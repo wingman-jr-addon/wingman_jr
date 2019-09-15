@@ -1,0 +1,23 @@
+{
+    "description": "Filter images transparently for kids",
+    "manifest_version": 2,
+    "name": "Wingman Jr.",
+    "version": "0.9.2",
+  
+    "permissions": [
+      "webRequest",
+      "webRequestBlocking",
+      "<all_urls>",
+      "menus",
+      "proxy"
+    ],
+  
+    "background": {
+      "scripts": [
+          "tfjs_1.1.2.js",
+          "background.js"
+        ]
+    },
+
+    "content_security_policy": "script-src 'self';  object-src 'self' blob:; img-src blob: data:;"
+  }
