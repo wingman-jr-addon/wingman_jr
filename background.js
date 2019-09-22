@@ -151,7 +151,7 @@ function getUnsafeScore(sqrxScore) {
 	}
 }
 
-async function fast_filter(filter,img,allData,sqrxScore, url, blob) {
+async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockSilently) {
     try
     {
 		let unsafeScore = getUnsafeScore(sqrxScore);
@@ -164,11 +164,14 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob) {
             filter.close();
             URL.revokeObjectURL(img.src);
         } else {
-            console.log('Blocked: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
-            let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
-            let encoder = new TextEncoder();
-            let encodedTypedBuffer = encoder.encode(svgText);
-            filter.write(encodedTypedBuffer.buffer);
+            let blockType = shouldBlockSilently ? 'silently' : 'with SVG'
+            console.log('Blocked '+blockType+': '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+            if (!shouldBlockSilently) {
+                let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
+                let encoder = new TextEncoder();
+                let encodedTypedBuffer = encoder.encode(svgText);
+                filter.write(encodedTypedBuffer.buffer);
+            }
             filter.close();
             URL.revokeObjectURL(img.src);
         }
@@ -182,7 +185,7 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob) {
 
 let capturedWorkQueue = {};
 
-async function listener(details) {
+async function listener(details, shouldBlockSilently=false) {
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -191,7 +194,9 @@ async function listener(details) {
             if(mimeType == 'image/svg+xml') {
                 return; //Skip SVG
             }
-            header.value = 'image/svg+xml';
+            if(!shouldBlockSilently) {
+                header.value = 'image/svg+xml';
+            }
             break;
         }
     }
@@ -238,7 +243,7 @@ async function listener(details) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                             sqrxScore = await predict(img);
-                            await fast_filter(filter,img,allData,sqrxScore,details.url,blob);
+                            await fast_filter(filter,img,allData,sqrxScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
                             console.log(`Total processing in ${Math.floor(totalTime)}ms`);
                         } else {
@@ -294,17 +299,15 @@ browser.webRequest.onHeadersReceived.addListener(
     ["blocking","responseHeaders"]
   );
 
-/*** Upcoming feature for blocking top level resources. Feature is blocked on MIME type reassignment bug #3.
 async function direct_typed_url_listener(details) {
     //Try to see if there is an image MIME type
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
-            //console.log('DIRECT: Checking mime type: '+mimeType+' for '+details.url);
             if(mimeType.startsWith('image/')) {
-                console.log('DIRECT: Forwarding based on mime type: '+mimeType+' for '+details.url);
-                return listener(details);
+                console.log('Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
+                return listener(details,true);
             }
         }
     }
@@ -317,7 +320,7 @@ browser.webRequest.onHeadersReceived.addListener(
     {urls:["<all_urls>"], types:["main_frame"]},
     ["blocking","responseHeaders"]
   );
-***/
+
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
