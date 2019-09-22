@@ -125,6 +125,10 @@ async function readFileAsDataURL (inputFile) {
     });
   };
 
+function escapeRegExp(str) {
+    return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
+}
+
 async function common_create_svg_from_blob(img, unsafeScore, blob)
 {
     let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
@@ -216,9 +220,9 @@ async function listener(details, shouldBlockSilently=false) {
         {
             filter.close();
         }
-        catch(e)
+        catch(ex)
         {
-            console.log('Filter error: '+e);
+            console.log('Filter error: '+e+', '+ex);
         }
     }
   
@@ -339,12 +343,23 @@ async function base64_fast_filter(img,sqrxScore, url) {
     }
 }
 
-
-
-
 //listen for "above the fold" image search requests
 async function base64_listener(details) {
     console.log('base64 headers '+details.requestId+' '+details.url);
+    let mimeType = '';
+    for(let i=0; i<details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        if(header.name.toLowerCase() == "content-type") {
+            mimeType = header.value;
+            break;
+        }
+    }
+    console.log('base64 mime type for '+details.requestId+': '+mimeType);
+    if (!mimeType.trim().startsWith('text/html')) {
+        return;
+    }
+
+
     const startTime = performance.now();
     let filter = browser.webRequest.filterResponseData(details.requestId);
     let decoder = new TextDecoder("utf-8");
@@ -362,9 +377,17 @@ async function base64_listener(details) {
         {
             console.log('base64 stop');
 
-            //unfortunately, str.replace cannot accept a promise as a function,
+            //Unfortunately, str.replace cannot accept a promise as a function,
             //so we simply set 'em up and knock 'em down.
-            let imageDataURIs = fullStr.match(/data:image\/[a-z]+;base64,[-A-Za-z0-9+\/= ]+/g);
+            //That funky bit at the end is to catch = encoded as \x3d
+            let dataURIMatcher = /data:image\/[a-z]+;base64,[A-Za-z0-9=+\/ \-]+(\\x3[dD])*/g;
+            let imageDataURIs = fullStr.match(dataURIMatcher);
+            if (imageDataURIs === null) {
+                console.log('base64 no images detected, passing through original');
+                filter.write(encoder.encode(fullStr));
+                filter.close();
+                return;
+            }
             console.log('base64 match count: '+imageDataURIs.length);
 
 
@@ -379,7 +402,13 @@ async function base64_listener(details) {
                     let filteredStr = fullStr;
                     for(let j=0; j<replacements.length; j++) {
                         let replacement = replacements[j];
-                        filteredStr = filteredStr.replace(replacement.old_img,replacement.new_img);
+                        //Why on earth doesn't JS just have a replaceAll instead?
+                        //Arguably replaceAll might be better semantics but without caching, this should
+                        //get called once per time, so replace will get the right number of times
+                        //If I go with the regex method instead, it works BUT then it errors out
+                        //when the image gets too big.
+                        filteredStr = filteredStr.replace(replacement.old_img, replacement.new_img);
+                        //filteredStr = filteredStr.replace(new RegExp(escapeRegExp(replacement.old_img),'g'),replacement.new_img);
                     }
                     filter.write(encoder.encode(filteredStr));
                     filter.close();
@@ -388,33 +417,39 @@ async function base64_listener(details) {
             
             for(let i=0; i<imageDataURIs.length; i++)
             {
-                let imageDataURI = imageDataURIs[i];
+                let rawImageDataURI = imageDataURIs[i];
+                //Note we now have move \x3d's into ='s for proper base64 decoding
+                let imageDataURI = rawImageDataURI.replace(/\\x3[dD]/g,'=');
+                let imageId = imageDataURI.slice(-20);
+                console.debug('base64 image loading: '+imageId);
                 let byteCount = imageDataURI.length*3/4;
 
                 if(byteCount >= MIN_IMAGE_BYTES) {
                     let img = new Image();
 
                     img.onload = async function(e) {
-                        console.log('base64 image loaded!');
+                        console.log('base64 image loaded: '+imageId);
                         let score = 0;
                         try
                         {
                             if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                                console.log('base64 predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                                console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                                 sqrxScore = await predict(img);
                                 console.log('base64 score: '+sqrxScore);
                                 let replacement = await base64_fast_filter(img, sqrxScore, details.url);
                                 const totalTime = performance.now() - startTime;
                                 console.log(`Total processing in ${Math.floor(totalTime)}ms`);
                                 if(replacement !== null) {
-                                    console.log('base64 replacement block: '+replacement);
-                                    replacements.push({'old_img':imageDataURI,'new_img':replacement});
+                                    //Important! We have to use raw as the old so we don't miss the actual replacement match due to decoding vagaries
+                                    replacements.push({'old_img':rawImageDataURI,'new_img':replacement});
                                 }
+                            } else {
+                                console.debug('base64 skipping image with small dimensions: '+imageId);
                             }
                         }
                         catch(e)
                         {
-                            console.log('base64 check failure: '+e);
+                            console.error('base64 check failure for '+imageId+': '+e);
                         }
                         ensureProgress();
                     }
@@ -426,9 +461,6 @@ async function base64_listener(details) {
                     ensureProgress();
                 }
             }
-
-
-
         }
         catch(e)
         {
@@ -448,13 +480,16 @@ async function base64_listener(details) {
     }
   
   return details;
-
-
 }
 
 browser.webRequest.onHeadersReceived.addListener(
     base64_listener,
-    {urls:["https://www.google.com/search?*gs_l=img*"]},
+    {
+        urls:[
+            "<all_urls>"
+        ],
+        types:["main_frame"]
+    },
     ["blocking","responseHeaders"]
   );
 
