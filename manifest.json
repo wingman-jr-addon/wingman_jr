@@ -19,5 +19,12 @@
         ]
     },
 
+    "browser_action": {
+      "default_title" : "Wingman Jr.",
+      "default_icon" : {
+        "32" : "icons/wingman_icon_32.png"
+      }
+    },
+
     "content_security_policy": "script-src 'self';  object-src 'self' blob:; img-src blob: data:;"
   }
