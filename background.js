@@ -74,6 +74,25 @@ const wingman_startup = async () => {
     console.log('Ready to go!');
 };
 
+let blockCount = 0;
+let checkCount = 0;
+function updateStatVisuals() {
+    if (blockCount > 0) {
+        let txt = (blockCount < 1000) ? blockCount+'' : '999+';
+        browser.browserAction.setBadgeText({ "text": txt });
+    }
+}
+
+function incrementCheckCount() {
+    checkCount++;
+    updateStatVisuals();
+}
+
+function incrementBlockCount() {
+    blockCount++;
+    updateStatVisuals();
+}
+
 /**
  * Given an image element, makes a prediction through wingman
  */
@@ -170,6 +189,7 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
         } else {
             let blockType = shouldBlockSilently ? 'silently' : 'with SVG'
             console.log('Blocked '+blockType+': '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+            incrementBlockCount();
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
                 let encoder = new TextEncoder();
@@ -227,6 +247,7 @@ async function listener(details, shouldBlockSilently=false) {
     }
   
     filter.onstop = async event => {
+        incrementCheckCount();
         let capturedWork = async () => {
             console.log('starting work for '+details.requestId +' from '+details.url);
             try
@@ -336,6 +357,7 @@ async function base64_fast_filter(img,sqrxScore, url) {
         console.log('base64 filter Passed: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
         return null;
     } else {
+        incrementBlockCount();
         console.log('base64 filter Blocked: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
         let svgText = await common_create_svg(img,unsafeScore,img.src);
         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
@@ -376,6 +398,7 @@ async function base64_listener(details) {
         try
         {
             console.log('base64 stop');
+            incrementCheckCount();
 
             //Unfortunately, str.replace cannot accept a promise as a function,
             //so we simply set 'em up and knock 'em down.
