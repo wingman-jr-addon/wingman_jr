@@ -80,6 +80,7 @@ function updateStatVisuals() {
     if (blockCount > 0) {
         let txt = (blockCount < 1000) ? blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
+        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' images!' });
     }
 }
 
@@ -113,7 +114,7 @@ async function predict(imgElement) {
     // Reshape to a single-element batch so we can pass it to predict.
     const batched = tf.stack([normalized]);
     const result = wingman.predict(batched, {batchSize: 1});
-    
+
     return result;
   });
 
