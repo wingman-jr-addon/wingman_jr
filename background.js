@@ -1,3 +1,17 @@
+//User feedback
+browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
+    //if (temporary) return; // skip during development
+    switch (reason) {
+      case "update": {
+        const url = browser.runtime.getURL("https://docs.google.com/forms/d/e/1FAIpQLSfkmwmDvV0vK5x8s1rmgCNWRoj5d7FOxu4-4scyrzMy2nuJbQ/viewform?usp=sf_link");
+        await browser.tabs.create({ url, });
+      } break;
+    }
+  });
+
+browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
+
+//Main plugin
 const MODEL_PATH = 'sqrx48_NoSpatialDropout2D/model.json'
 const IMAGE_SIZE = 224;
 
