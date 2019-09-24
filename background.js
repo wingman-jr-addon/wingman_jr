@@ -161,9 +161,20 @@ async function common_create_svg(img, unsafeScore, dataURL)
 {
     let visibleScore = Math.floor(unsafeScore*100);
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
-    + '<image href="'+iconDataURI+'" x="20%" y="20%" ></image>'
+    +'<g transform="translate(20 20)">'
+    + '<g transform="matrix(1.123 0 0 1.123 -10.412 -76.993)">'
+    + '<g transform="translate(-.18271)" stroke="#000" stroke-width=".24169px">'
+    + '<path d="m15.789 83.695 10.897 14.937 2.169-11.408-2.6759 5.763z"/>'
+    + '<path d="m43.252 83.695-10.897 14.937-2.169-11.408 2.6759 5.763z"/>'
+    + '</g>'
+    + '<g transform="translate(.29293 -1.5875)">'
+    + '<path d="m26.385 98.602 2.6423-2.9066 2.6423 2.9066" fill="none" stroke="#000" stroke-width=".26458px"/>'
+    + '</g>'
+    + '<circle cx="29.338" cy="87.549" r=".33705" stroke="#13151c" stroke-width=".093848"/>'
+    + '</g>'
     + (isInReviewMode ? '<image href="'+dataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" opacity="0.2" />' : '')
-    +'<text x="25%" y="25%" font-size="20" text-anchor="middle" fill="red">'+visibleScore+'</text>'
+    +'<text transform="translate(12 20)" font-size="20" fill="red">'+visibleScore+'</text>'
+    +'</g>'
     +'</svg>';
     return svgText;
 }
