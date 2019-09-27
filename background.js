@@ -252,9 +252,6 @@ async function listener(details, shouldBlockSilently=false) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
             mimeType = header.value;
-            if(mimeType == 'image/svg+xml') {
-                return; //Skip SVG
-            }
             if(!shouldBlockSilently) {
                 header.value = 'image/svg+xml';
             }
