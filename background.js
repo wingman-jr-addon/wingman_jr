@@ -1,6 +1,6 @@
 //User feedback
 browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
-    //if (temporary) return; // skip during development
+    if (temporary) return; // skip during development
     switch (reason) {
       case "update": {
         const url = browser.runtime.getURL("https://docs.google.com/forms/d/e/1FAIpQLSfkmwmDvV0vK5x8s1rmgCNWRoj5d7FOxu4-4scyrzMy2nuJbQ/viewform?usp=sf_link");
@@ -113,12 +113,19 @@ function incrementBlockCount() {
  */
 let inferenceTimeTotal = 0;
 let inferenceCountTotal = 0;
+let inferenceCanvas = document.createElement('canvas');
+inferenceCanvas.width = IMAGE_SIZE;
+inferenceCanvas.height = IMAGE_SIZE;
+let inferenceCtx = inferenceCanvas.getContext('2d');
+inferenceCtx.imageSmoothingEnabled = true;
+
 async function predict(imgElement) {
   const startTime = performance.now();
   const logits = tf.tidy(() => {
-    const img = tf.browser.fromPixels(imgElement);
-    const rightSizeImage = tf.image.resizeBilinear(img, [IMAGE_SIZE,IMAGE_SIZE]);
-    const floatImg = rightSizeImage.toFloat();
+    inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
+    const rightSizeImageData = inferenceCtx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
+    const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
+    const floatImg = rightSizeImageDataTF.toFloat();
     //EfficientNet
     //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
     //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
