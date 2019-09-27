@@ -75,6 +75,7 @@ const wingman_startup = async () => {
     tf.serialization.registerClass(Swish);
     tf.serialization.registerClass(Lambda);
     tf.serialization.registerClass(DropConnect);
+    await tf.ready();
     console.log('TensorflowJS backend is: '+tf.getBackend());
     console.log('Loading model...');
     wingman = await tf.loadLayersModel(MODEL_PATH);
