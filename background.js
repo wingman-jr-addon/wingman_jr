@@ -121,10 +121,15 @@ let inferenceCtx = inferenceCanvas.getContext('2d');
 inferenceCtx.imageSmoothingEnabled = true;
 
 async function predict(imgElement) {
+
+  const drawStartTime = performance.now();
+  inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
+  const rightSizeImageData = inferenceCtx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
+  const totalDrawTime = performance.now() - drawStartTime;
+  console.log(`Draw time in ${Math.floor(totalDrawTime)}ms`);
+
   const startTime = performance.now();
   const logits = tf.tidy(() => {
-    inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
-    const rightSizeImageData = inferenceCtx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
     const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
     const floatImg = rightSizeImageDataTF.toFloat();
     //EfficientNet
