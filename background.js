@@ -250,7 +250,12 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
     }
 }
 
-let capturedWorkQueue = {};
+let capturedWorkQueue = new Map();
+let prioritizedItems = new Map();
+browser.runtime.onMessage.addListener((message, sender, _)=>{
+    console.log('Receiving prioritization message with '+message.prioritize.length+' items');
+    prioritizedItems.set(sender.url, message.prioritize);
+});
 
 async function listener(details, shouldBlockSilently=false) {
     let mimeType = '';
@@ -336,23 +341,38 @@ async function listener(details, shouldBlockSilently=false) {
         };
 
         console.log('queuing '+details.requestId);
-        capturedWorkQueue[details.requestId] = capturedWork;
+        capturedWorkQueue.set(details.url, capturedWork);
 
-        let lowestRequest = 10000000;
-        let remainingWorkCount = 0;
-        for(let key in capturedWorkQueue) {
-            if (capturedWorkQueue.hasOwnProperty(key)) { 
-                remainingWorkCount++;
-                if(key < lowestRequest) {
-                    lowestRequest = key;
+        let prioritizedRequest = null;
+        prioritizedItems.forEach((v,k,_)=>{
+            console.log('checking prioritization for web page ('+v.length+' items): '+k);
+            for(let i=0; i<v.length; i++) {
+                let url = v[i];
+                //console.log('checking if url is in work queue: '+url+' vs work queue '+JSON.stringify(capturedWorkQueue.keys()));
+                if(capturedWorkQueue.has(url)) {
+                    console.log('prioritizing success: '+url);
+                    prioritizedRequest = url;
                 }
             }
+            if(prioritizedRequest !== null) {
+                return;
+            }
+        })
+        if(prioritizedRequest === null) {
+            console.log('no prioritization found... ('+capturedWorkQueue.size+' work items)');
         }
-        console.log('dequeuing '+lowestRequest);
-        let work = capturedWorkQueue[lowestRequest];
+        let chosenKey = (prioritizedRequest !== null) ? prioritizedRequest : capturedWorkQueue.keys().next().value;
+        //console.log('dequeuing '+chosenKey);
+        let work = capturedWorkQueue.get(chosenKey);
         await work();
-        delete capturedWorkQueue[lowestRequest];
-        console.log('remaining: '+(remainingWorkCount-1));
+        capturedWorkQueue.delete(chosenKey);
+        let effectiveCount = capturedWorkQueue.size;
+        console.log('remaining: '+effectiveCount);
+        //This strategy below doesn't work well because things can still be in flight...
+        //if(effectiveCount == 0) {
+        //    console.log('cleaning up prioritized items because all work is currently done...')
+        //    prioritizedItems.clear();
+        //}
     }
     return details;
   }
