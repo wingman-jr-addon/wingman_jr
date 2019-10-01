@@ -250,13 +250,6 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
     }
 }
 
-let capturedWorkQueue = new Map();
-let prioritizedItems = new Map();
-browser.runtime.onMessage.addListener((message, sender, _)=>{
-    console.log('Receiving prioritization message with '+message.prioritize.length+' items');
-    prioritizedItems.set(sender.url, message.prioritize);
-});
-
 async function listener(details, shouldBlockSilently=false) {
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
@@ -340,42 +333,24 @@ async function listener(details, shouldBlockSilently=false) {
             }
         };
 
-        console.log('queuing '+details.requestId);
-        capturedWorkQueue.set(details.url, capturedWork);
-
-        let prioritizedRequest = null;
-        prioritizedItems.forEach((v,k,_)=>{
-            console.log('checking prioritization for web page ('+v.length+' items): '+k);
-            for(let i=0; i<v.length; i++) {
-                let url = v[i];
-                //console.log('checking if url is in work queue: '+url+' vs work queue '+JSON.stringify(capturedWorkQueue.keys()));
-                if(capturedWorkQueue.has(url)) {
-                    console.log('prioritizing success: '+url);
-                    prioritizedRequest = url;
-                }
-            }
-            if(prioritizedRequest !== null) {
-                return;
-            }
-        })
-        if(prioritizedRequest === null) {
-            console.log('no prioritization found... ('+capturedWorkQueue.size+' work items)');
-        }
-        let chosenKey = (prioritizedRequest !== null) ? prioritizedRequest : capturedWorkQueue.keys().next().value;
-        //console.log('dequeuing '+chosenKey);
-        let work = capturedWorkQueue.get(chosenKey);
-        await work();
-        capturedWorkQueue.delete(chosenKey);
-        let effectiveCount = capturedWorkQueue.size;
-        console.log('remaining: '+effectiveCount);
-        //This strategy below doesn't work well because things can still be in flight...
-        //if(effectiveCount == 0) {
-        //    console.log('cleaning up prioritized items because all work is currently done...')
-        //    prioritizedItems.clear();
-        //}
+        await capturedWork();
     }
     return details;
   }
+
+function isImageResponse(details) {
+    //Try to see if there is an image MIME type
+    for(let i=0; i<details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        if(header.name.toLowerCase() == "content-type") {
+            let mimeType = header.value;
+            if(mimeType.startsWith('image/')) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 
 browser.webRequest.onHeadersReceived.addListener(
@@ -385,16 +360,9 @@ browser.webRequest.onHeadersReceived.addListener(
   );
 
 async function direct_typed_url_listener(details) {
-    //Try to see if there is an image MIME type
-    for(let i=0; i<details.responseHeaders.length; i++) {
-        let header = details.responseHeaders[i];
-        if(header.name.toLowerCase() == "content-type") {
-            let mimeType = header.value;
-            if(mimeType.startsWith('image/')) {
-                console.log('Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
-                return listener(details,true);
-            }
-        }
+    if (isImageResponse(details)) {
+        console.log('Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
+        return listener(details,true);
     }
     //Otherwise do nothing...
     return details;
@@ -406,6 +374,20 @@ browser.webRequest.onHeadersReceived.addListener(
     ["blocking","responseHeaders"]
   );
 
+async function xhr_listener(details) {
+    if (isImageResponse(details)) {
+        console.log('XHR URL: Forwarding based on mime type: '+mimeType+' for '+details.url.slice(-20));
+        return listener(details,true);
+    }
+    //Otherwise do nothing...
+    return details;
+}
+
+browser.webRequest.onHeadersReceived.addListener(
+    xhr_listener,
+    {urls:["<all_urls>"], types:["xmlhttprequest"]},
+    ["blocking","responseHeaders"]
+  );
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
