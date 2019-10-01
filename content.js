@@ -1,6 +1,7 @@
 let imgObserver = null;
 let prefetchCount = 0;
 let prefetchInFlightCount = 0;
+let workQueue = [];
 
 //https://gomakethings.com/how-to-test-if-an-element-is-in-the-viewport-with-vanilla-javascript/
 function isInViewport(elem) {
@@ -12,6 +13,16 @@ function isInViewport(elem) {
         bounding.right <= (window.innerWidth || document.documentElement.clientWidth)
     );
 };
+
+setInterval(async()=>{
+    let workLeft = 8;
+    while(workQueue.length > 0 && workLeft > 0) {
+        console.log('WJR: Work! '+workQueue.length);
+        let topWork = workQueue.pop();
+        await topWork();
+        workLeft--;
+    }
+}, 100);
 
 async function checkPrioritize(entries, observer) {
     let prioritizedList = null;
@@ -29,21 +40,13 @@ async function checkPrioritize(entries, observer) {
                 //return;
             }
             if (url.length < 2048) {
-                if(prioritizedList === null) {
-                    prioritizedList = [];
-                }
-                prioritizedList.push(url);
-                setTimeout(async ()=>{
+                let capturedWork = async ()=>{
                     if(target.complete) {
                         console.log('WJR: Image already completed! '+urlSnippet);
                         return;
                     }
                     if(!isInViewport(target)) {
                         console.log('WJR: Image not in viewport any more! '+urlSnippet);
-                        return;
-                    }
-                    if(prefetchInFlightCount > 16) {
-                        console.log('WJR: Already prefetching all the things, skipping prefetch of '+urlSnippet);
                         return;
                     }
                     prefetchCount++;
@@ -60,13 +63,13 @@ async function checkPrioritize(entries, observer) {
                     //target.decode = 'sync';
                     target.src = fetchedURL;
                     console.log('WJR: Prefetch finished ('+prefetchCount+','+prefetchInFlightCount+') '+urlSnippet + ' of size '+blob.size);
-                }, 120);
+                };
+                workQueue.push(capturedWork);
             } else {
                 console.log('WJR: Skipping prioritization for extra long URL');
             }
         }
     });
-    browser.runtime.sendMessage({ "prioritize": prioritizedList });
 }
 
 function observeAllImgIntersections() {
