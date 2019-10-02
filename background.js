@@ -176,6 +176,10 @@ function escapeRegExp(str) {
     return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
 }
 
+const sleep = (milliseconds) => {
+    return new Promise(resolve => setTimeout(resolve, milliseconds))
+  }  
+
 async function common_create_svg_from_blob(img, unsafeScore, blob)
 {
     let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
@@ -250,7 +254,9 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
     }
 }
 
-async function listener(details, shouldBlockSilently=false) {
+
+let inFlightPluginRequests = 0;
+async function listener(details, requestType='image', shouldBlockSilently=false) {
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -262,7 +268,7 @@ async function listener(details, shouldBlockSilently=false) {
             break;
         }
     }
-    console.log('start headers '+details.requestId);
+    console.log('request-process-track start headers '+details.requestId + '('+requestType+','+performance.now()+')');
     const startTime = performance.now();
     let filter = browser.webRequest.filterResponseData(details.requestId);
     let allData = [];
@@ -287,7 +293,7 @@ async function listener(details, shouldBlockSilently=false) {
     filter.onstop = async event => {
         incrementCheckCount();
         let capturedWork = async () => {
-            console.log('starting work for '+details.requestId +' from '+details.url);
+            console.log('starting work for '+details.requestId +' of request type '+requestType+' from '+details.url);
             try
             {
                 let byteCount = 0;
@@ -302,10 +308,20 @@ async function listener(details, shouldBlockSilently=false) {
                     let img = new Image();
 
                     img.onload = async function(e) {
-                        let score = 0;
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                            console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                            sqrxScore = await predict(img);
+                            console.log('request-process-track predict '+details.requestId+'('+requestType+','+performance.now()+') size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                            let sqrxScore = 0;
+                            if(requestType == 'plugin') {
+                                inFlightPluginRequests++;
+                                sqrxScore = await predict(img);
+                                inFlightPluginRequests--;
+                            } else {
+                                for(let i=0; i<10 && inFlightPluginRequests>0; i++) {
+                                    console.log('deferring image check '+i+' ('+inFlightPluginRequests+')');
+                                    await sleep(100);
+                                }
+                                sqrxScore = await predict(img);
+                            }
                             await fast_filter(filter,img,allData,sqrxScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
                             console.log(`Total processing in ${Math.floor(totalTime)}ms`);
@@ -338,18 +354,20 @@ async function listener(details, shouldBlockSilently=false) {
     return details;
   }
 
-function isImageResponse(details) {
-    //Try to see if there is an image MIME type
+function getMimeType(details) {
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
-            let mimeType = header.value;
-            if(mimeType.startsWith('image/')) {
-                return true;
-            }
+            return header.value;
         }
     }
-    return false;
+    return 'unknown';
+}
+
+function isImageResponse(details) {
+    //Try to see if there is an image MIME type
+    let mimeType = getMimeType(details);
+    return mimeType.startsWith('image/');
 }
 
 
@@ -361,8 +379,8 @@ browser.webRequest.onHeadersReceived.addListener(
 
 async function direct_typed_url_listener(details) {
     if (isImageResponse(details)) {
-        console.log('Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
-        return listener(details,true);
+        console.log('Direct URL: Forwarding based on mime type for '+details.url);
+        return listener(details, 'direct', true);
     }
     //Otherwise do nothing...
     return details;
@@ -374,17 +392,17 @@ browser.webRequest.onHeadersReceived.addListener(
     ["blocking","responseHeaders"]
   );
 
-async function xhr_listener(details) {
+async function plugin_listener(details) {
     if (isImageResponse(details)) {
-        console.log('XHR URL: Forwarding based on mime type: '+mimeType+' for '+details.url.slice(-20));
-        return listener(details,true);
+        console.log('plugin: forwarding based on mime type for '+details.url.slice(-20));
+        return listener(details, 'plugin');
     }
     //Otherwise do nothing...
     return details;
 }
 
 browser.webRequest.onHeadersReceived.addListener(
-    xhr_listener,
+    plugin_listener,
     {urls:["<all_urls>"], types:["xmlhttprequest"]},
     ["blocking","responseHeaders"]
   );

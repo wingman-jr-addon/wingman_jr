@@ -15,14 +15,14 @@ function isInViewport(elem) {
 };
 
 setInterval(async()=>{
-    let workLeft = 8;
+    let workLeft = 3;
     while(workQueue.length > 0 && workLeft > 0) {
         console.log('WJR: Work! '+workQueue.length);
         let topWork = workQueue.pop();
         await topWork();
         workLeft--;
     }
-}, 100);
+}, 50);
 
 async function checkPrioritize(entries, observer) {
     let prioritizedList = null;
@@ -52,7 +52,7 @@ async function checkPrioritize(entries, observer) {
                     prefetchCount++;
                     prefetchInFlightCount++;
                     console.log('WJR: Prefetch started ('+prefetchCount+','+prefetchInFlightCount+') '+urlSnippet);
-                    let response = await fetch(target.currentSrc);
+                    let response = await content.fetch(target.currentSrc);
                     prefetchInFlightCount--;
                     if(!response.ok) {
                         console.log('WJR: Failed to fetch image: '+urlSnippet);
@@ -60,8 +60,23 @@ async function checkPrioritize(entries, observer) {
                     }
                     let blob = await response.blob();
                     let fetchedURL = URL.createObjectURL(blob);
-                    //target.decode = 'sync';
+                    //Now set the new URL immediately
+                    let oldURL = target.src;
+                    target.decode = 'sync';
                     target.src = fetchedURL;
+                    //Then set the old URL in a deferred fashion.
+                    //NOT setting this again will sometimes cause problems for
+                    //databound elements. For example, Google Images has something
+                    //that detects the change, but doesn't change it back fully, only
+                    //based on the root protocol. This causes the .src URL to be
+                    //blob:https:// etc. which just breaks. This "fixes" that behavior.
+                    setTimeout(()=>{
+                        if(target.src.startsWith('blob:')) {
+                            target.decode = 'async';
+                            target.src = oldURL;
+                        }
+                    }, 300);
+                    
                     console.log('WJR: Prefetch finished ('+prefetchCount+','+prefetchInFlightCount+') '+urlSnippet + ' of size '+blob.size);
                 };
                 workQueue.push(capturedWork);
