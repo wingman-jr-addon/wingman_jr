@@ -14,9 +14,11 @@ function isInViewport(elem) {
     );
 };
 
+let dwellChecker = 0;
+
 setInterval(async()=>{
     let workLeft = 3;
-    while(workQueue.length > 0 && workLeft > 0) {
+    while(workQueue.length > 0 && workLeft > 0 && dwellChecker == 0) {
         console.log('WJR: Work! '+workQueue.length);
         let topWork = workQueue.pop();
         await topWork();
@@ -80,6 +82,12 @@ async function checkPrioritize(entries, observer) {
                     console.log('WJR: Prefetch finished ('+prefetchCount+','+prefetchInFlightCount+') '+urlSnippet + ' of size '+blob.size);
                 };
                 workQueue.push(capturedWork);
+                console.log('dwell up');
+                dwellChecker++;
+                setTimeout(()=>{
+                    console.log('dwell down');
+                    dwellChecker--;
+                },50);
             } else {
                 console.log('WJR: Skipping prioritization for extra long URL');
             }
