@@ -14,7 +14,7 @@
   
     "background": {
       "scripts": [
-          "tfjs_1.1.2.js",
+          "tfjs_1.2.10.js",
           "background.js"
         ]
     },
