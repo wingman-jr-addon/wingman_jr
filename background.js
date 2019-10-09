@@ -12,7 +12,7 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 //Main plugin
-const MODEL_PATH = 'sqrx48_NoSpatialDropout2D/model.json'
+const MODEL_PATH = 'sqrx_48_graphopt/model.json'
 const IMAGE_SIZE = 224;
 
 //Swish activation
@@ -78,7 +78,7 @@ const wingman_startup = async () => {
     await tf.ready();
     console.log('TensorflowJS backend is: '+tf.getBackend());
     console.log('Loading model...');
-    wingman = await tf.loadLayersModel(MODEL_PATH);
+    wingman = await tf.loadGraphModel(MODEL_PATH);
     console.log('Model: ' + wingman);
 
     console.log('Warming up...');
