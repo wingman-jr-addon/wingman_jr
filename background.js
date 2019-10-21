@@ -70,6 +70,7 @@ let isInReviewMode = false;
 let isBlockingQuestionable = true;
 let wingman;
 const wingman_startup = async () => {
+    console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING: SUBMIT IMAGE BRANCH, DO NOT RELEASE !!!!!!!!!!!!!!!!!!!!!!');
     tf.ENV.set('WEBGL_PACK',false);
     console.log('!!!Registering custom layer');
     tf.serialization.registerClass(Swish);
@@ -250,6 +251,24 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
     }
 }
 
+function submitImage(sqrxScore, blob, url) {
+    try {
+        let finalClass = -1;
+        let largestScore = 0;
+        for(let i=0; i<4; i++) {
+            if(sqrxScore[i]>largestScore) {
+                finalClass = i;
+                largestScore = sqrxScore[i];
+            }
+        }
+        console.log('!!!! Submitting '+finalClass+' '+url.slice(-20));
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", 'http://localhost:43234/store?wingman='+finalClass+'&url='+encodeURI(url), true);
+        xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhr.send(blob);
+    } catch (e) {}
+}
+
 let capturedWorkQueue = {};
 
 async function listener(details, shouldBlockSilently=false) {
@@ -308,6 +327,7 @@ async function listener(details, shouldBlockSilently=false) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                             sqrxScore = await predict(img);
+                            submitImage(sqrxScore, blob, details.url);
                             await fast_filter(filter,img,allData,sqrxScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
                             console.log(`Total processing in ${Math.floor(totalTime)}ms`);
