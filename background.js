@@ -14,55 +14,6 @@ browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfD
 //Main plugin
 const MODEL_PATH = 'sqrx_53_graphopt/model.json'
 const IMAGE_SIZE = 224;
-
-//Swish activation
-class Swish extends tf.layers.Layer {
-    constructor() {
-      super({});
-    }
-    computeOutputShape(inputShape) { console.log('Swish input shape: '+JSON.stringify(inputShape)); return inputShape; }
-    call(rawInput, kwargs) { 
-        const input = rawInput[0];
-        //tf.print(input);
-        //tf.print(tf.sigmoid(input));
-        const output = tf.mul(input, tf.sigmoid(input));
-        //tf.print(output);
-        return output; }
-    getClassName() { return 'Swish'; }
-   }
-Swish.className = 'Swish';
-
-//The lambda layer of EfficientNet's Keras port
-class Lambda extends tf.layers.Layer {
-    constructor() {
-      super({});
-    }
-    computeOutputShape(inputShape) {
-        console.log('Lambda input shape: '+JSON.stringify(inputShape));
-        return [inputShape[0], 1, 1, inputShape[3]]; /*scalar - is that what we want? */ }
-    call(rawInput, kwargs) {
-        const input = rawInput[0];
-        return tf.mean(input, [1,2] /*spatial dims, channels last*/, true /*keep dims*/);}
-    getClassName() { return 'Lambda'; }
-   }
-Lambda.className = 'Lambda';
-
-//Placeholder for swish activation
-class DropConnect extends tf.layers.Layer {
-    constructor() {
-      super({});
-    }
-    computeOutputShape(inputShape) { return inputShape; }
-    call(input, kwargs) { return input; }
-    getClassName() { return 'DropConnect'; }
-   }
-DropConnect.className = 'DropConnect';
-
-
-//const MODEL_PATH = 'sqrx_50_efficientnet/model.json'
-//const IMAGE_SIZE = 260;
-
-
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
 
@@ -70,11 +21,8 @@ let isInReviewMode = false;
 let isBlockingQuestionable = true;
 let wingman;
 const wingman_startup = async () => {
+    console.log('Launching TF.js!');
     tf.ENV.set('WEBGL_PACK',false);
-    console.log('!!!Registering custom layer');
-    tf.serialization.registerClass(Swish);
-    tf.serialization.registerClass(Lambda);
-    tf.serialization.registerClass(DropConnect);
     await tf.ready();
     console.log('TensorflowJS backend is: '+tf.getBackend());
     console.log('Loading model...');
