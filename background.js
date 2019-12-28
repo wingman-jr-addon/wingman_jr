@@ -385,13 +385,14 @@ async function base64_listener(details) {
     filter.onstop = e => {
         try
         {
-            console.log('base64 stop');
+            console.log('base64 stop '+fullStr.length);
             incrementCheckCount();
 
             //Unfortunately, str.replace cannot accept a promise as a function,
             //so we simply set 'em up and knock 'em down.
-            //That funky bit at the end is to catch = encoded as \x3d
-            let dataURIMatcher = /data:image\/[a-z]+;base64,[A-Za-z0-9=+\/ \-]+(\\x3[dD])*/g;
+            //Note there used to be a funky bit at the end to catch = encoded as \x3d
+            //but it isn't needed any more with \ in the main body being caught for JS encoding.
+            let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,[A-Za-z0-9=+\/ \-\\]+/g;
             let imageDataURIs = fullStr.match(dataURIMatcher);
             if (imageDataURIs === null) {
                 console.log('base64 no images detected, passing through original');
@@ -430,9 +431,21 @@ async function base64_listener(details) {
             {
                 let rawImageDataURI = imageDataURIs[i];
                 //Note we now have move \x3d's into ='s for proper base64 decoding
-                let imageDataURI = rawImageDataURI.replace(/\\x3[dD]/g,'=');
+                let imageDataURI = rawImageDataURI;
+                let wasJSEncoded = imageDataURI.startsWith('data:image\\/'); //Unencoded, data:image\\/
+                let prefixId = imageDataURI.slice(0,20);
+                if(wasJSEncoded) {
+                    imageDataURI = imageDataURI.replace(/\\/g,''); //Unencoded, \ -> ''
+                    let newPrefixId = imageDataURI.slice(0,20);
+                    console.log('base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
+                } else {
+                    console.log('base64 image no extra encoding detected: '+prefixId);
+                }
+                imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
                 let imageId = imageDataURI.slice(-20);
                 console.debug('base64 image loading: '+imageId);
+
+
                 let byteCount = imageDataURI.length*3/4;
 
                 if(byteCount >= MIN_IMAGE_BYTES) {
@@ -451,6 +464,10 @@ async function base64_listener(details) {
                                 const totalTime = performance.now() - startTime;
                                 console.log(`Total processing in ${Math.floor(totalTime)}ms`);
                                 if(replacement !== null) {
+                                    if(wasJSEncoded) {
+                                        console.log('base64 JS encoding replacement fixup for '+imageId);
+                                        replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
+                                    }
                                     //Important! We have to use raw as the old so we don't miss the actual replacement match due to decoding vagaries
                                     replacements.push({'old_img':rawImageDataURI,'new_img':replacement});
                                 }
