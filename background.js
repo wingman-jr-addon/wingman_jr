@@ -12,13 +12,12 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 //Main plugin
-const MODEL_PATH = 'sqrx_62_graphopt/model.json'
+const MODEL_PATH = 'sqrxb_64_graphopt/model.json'
 const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
 
 let isInReviewMode = false;
-let isBlockingQuestionable = true;
 let wingman;
 const wingman_startup = async () => {
     console.log('Launching TF.js!');
@@ -31,7 +30,8 @@ const wingman_startup = async () => {
 
     console.log('Warming up...');
     let dummy_data = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
-    let warmup_result = wingman.predict(dummy_data);
+    let warmup_result = wingman.predict(dummy_data)[1];
+    console.log(warmup_result);
     warmup_result.print();
     warmup_result.dispose();
     console.log('Ready to go!');
@@ -55,6 +55,12 @@ function incrementCheckCount() {
 function incrementBlockCount() {
     blockCount++;
     updateStatVisuals();
+}
+
+function isSafe(sqrxbScore)
+{
+    let normalized = sqrxbScore[1]/(sqrxbScore[0]+sqrxbScore[1]);
+    return sqrxbScore[1]<0.5;
 }
 
 /**
@@ -88,7 +94,7 @@ async function predict(imgElement) {
     const normalized = scaled.sub(tf.scalar(1));
     // Reshape to a single-element batch so we can pass it to predict.
     const batched = tf.stack([normalized]);
-    const result = wingman.predict(batched, {batchSize: 1});
+    const result = wingman.predict(batched, {batchSize: 1})[1];
 
     return result;
   });
@@ -155,23 +161,12 @@ async function common_create_svg(img, unsafeScore, dataURL)
     return svgText;
 }
 
-function getUnsafeScore(sqrxScore) {
-	if(isBlockingQuestionable) {
-		let sqrx = 1*sqrxScore[1]+2*sqrxScore[2]+3*sqrxScore[3];
-		return sqrx/3.0 + 0.085;// + 0.17;
-	} else {
-		let sqrx = 1*sqrxScore[2]+2*sqrxScore[3];
-		return sqrx/2.0;
-	}
-}
-
-async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockSilently) {
+async function fast_filter(filter,img,allData,sqrxbScore, url, blob, shouldBlockSilently) {
     try
     {
-		let unsafeScore = getUnsafeScore(sqrxScore);
-        let safeScore = 1.0-unsafeScore;
-        if(safeScore >= unsafeScore) {
-            console.log('Passed: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+		let unsafeScore = sqrxbScore[1];
+        if(isSafe(sqrxbScore)) {
+            console.log('Passed: '+sqrxbScore[0]+','+sqrxbScore[1]+' '+url);
             for(let i=0; i<allData.length; i++) {
                 filter.write(allData[i]);
             }
@@ -179,7 +174,7 @@ async function fast_filter(filter,img,allData,sqrxScore, url, blob, shouldBlockS
             URL.revokeObjectURL(img.src);
         } else {
             let blockType = shouldBlockSilently ? 'silently' : 'with SVG'
-            console.log('Blocked '+blockType+': '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+            console.log('Blocked '+blockType+': '+sqrxbScore[0]+','+sqrxbScore[1]+' '+url);
             incrementBlockCount();
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
@@ -252,11 +247,10 @@ async function listener(details, shouldBlockSilently=false) {
                     let img = new Image();
 
                     img.onload = async function(e) {
-                        let score = 0;
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                            sqrxScore = await predict(img);
-                            await fast_filter(filter,img,allData,sqrxScore,details.url,blob, shouldBlockSilently);
+                            let sqrxbScore = await predict(img);
+                            await fast_filter(filter,img,allData,sqrxbScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
                             console.log(`Total processing in ${Math.floor(totalTime)}ms`);
                         } else {
@@ -337,16 +331,15 @@ browser.webRequest.onHeadersReceived.addListener(
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
-async function base64_fast_filter(img,sqrxScore, url) {
+async function base64_fast_filter(img,sqrxbScore, url) {
     console.log('base64 fast filter!');
-	let unsafeScore = getUnsafeScore(sqrxScore);
-	let safeScore = 1.0-unsafeScore;
-    if(safeScore >= unsafeScore) {
-        console.log('base64 filter Passed: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+	let unsafeScore = sqrxbScore[1];
+    if(isSafe(sqrxbScore)) {
+        console.log('base64 filter Passed: '+sqrxbScore[0]+','+sqrxbScore[1]+' '+url);
         return null;
     } else {
         incrementBlockCount();
-        console.log('base64 filter Blocked: '+sqrxScore[0]+','+sqrxScore[1]+','+sqrxScore[2]+','+sqrxScore[3]+' '+url);
+        console.log('base64 filter Blocked: '+sqrxbScore[0]+','+sqrxbScore[1]+' '+url);
         let svgText = await common_create_svg(img,unsafeScore,img.src);
         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
         return svgURI;
@@ -453,14 +446,13 @@ async function base64_listener(details) {
 
                     img.onload = async function(e) {
                         console.log('base64 image loaded: '+imageId);
-                        let score = 0;
                         try
                         {
                             if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                                 console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                                sqrxScore = await predict(img);
+                                let sqrxbScore = await predict(img);
                                 console.log('base64 score: '+sqrxScore);
-                                let replacement = await base64_fast_filter(img, sqrxScore, details.url);
+                                let replacement = await base64_fast_filter(img, sqrxbScore, details.url);
                                 const totalTime = performance.now() - startTime;
                                 console.log(`Total processing in ${Math.floor(totalTime)}ms`);
                                 if(replacement !== null) {
@@ -526,27 +518,13 @@ browser.menus.create({
     id: "toggle-review-mode",
     title: "Toggle Review Mode"
   });
-  
- browser.menus.create({
-    id: "toggle-questionable-mode",
-    title: "Toggle Questionable Mode"
-  });
+
 
 browser.menus.onClicked.addListener((info, tab) => {
     switch (info.menuItemId) {
       case "toggle-review-mode":
         isInReviewMode = !isInReviewMode;
         console.log('Review mode? '+isInReviewMode);
-        break;
-	  case "toggle-questionable-mode":
-		isBlockingQuestionable = !isBlockingQuestionable;
-		console.log('Are questionable images being blocked?'+isBlockingQuestionable);
-		break;
-      case "report-good":
-        console.log('Good: '+info.srcUrl);
-        break;
-      case "report-bad":
-        console.log('Bad: '+info.srcUrl);
         break;
     }
   });
