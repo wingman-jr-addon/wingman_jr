@@ -59,7 +59,7 @@ function incrementBlockCount() {
 
 function isSafe(sqrxrScore)
 {
-    return sqrxrScore[0] < 0.25;
+    return sqrxrScore[0] < 0.43;
 }
 
 /**
