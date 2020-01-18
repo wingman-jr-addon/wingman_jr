@@ -12,7 +12,7 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 //Main plugin
-const MODEL_PATH = 'sqrxr_64_graphopt/model.json'
+const MODEL_PATH = 'sqrxr_62_graphopt/model.json'
 const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
@@ -59,7 +59,11 @@ function incrementBlockCount() {
 
 function isSafe(sqrxrScore)
 {
-    return sqrxrScore[0] < 0.43;
+    //FPR, TPR, Threshold
+    //((0.02007051803634391, 0.7753737214791503), 0.99565566) Minimal/Normal
+    //((0.04488744236506645, 0.8502491476527668), 0.9401961) Medium
+    //((0.10035259018171956, 0.9061106740099659), 0.0641256) Conservative
+    return sqrxrScore[0] < 0.9401961;
 }
 
 /**
