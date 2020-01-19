@@ -386,9 +386,9 @@ async function base64_listener(details) {
 
             //Unfortunately, str.replace cannot accept a promise as a function,
             //so we simply set 'em up and knock 'em down.
-            //Note there used to be a funky bit at the end to catch = encoded as \x3d
-            //but it isn't needed any more with \ in the main body being caught for JS encoding.
-            let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,[A-Za-z0-9=+\/ \-\\]+/g;
+            //Note there is a funky bit at the end to catch = encoded as \x3d
+            //but we need to exclude e.g. \x22 from showing up inside the match. Ugh.
+            let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,[A-Za-z0-9=+\/ \-]+(\\x3[dD])*/g;
             let imageDataURIs = fullStr.match(dataURIMatcher);
             if (imageDataURIs === null) {
                 console.log('base64 no images detected, passing through original');
