@@ -478,6 +478,7 @@ async function base64_listener(details) {
                     }
                     img.onerror = function(e) {
                         console.log('base64 img load error: '+e);
+                        ensureProgress();
                     }
                     img.src = imageDataURI;
                 } else {
