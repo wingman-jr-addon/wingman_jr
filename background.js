@@ -35,6 +35,7 @@ const wingman_startup = async () => {
     warmup_result.print();
     warmup_result.dispose();
     console.log('Ready to go!');
+    browser.browserAction.setTitle({title: "Wingman Jr."});
 };
 
 let blockCount = 0;
@@ -57,13 +58,41 @@ function incrementBlockCount() {
     updateStatVisuals();
 }
 
+//FPR, TPR, Threshold - Positive=Unsafe
+//((0.005017629509085977, 0.6582743246787307), 0.998805) Trusted
+//((0.014103607268782207, 0.7504589562024653), 0.9975748) Neutral
+//((0.10035259018171956, 0.9061106740099659), 0.0641256) Untrusted
+var zoneThreshold = 0.9401961;
+var zone = 'neutral';
+function setZone(newZone)
+{
+    console.log('Zone request to: '+newZone);
+    switch(newZone)
+    {
+        case 'trusted':
+            zoneThreshold = 0.998805;
+            browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
+            zone = newZone;
+            console.log('Zone is now trusted!');
+            break;
+        case 'neutral':
+            zoneThreshold = 0.9975748;
+            browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+            zone = newZone;
+            console.log('Zone is now neutral!');
+            break;
+        case 'untrusted':
+            zoneThreshold = 0.0641256;
+            browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
+            zone = newZone;
+            console.log('Zone is now untrusted!')
+            break;
+    }
+}
+
 function isSafe(sqrxrScore)
 {
-    //FPR, TPR, Threshold
-    //((0.02007051803634391, 0.7753737214791503), 0.99565566) Minimal/Normal
-    //((0.04488744236506645, 0.8502491476527668), 0.9401961) Medium
-    //((0.10035259018171956, 0.9061106740099659), 0.0641256) Conservative
-    return sqrxrScore[0] < 0.9401961;
+    return sqrxrScore[0] < zoneThreshold;
 }
 
 /**
@@ -534,4 +563,16 @@ browser.menus.onClicked.addListener((info, tab) => {
   });
 
 ////////////////////////Actual Startup//////////////////////////////
+function handleMessage(request, sender, sendResponse) {
+    if(request.type=='setZone')
+    {
+        setZone(request.zone);
+    }
+    else if(request.type=='getZone')
+    {
+        sendResponse({zone: zone});
+    }
+}
+browser.runtime.onMessage.addListener(handleMessage);
+setZone('neutral');
 wingman_startup();
