@@ -4,6 +4,7 @@ window.onload=function()
     for (var i = 0; i < rad.length; i++) {
         rad[i].addEventListener('change', function(e) {
             browser.runtime.sendMessage({ type: 'setZone', zone: e.target.id });
+            window.close();
         });
     }
     let sending = browser.runtime.sendMessage({type:'getZone'});
