@@ -8,6 +8,7 @@
                 padding: 0px;
                 margin: 0px;
                 height: auto;
+                overflow-y: hidden;
             }
             label[for=trusted]
             {
@@ -21,7 +22,7 @@
             {
                 background: #e87f7eff;
             }
-            input
+            input[type=radio]
             {
                 position: absolute;
                 opacity: 0;
@@ -29,7 +30,7 @@
                 height: 0;
                 width: 0;
             }
-            input+label
+            input[type=radio]+label,span#isZoneAutomaticWrapper
             {
                 width:95px;
                 display: block;
@@ -37,31 +38,35 @@
                 border-radius: 3px;
                 font-size: 17;
             }
-            input:checked+label
+            input[type=radio]:checked+label
             {
                 border: 3px solid black;
                 padding: 0px;
             }
-            input+label:hover
+            input[type=radio]+label:hover
             {
                 border: 3px dashed black;
                 padding: 0px;
             }
-            input+label>img
+            input[type=radio]+label>img
             {
                 width: 16px;
                 height: 16px;
                 padding-right: 5px;
                 visibility: hidden;
             }
-            input:checked+label>img
+            input[type=radio]:checked+label>img
             {
                 visibility: visible;
             }
-            input+label:hover>img
+            input[type=radio]+label:hover>img
             {
                 visibility: visible;
                 opacity: 0.2;
+            }
+            span#isZoneAutomaticWrapper
+            {
+                background: skyblue;
             }
 
         </style>
@@ -69,9 +74,10 @@
     </head>
     <body>
         <form id="popupForm">
-            <input type="radio" name="zone" id="trusted"><label for="trusted" title="For trusted zones: block few good images accidentally but still catch the majority of bad ones."><img src="icons/wingman_icon_32_trusted.png" />Trusted</label>
-            <input type="radio" name="zone" id="neutral" checked><label for="neutral" title="For neutral zones: block some good images accidentally, and catch most bad ones."><img src="icons/wingman_icon_32_neutral.png" />Neutral</label>
-            <input type="radio" name="zone" id="untrusted"><label for="untrusted" title="For untrusted zones: block almost all bad images but quite a few good ones as well."><img src="icons/wingman_icon_32_untrusted.png" />Untrusted</label>
+            <input type="radio" name="zone" id="trusted"><label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones."><img src="icons/wingman_icon_32_trusted.png" />Trusted</label>
+            <input type="radio" name="zone" id="neutral" checked><label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones."><img src="icons/wingman_icon_32_neutral.png" />Neutral</label>
+            <input type="radio" name="zone" id="untrusted"><label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well."><img src="icons/wingman_icon_32_untrusted.png" />Untrusted</label>
+            <span id="isZoneAutomaticWrapper"><input type="checkbox" name="zoneAuto" id="isZoneAutomatic"><label for="isZoneAutomatic">Automatic?</label></span>
         </form>
     </body>
 </html>

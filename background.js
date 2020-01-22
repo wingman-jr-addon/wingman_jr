@@ -36,16 +36,56 @@ const wingman_startup = async () => {
     warmup_result.dispose();
     console.log('Ready to go!');
     browser.browserAction.setTitle({title: "Wingman Jr."});
+    browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+
 };
 
+//Note: checks can occur that fail and do not result in either a block or a pass.
+//Therefore, use block+pass as the total count in certain cases
 let blockCount = 0;
+let passCount = 0;
 let checkCount = 0;
 function updateStatVisuals() {
     if (blockCount > 0) {
         let txt = (blockCount < 1000) ? blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
-        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' images!' });
+        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' total images\r\n'+
+        'Blocked '+Math.round(100*estimatedTruePositivePercentage)+'% of the last '+predictionBuffer.length+' in this zone' });
     }
+}
+
+var isZoneAutomatic = true;
+var predictionBufferBlockCount = 0;
+var predictionBuffer = [];
+var estimatedTruePositivePercentage = 0;
+var isEstimateValid = false;
+
+function addToPredictionBuffer(prediction)
+{
+    predictionBuffer.push(prediction);
+    if(prediction>0) {
+        predictionBufferBlockCount++;
+    }
+    if(predictionBuffer.length>200) {
+        let oldPrediction = predictionBuffer.shift();
+        if(oldPrediction > 0) {
+            predictionBufferBlockCount--;
+        }
+    }
+    if(predictionBuffer.length>50) {
+        let estimatedTruePositiveCount = zonePrecision*predictionBufferBlockCount;
+        estimatedTruePositivePercentage = estimatedTruePositiveCount / predictionBuffer.length;
+        isEstimateValid = true;
+    } else {
+        estimatedTruePositivePercentage = 0;
+        isEstimateValid = false;
+    }
+}
+
+function clearPredictionBuffer() {
+    predictionBufferBlockCount = 0;
+    predictionBuffer = [];
+    estimatedTruePositivePercentage = 0;
 }
 
 function incrementCheckCount() {
@@ -55,38 +95,90 @@ function incrementCheckCount() {
 
 function incrementBlockCount() {
     blockCount++;
+    addToPredictionBuffer(1);
+    checkZone();
     updateStatVisuals();
 }
 
+function incrementPassCount() {
+    passCount++;
+    addToPredictionBuffer(0);
+    checkZone();
+    updateStatVisuals();
+}
+
+function setZoneAutomatic(isAutomatic) {
+    isZoneAutomatic = isAutomatic;
+}
+
+function checkZone()
+{
+    if(!isEstimateValid) {
+        return;
+    }
+    if(!isZoneAutomatic) {
+        return;
+    }
+    let requestedZone = 'untrusted';
+    if(estimatedTruePositivePercentage < 0.015) {
+        requestedZone = 'trusted';
+    } else if(estimatedTruePositivePercentage < 0.04) {
+        requestedZone = 'neutral';
+    }
+    if(requestedZone != zone) {
+        setZone(requestedZone);
+    }
+}
+
 //FPR, TPR, Threshold - Positive=Unsafe
-//((0.005017629509085977, 0.6582743246787307), 0.998805) Trusted
-//((0.014103607268782207, 0.7504589562024653), 0.9975748) Neutral
-//((0.10035259018171956, 0.9061106740099659), 0.0641256) Untrusted
+//((0.0049182506978598965, 0.6592216129463688), 0.9987614) //Trusted
+//Binary confusion matrix at threshold = 0.9987614
+//[[7486   37]
+// [2548 4929]]
+//((0.015020603482653197, 0.7378627791895145), 0.9977756) //Neutral
+//Binary confusion matrix at threshold = 0.9977756
+//[[7410  113]
+// [1960 5517]]
+//((0.10022597368071248, 0.9025010030761), 0.09442982) //Untrusted
+//Binary confusion matrix at threshold = 0.09442982
+//[[6769  754]
+// [ 729 6748]]
 var zoneThreshold = 0.9401961;
+var zonePrecision = 5517/(113+5517);
 var zone = 'neutral';
 function setZone(newZone)
 {
     console.log('Zone request to: '+newZone);
+    let didZoneChange = false;
     switch(newZone)
     {
         case 'trusted':
-            zoneThreshold = 0.998805;
+            zoneThreshold = 0.9987614;
+            zonePrecision = 4929/(37+4929);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             zone = newZone;
+            didZoneChange = true;
             console.log('Zone is now trusted!');
             break;
         case 'neutral':
-            zoneThreshold = 0.9975748;
+            zoneThreshold = 0.9977756;
+            zonePrecision = 5517/(113+5517);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
             zone = newZone;
+            didZoneChange = true;
             console.log('Zone is now neutral!');
             break;
         case 'untrusted':
-            zoneThreshold = 0.0641256;
+            zoneThreshold = 0.09442982;
+            zonePrecision = 6784/(754+6784);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             zone = newZone;
+            didZoneChange = true;
             console.log('Zone is now untrusted!')
             break;
+    }
+    if(didZoneChange) {
+        clearPredictionBuffer();
     }
 }
 
@@ -199,6 +291,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
         let unsafeScore = sqrxrScore[0];
         if(isSafe(sqrxrScore)) {
             console.log('Passed: '+sqrxrScore[0]+' '+url);
+            incrementPassCount();
             for(let i=0; i<allData.length; i++) {
                 filter.write(allData[i]);
             }
@@ -367,6 +460,7 @@ async function base64_fast_filter(img,sqrxrScore, url) {
     console.log('base64 fast filter!');
 	let unsafeScore = sqrxrScore[0];
     if(isSafe(sqrxrScore)) {
+        incrementPassCount();
         console.log('base64 filter Passed: '+sqrxrScore[0]+' '+url);
         return null;
     } else {
@@ -572,7 +666,16 @@ function handleMessage(request, sender, sendResponse) {
     {
         sendResponse({zone: zone});
     }
+    else if(request.type=='setZoneAutomatic')
+    {
+        setZoneAutomatic(request.isZoneAutomatic);
+    }
+    else if(request.type=='getZoneAutomatic')
+    {
+        sendResponse({isZoneAutomatic:isZoneAutomatic});
+    }
 }
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
+browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 wingman_startup();
