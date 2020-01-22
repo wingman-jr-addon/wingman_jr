@@ -49,7 +49,8 @@ function updateStatVisuals() {
     if (blockCount > 0) {
         let txt = (blockCount < 1000) ? blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
-        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' images! ('+estimatedTruePositivePercentage+'/'+predictionBufferBlockCount+'/'+predictionBuffer.length+')' });
+        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' total images\r\n'+
+        'Blocked '+Math.round(100*estimatedTruePositivePercentage)+'% of the last '+predictionBuffer.length+' in this zone' });
     }
 }
 
