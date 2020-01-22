@@ -36,6 +36,8 @@ const wingman_startup = async () => {
     warmup_result.dispose();
     console.log('Ready to go!');
     browser.browserAction.setTitle({title: "Wingman Jr."});
+    browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+
 };
 
 //Note: checks can occur that fail and do not result in either a block or a pass.
@@ -51,6 +53,7 @@ function updateStatVisuals() {
     }
 }
 
+var isZoneAutomatic = true;
 var predictionBufferBlockCount = 0;
 var predictionBuffer = [];
 var estimatedTruePositivePercentage = 0;
@@ -103,9 +106,16 @@ function incrementPassCount() {
     updateStatVisuals();
 }
 
+function setZoneAutomatic(isAutomatic) {
+    isZoneAutomatic = isAutomatic;
+}
+
 function checkZone()
 {
     if(!isEstimateValid) {
+        return;
+    }
+    if(!isZoneAutomatic) {
         return;
     }
     let requestedZone = 'untrusted';
@@ -655,7 +665,16 @@ function handleMessage(request, sender, sendResponse) {
     {
         sendResponse({zone: zone});
     }
+    else if(request.type=='setZoneAutomatic')
+    {
+        setZoneAutomatic(request.isZoneAutomatic);
+    }
+    else if(request.type=='getZoneAutomatic')
+    {
+        sendResponse({isZoneAutomatic:isZoneAutomatic});
+    }
 }
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
+browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 wingman_startup();
