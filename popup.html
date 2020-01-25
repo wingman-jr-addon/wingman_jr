@@ -3,12 +3,17 @@
     <head>
         <meta charset="utf-8">
         <style>
+            html
+            {
+                background-color: transparent;
+            }
             body
             {
                 padding: 0px;
                 margin: 0px;
                 height: auto;
                 overflow-y: hidden;
+                background-color: transparent;
             }
             label[for=trusted]
             {
@@ -34,8 +39,9 @@
             {
                 width:95px;
                 display: block;
-                padding: 3px;
+                padding: 1px;
                 border-radius: 3px;
+                border: 2px solid grey;
                 font-size: 17;
             }
             input[type=radio]:checked+label
@@ -77,7 +83,7 @@
             <input type="radio" name="zone" id="trusted"><label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones."><img src="icons/wingman_icon_32_trusted.png" />Trusted</label>
             <input type="radio" name="zone" id="neutral" checked><label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones."><img src="icons/wingman_icon_32_neutral.png" />Neutral</label>
             <input type="radio" name="zone" id="untrusted"><label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well."><img src="icons/wingman_icon_32_untrusted.png" />Untrusted</label>
-            <span id="isZoneAutomaticWrapper"><input type="checkbox" name="zoneAuto" id="isZoneAutomatic"><label for="isZoneAutomatic">Automatic?</label></span>
+            <span id="isZoneAutomaticWrapper" title="If set to automatic, the plugin will attempt to switch between zones automatically based on the number of blocked images. Selecting a specific zone will change this to manual."><input type="checkbox" name="zoneAuto" id="isZoneAutomatic"><label for="isZoneAutomatic">Automatic?</label></span>
         </form>
     </body>
 </html>
