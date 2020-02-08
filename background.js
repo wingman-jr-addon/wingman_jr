@@ -198,7 +198,10 @@ inferenceCanvas.height = IMAGE_SIZE;
 let inferenceCtx = inferenceCanvas.getContext('2d');
 inferenceCtx.imageSmoothingEnabled = true;
 
-async function predict(imgElement) {
+let processingTimeTotal = 0;
+let processingCountTotal = 0;
+
+function predict(imgElement) {
 
   const drawStartTime = performance.now();
   inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
@@ -223,13 +226,13 @@ async function predict(imgElement) {
     return result;
   });
 
+  let syncedResult = logits.dataSync();
   const totalTime = performance.now() - startTime;
   inferenceTimeTotal += totalTime;
   inferenceCountTotal++;
   const avgTime = inferenceTimeTotal / inferenceCountTotal;
   console.log(`Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${inferenceCountTotal} scanned images`);
 
-  let syncedResult = await logits.data();
   console.log('Prediction: '+syncedResult[0]);
   return syncedResult;
 }
@@ -374,10 +377,12 @@ async function listener(details, shouldBlockSilently=false) {
                     img.onload = async function(e) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                            let sqrxrScore = await predict(img);
+                            let sqrxrScore = predict(img);
                             await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
-                            console.log(`Total processing in ${Math.floor(totalTime)}ms`);
+                            processingTimeTotal += totalTime;
+                            processingCountTotal++;
+                            console.log('Total processing in '+totalTime+' with an avg of '+(processingTimeTotal/processingCountTotal)+' at a count of '+processingCountTotal);
                         } else {
                             for(let i=0; i<allData.length; i++) {
                                 filter.write(allData[i]);
@@ -576,7 +581,7 @@ async function base64_listener(details) {
                         {
                             if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                                 console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                                let sqrxrScore = await predict(img);
+                                let sqrxrScore = predict(img);
                                 console.log('base64 score: '+sqrxrScore);
                                 let replacement = await base64_fast_filter(img, sqrxrScore, details.url);
                                 const totalTime = performance.now() - startTime;
