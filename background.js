@@ -195,7 +195,7 @@ let inferenceCountTotal = 0;
 let inferenceCanvas = document.createElement('canvas');
 inferenceCanvas.width = IMAGE_SIZE;
 inferenceCanvas.height = IMAGE_SIZE;
-let inferenceCtx = inferenceCanvas.getContext('2d');
+let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});
 inferenceCtx.imageSmoothingEnabled = true;
 
 let processingTimeTotal = 0;
