@@ -150,9 +150,22 @@ function checkZone()
 //Binary confusion matrix at threshold = 0.09442982
 //[[6769  754]
 // [ 729 6748]]
-var zoneThreshold = 0.9401961;
-var zonePrecision = 5517/(113+5517);
+let trustedZoneThreshold = 0.9987614;
+let trustedZonePrecision = 4929/(37+4929);
+
+let neutralZoneThreshold = 0.9977756;
+let neutralZonePrecision = 5517/(113+5517);
+
+let untrustedZoneThreshold = 0.09442982;
+let untrustedZonePrecision = 6784/(754+6784);
+
+
+var zoneThreshold = neutralZoneThreshold;
+var zonePrecision = neutralZonePrecision;
 var zone = 'neutral';
+
+var heightenedZoneThreshold = untrustedZoneThreshold;
+
 function setZone(newZone)
 {
     console.log('Zone request to: '+newZone);
@@ -160,24 +173,27 @@ function setZone(newZone)
     switch(newZone)
     {
         case 'trusted':
-            zoneThreshold = 0.9987614;
-            zonePrecision = 4929/(37+4929);
+            zoneThreshold = trustedZoneThreshold;
+            heightenedZoneThreshold = neutralZoneThreshold;
+            zonePrecision = trustedZonePrecision;
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             zone = newZone;
             didZoneChange = true;
             console.log('Zone is now trusted!');
             break;
         case 'neutral':
-            zoneThreshold = 0.9977756;
-            zonePrecision = 5517/(113+5517);
+            zoneThreshold = neutralZoneThreshold;
+            heightenedZoneThreshold = untrustedZoneThreshold;
+            zonePrecision = neutralZonePrecision;
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
             zone = newZone;
             didZoneChange = true;
             console.log('Zone is now neutral!');
             break;
         case 'untrusted':
-            zoneThreshold = 0.09442982;
-            zonePrecision = 6784/(754+6784);
+            zoneThreshold = untrustedZoneThreshold;
+            heightenedZoneThreshold = untrustedZoneThreshold;
+            zonePrecision = untrustedZonePrecision;
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             zone = newZone;
             didZoneChange = true;
@@ -189,8 +205,11 @@ function setZone(newZone)
     }
 }
 
-function isSafe(sqrxrScore)
+function isSafe(sqrxrScore, isThirdParty=false)
 {
+    if(isThirdParty) {
+        return sqrxrScore[0] < heightenedZoneThreshold;
+    }
     return sqrxrScore[0] < zoneThreshold;
 }
 
@@ -295,11 +314,12 @@ async function common_create_svg(img, unsafeScore, dataURL)
     return svgText;
 }
 
-async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlockSilently) {
+async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlockSilently, isThirdParty=false) {
+    console.log('isThirdParty='+isThirdParty+' '+url);
     try
     {
         let unsafeScore = sqrxrScore[0];
-        if(isSafe(sqrxrScore)) {
+        if(isSafe(sqrxrScore, isThirdParty)) {
             console.log('Passed: '+sqrxrScore[0]+' '+url);
             incrementPassCount();
             for(let i=0; i<allData.length; i++) {
@@ -309,8 +329,10 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
             URL.revokeObjectURL(img.src);
         } else {
             let blockType = shouldBlockSilently ? 'silently' : 'with SVG'
-            console.log('Blocked '+blockType+': '+sqrxrScore[0]+' '+url);
-            incrementBlockCount();
+            console.log('Blocked '+blockType+'(3rd party='+isThirdParty+'): '+sqrxrScore[0]+' '+url);
+            if(!isThirdParty) {
+                incrementBlockCount(); //Should we or should we not increment when it is 3rd party and zone < untrusted?
+            }
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
                 let encoder = new TextEncoder();
@@ -393,7 +415,8 @@ async function listener(details, shouldBlockSilently=false) {
                             } else {
                                 sqrxrScore = predict(img);
                             }
-                            await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently);
+                            let isThirdParty = (details.thirdParty !== undefined) ? details.thirdParty : false;
+                            await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently, isThirdParty);
                             const totalTime = performance.now() - startTime;
                             processingTimeTotal += totalTime;
                             processingCountTotal++;
