@@ -17,6 +17,10 @@ const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
 
+function onModelLoadProgress(percentage) {
+    console.log('Model load '+Math.round(percentage*100)+'% at '+performance.now());
+}
+
 let isInReviewMode = false;
 let wingman;
 const wingman_startup = async () => {
@@ -26,16 +30,18 @@ const wingman_startup = async () => {
     await tf.ready();
     console.log('TensorflowJS backend is: '+tf.getBackend());
     console.log('Loading model...');
-    wingman = await tf.loadGraphModel(MODEL_PATH);
-    console.log('Model: ' + wingman);
+    wingman = await tf.loadGraphModel(MODEL_PATH, { onProgress: onModelLoadProgress });
+    console.log('Model loaded: ' + wingman+' at '+performance.now());
 
     console.log('Warming up...');
     let dummy_data = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
-    let warmup_result = wingman.predict(dummy_data);
+    let warmup_result = null;
+    let timingInfo = await tf.time(()=>warmup_result = wingman.predict(dummy_data));
     console.log(warmup_result);
+    console.log('TIMING LOADING: '+JSON.stringify(timingInfo));
     warmup_result.print();
     warmup_result.dispose();
-    console.log('Ready to go!');
+    console.log('Ready to go at '+performance.now()+'!');
     browser.browserAction.setTitle({title: "Wingman Jr."});
     browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
 
@@ -323,6 +329,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
 }
 
 let capturedWorkQueue = {};
+let timingInfoDumpCount = 0;
 
 async function listener(details, shouldBlockSilently=false) {
     let mimeType = '';
@@ -378,7 +385,14 @@ async function listener(details, shouldBlockSilently=false) {
                     img.onload = async function(e) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                            let sqrxrScore = predict(img);
+                            let sqrxrScore = 0;
+                            if(timingInfoDumpCount<10) {
+                                timingInfoDumpCount++;
+                                let timingInfo = await tf.time(()=>sqrxrScore=predict(img));
+                                console.log('TIMING NORMAL: '+JSON.stringify(timingInfo));
+                            } else {
+                                sqrxrScore = predict(img);
+                            }
                             await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently);
                             const totalTime = performance.now() - startTime;
                             processingTimeTotal += totalTime;
