@@ -488,9 +488,10 @@ async function base64_fast_filter(img,sqrxrScore, url) {
         return null;
     } else {
         incrementBlockCount();
-        console.log('base64 filter Blocked: '+sqrxrScore[0]+' '+url);
         let svgText = await common_create_svg(img,unsafeScore,img.src);
         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
+        let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+img.src+'); background-size: contain; background-repeat: no-repeat;';
+        console.log('%c BLOCKED IMG BASE64 '+sqrxrScore[0], blockedCSS);
         return svgURI;
     }
 }
@@ -664,22 +665,6 @@ browser.webRequest.onHeadersReceived.addListener(
     },
     ["blocking","responseHeaders"]
   );
-
-///////////////////////////////Context Menu//////////////////////////////
-browser.menus.create({
-    id: "toggle-review-mode",
-    title: "Toggle Review Mode"
-  });
-
-
-browser.menus.onClicked.addListener((info, tab) => {
-    switch (info.menuItemId) {
-      case "toggle-review-mode":
-        isInReviewMode = !isInReviewMode;
-        console.log('Review mode? '+isInReviewMode);
-        break;
-    }
-  });
 
 ////////////////////////Actual Startup//////////////////////////////
 function handleMessage(request, sender, sendResponse) {
