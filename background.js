@@ -531,7 +531,9 @@ async function base64_listener(details) {
             //so we simply set 'em up and knock 'em down.
             //Note there is a funky bit at the end to catch = encoded as \x3d
             //but we need to exclude e.g. \x22 from showing up inside the match. Ugh.
-            let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,[A-Za-z0-9=+\/ \-]+(\\x3[dD])*/g;
+            //However, we also must allow '\/' to show up, making for a nasty two character
+            //allowed sequence when the rest are single chars up to the end. Double ugh.
+            let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,([A-Za-z0-9=+\/ \-]|\\\/)+(\\x3[dD])*/g;
             let imageDataURIs = fullStr.match(dataURIMatcher);
             if (imageDataURIs === null) {
                 console.log('base64 no images detected, passing through original');
