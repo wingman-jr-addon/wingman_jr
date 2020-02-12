@@ -264,6 +264,26 @@ function escapeRegExp(str) {
     return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
 }
 
+let LOG_IMG_SIZE = 150;
+let logCanvas = document.createElement('canvas');
+logCanvas.width = LOG_IMG_SIZE;
+logCanvas.height = LOG_IMG_SIZE;
+let logCtx = logCanvas.getContext('2d', { alpha: false});
+logCanvas.imageSmoothingEnabled = true;
+async function common_log_img(img, message)
+{
+    let maxSide = Math.max(img.width, img.height);
+    let ratio = LOG_IMG_SIZE/maxSide;
+    let newWidth = img.width*ratio;
+    let newHeight = img.height*ratio;
+    logCtx.clearRect(0,0,logCanvas.width,logCanvas.height);
+    logCtx.drawImage(img, 0, 0, newWidth, newHeight);
+    let logDataUrl = logCanvas.toDataURL('image/jpeg', 0.7);
+    let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+logDataUrl+'); background-size: contain; background-repeat: no-repeat;';
+    console.log(blockedCSS);
+    console.log('%c '+message, blockedCSS);
+}
+
 async function common_create_svg_from_blob(img, unsafeScore, blob)
 {
     let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
@@ -313,9 +333,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
             incrementBlockCount();
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
-                let dataUrl = await readFileAsDataURL(blob);
-                let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+dataUrl+'); background-size: contain; background-repeat: no-repeat;';
-                console.log('%c BLOCKED IMG '+sqrxrScore, blockedCSS);
+                common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
                 let encoder = new TextEncoder();
                 let encodedTypedBuffer = encoder.encode(svgText);
                 filter.write(encodedTypedBuffer.buffer);
@@ -490,8 +508,7 @@ async function base64_fast_filter(img,sqrxrScore, url) {
         incrementBlockCount();
         let svgText = await common_create_svg(img,unsafeScore,img.src);
         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
-        let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+img.src+'); background-size: contain; background-repeat: no-repeat;';
-        console.log('%c BLOCKED IMG BASE64 '+sqrxrScore[0], blockedCSS);
+        common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
         return svgURI;
     }
 }
