@@ -264,13 +264,33 @@ function escapeRegExp(str) {
     return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
 }
 
+let LOG_IMG_SIZE = 150;
+let logCanvas = document.createElement('canvas');
+logCanvas.width = LOG_IMG_SIZE;
+logCanvas.height = LOG_IMG_SIZE;
+let logCtx = logCanvas.getContext('2d', { alpha: false});
+logCanvas.imageSmoothingEnabled = true;
+async function common_log_img(img, message)
+{
+    let maxSide = Math.max(img.width, img.height);
+    let ratio = LOG_IMG_SIZE/maxSide;
+    let newWidth = img.width*ratio;
+    let newHeight = img.height*ratio;
+    logCtx.clearRect(0,0,logCanvas.width,logCanvas.height);
+    logCtx.drawImage(img, 0, 0, newWidth, newHeight);
+    let logDataUrl = logCanvas.toDataURL('image/jpeg', 0.7);
+    let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+logDataUrl+'); background-size: contain; background-repeat: no-repeat;';
+    console.log(blockedCSS);
+    console.log('%c '+message, blockedCSS);
+}
+
 async function common_create_svg_from_blob(img, unsafeScore, blob)
 {
     let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
     return common_create_svg(img, unsafeScore, dataURL);
 }
 
-let iconDataURI = "data:image/pngl;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
+let iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 
 async function common_create_svg(img, unsafeScore, dataURL)
@@ -313,6 +333,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
             incrementBlockCount();
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
+                common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
                 let encoder = new TextEncoder();
                 let encodedTypedBuffer = encoder.encode(svgText);
                 filter.write(encodedTypedBuffer.buffer);
@@ -485,9 +506,9 @@ async function base64_fast_filter(img,sqrxrScore, url) {
         return null;
     } else {
         incrementBlockCount();
-        console.log('base64 filter Blocked: '+sqrxrScore[0]+' '+url);
         let svgText = await common_create_svg(img,unsafeScore,img.src);
         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
+        common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
         return svgURI;
     }
 }
@@ -661,22 +682,6 @@ browser.webRequest.onHeadersReceived.addListener(
     },
     ["blocking","responseHeaders"]
   );
-
-///////////////////////////////Context Menu//////////////////////////////
-browser.menus.create({
-    id: "toggle-review-mode",
-    title: "Toggle Review Mode"
-  });
-
-
-browser.menus.onClicked.addListener((info, tab) => {
-    switch (info.menuItemId) {
-      case "toggle-review-mode":
-        isInReviewMode = !isInReviewMode;
-        console.log('Review mode? '+isInReviewMode);
-        break;
-    }
-  });
 
 ////////////////////////Actual Startup//////////////////////////////
 function handleMessage(request, sender, sendResponse) {
