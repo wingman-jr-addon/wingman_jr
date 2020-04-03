@@ -206,6 +206,9 @@ let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});
 inferenceCtx.imageSmoothingEnabled = true;
 
 let processingTimeTotal = 0;
+let processingSinceDataStartTimeTotal = 0;
+let processingSinceDataEndTimeTotal = 0;
+let processingSinceImageLoadTimeTotal = 0;
 let processingCountTotal = 0;
 
 function predict(imgElement) {
@@ -366,11 +369,15 @@ async function listener(details, shouldBlockSilently=false) {
     }
     console.log('start headers '+details.requestId);
     const startTime = performance.now();
+    let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
     let allData = [];
     
   
     filter.ondata = event => {
+        if (dataStartTime == null) {
+            dataStartTime = performance.now();
+        }
         console.log('data '+details.requestId);
         allData.push(event.data);
     }
@@ -388,6 +395,7 @@ async function listener(details, shouldBlockSilently=false) {
   
     filter.onstop = async event => {
         incrementCheckCount();
+        let dataEndTime = performance.now();
         let capturedWork = async () => {
             console.log('starting work for '+details.requestId +' from '+details.url);
             try
@@ -406,6 +414,7 @@ async function listener(details, shouldBlockSilently=false) {
                     img.onload = async function(e) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                            let imgLoadTime = performance.now();
                             let sqrxrScore = 0;
                             if(timingInfoDumpCount<10) {
                                 timingInfoDumpCount++;
@@ -415,10 +424,24 @@ async function listener(details, shouldBlockSilently=false) {
                                 sqrxrScore = predict(img);
                             }
                             await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently);
-                            const totalTime = performance.now() - startTime;
+                            const endTime = performance.now();
+                            const totalTime = endTime - startTime;
+                            const totalSinceDataStartTime = endTime - dataStartTime;
+                            const totalSinceDataEndTime = endTime - dataEndTime;
+                            const totalSinceImageLoadTime = endTime - imgLoadTime;
                             processingTimeTotal += totalTime;
+                            processingSinceDataStartTimeTotal += totalSinceDataStartTime;
+                            processingSinceDataEndTimeTotal += totalSinceDataEndTime;
+                            processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
                             processingCountTotal++;
-                            console.log('Total processing in '+totalTime+' with an avg of '+(processingTimeTotal/processingCountTotal)+' at a count of '+processingCountTotal);
+                            console.log('Processed in '+totalTime
+                                +' ('+totalSinceDataStartTime+' data start, '
+                                +totalSinceDataEndTime+' data end, '+totalSinceImageLoadTime+' img load) with an avg of '
+                                +Math.round(processingTimeTotal/processingCountTotal)
+                                +' ('+Math.round(processingSinceDataStartTimeTotal/processingCountTotal)
+                                +' data start, '+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
+                                +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
+                                +' img load) at a count of '+processingCountTotal);
                         } else {
                             for(let i=0; i<allData.length; i++) {
                                 filter.write(allData[i]);
