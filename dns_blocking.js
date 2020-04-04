@@ -1,4 +1,6 @@
 let dnsLookupCache = { '': true } //Add blank entry for things without a true hostname.
+let dnsInFlightRequests = { }
+let dnsInFlightRequestsCounter = { }
 let isDnsFailureTripped = false;
 let dnsCacheHitCount = 0;
 let dnsCacheMissCount = 0;
@@ -17,6 +19,40 @@ async function isDomainOk(urlString) {
     }
     dnsCacheMissCount++;
 
+    //I used to simply make the request. But we end up spamming the DNS requests multiple times when
+    //the cache is not yet populated but one or more requests to fill the cache are in flight.
+    //The approach here is to make sure we get the same promise and await it.
+    let p = null;
+    let wasTrueMiss = false;
+    if (url.hostname in dnsInFlightRequests) {
+        p = dnsInFlightRequests[url.hostname];
+        dnsInFlightRequestsCounter[url.hostname]++;
+        if(shouldShowDnsDebugMessages) {
+            console.log('DNS in flight: multiple lookups ('+dnsInFlightRequestsCounter[url.hostname]+') occurring on '+url.hostname);
+        }
+    } else {
+        p = makeRequest(url);
+        dnsInFlightRequests[url.hostname] = p;
+        dnsInFlightRequestsCounter[url.hostname] = 1;
+        wasTrueMiss = true;
+    }
+    let result = await p;
+    dnsInFlightRequestsCounter[url.hostname]--;
+    if(shouldShowDnsDebugMessages) {
+        console.log('DNS in flight: '+dnsInFlightRequestsCounter[url.hostname]+' remaining requests for '+url.hostname);
+    }
+    if (dnsInFlightRequestsCounter[url.hostname]<=0) {
+        if(shouldShowDnsDebugMessages) {
+            console.log('DNS in flight: cleaning up for '+url.hostname);
+        }
+        delete dnsInFlightRequests[url.hostname];
+        delete dnsInFlightRequestsCounter[url.hostname];
+    }
+    console.log('DNS cache '+(wasTrueMiss ? 'miss' : 'hold')+' (result: '+result+') for hostname: '+url.hostname);
+    return result;
+}
+
+async function makeRequest(url) {
     let reqHeaders = new Headers();
     reqHeaders.append('Accept', 'application/dns-json');
 
@@ -42,8 +78,5 @@ async function isDomainOk(urlString) {
     let json = await response.json();
     let didResolve = json["Answer"] !== undefined;
     dnsLookupCache[url.hostname] = didResolve;
-    if(shouldShowDnsDebugMessages) {
-        console.log('DNS cache miss (result: '+didResolve+') for: '+url.hostname);
-    }
     return didResolve;
 }
