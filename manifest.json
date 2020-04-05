@@ -9,14 +9,20 @@
       "webRequestBlocking",
       "<all_urls>",
       "menus",
-      "proxy"
+      "proxy",
+      "storage"
     ],
   
     "background": {
       "scripts": [
           "tfjs_1.5.1.js",
+          "dns_blocking.js",
           "background.js"
         ]
+    },
+
+    "options_ui": {
+      "page": "options.html"
     },
 
     "browser_action": {

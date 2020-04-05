@@ -488,7 +488,6 @@ async function listener(details, shouldBlockSilently=false) {
     return details;
   }
 
-
 browser.webRequest.onHeadersReceived.addListener(
     listener,
     {urls:["<all_urls>"], types:["image","imageset"]},
@@ -517,6 +516,37 @@ browser.webRequest.onHeadersReceived.addListener(
     ["blocking","responseHeaders"]
   );
 
+///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
+
+shouldUseDnsBlocking = false;
+
+async function dnsBlockListener(details) {
+    let dnsResult = await isDomainOk(details.url);
+    if(!dnsResult) {
+        console.log('DNS Blocked '+details.url);
+        return { cancel: true };
+    }
+    return details;
+}
+
+function setDnsBlocking(onOrOff) {
+    let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
+    if(onOrOff != isCurrentlyOn) {
+        shouldUseDnsBlocking = onOrOff;
+        if(onOrOff && !isCurrentlyOn) {
+            console.log('DNS Adding DNS block listener')
+            browser.webRequest.onBeforeRequest.addListener(
+                dnsBlockListener,
+                {urls:["<all_urls>"], types:["image","imageset","media"]},
+                ["blocking"]
+              );
+        } else if (!onOrOff && isCurrentlyOn) {
+            console.log('DNS Removing DNS block listener')
+            browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
+        }
+        console.log('DNS blocking is now: '+onOrOff);
+    }
+}
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
@@ -723,6 +753,10 @@ function handleMessage(request, sender, sendResponse) {
     else if(request.type=='getZoneAutomatic')
     {
         sendResponse({isZoneAutomatic:isZoneAutomatic});
+    }
+    else if(request.type=='setDnsBlocking')
+    {
+        setDnsBlocking(request.value);
     }
 }
 browser.runtime.onMessage.addListener(handleMessage);
