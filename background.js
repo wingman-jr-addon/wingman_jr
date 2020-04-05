@@ -754,6 +754,10 @@ function handleMessage(request, sender, sendResponse) {
     {
         sendResponse({isZoneAutomatic:isZoneAutomatic});
     }
+    else if(request.type=='setDnsBlocking')
+    {
+        setDnsBlocking(request.value);
+    }
 }
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');

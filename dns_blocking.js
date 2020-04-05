@@ -5,7 +5,7 @@ let isDnsFailureTripped = false;
 let dnsCacheHitCount = 0;
 let dnsCacheMissCount = 0;
 let dnsErrorCount = 0;
-let shouldShowDnsDebugMessages = true;
+let shouldShowDnsDebugMessages = false;
 
 async function isDomainOk(urlString) {
     let url = new URL(urlString);

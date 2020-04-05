@@ -9,7 +9,8 @@
       "webRequestBlocking",
       "<all_urls>",
       "menus",
-      "proxy"
+      "proxy",
+      "storage"
     ],
   
     "background": {
@@ -18,6 +19,10 @@
           "dns_blocking.js",
           "background.js"
         ]
+    },
+
+    "options_ui": {
+      "page": "options.html"
     },
 
     "browser_action": {
