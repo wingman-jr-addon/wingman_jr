@@ -2,7 +2,7 @@
     "description": "Filter images transparently for kids",
     "manifest_version": 2,
     "name": "Wingman Jr.",
-    "version": "1.0.2",
+    "version": "1.1.0",
   
     "permissions": [
       "webRequest",
