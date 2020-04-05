@@ -530,6 +530,7 @@ async function dnsBlockListener(details) {
 }
 
 function setDnsBlocking(onOrOff) {
+    console.log('DNS blocking set request: '+onOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
     if(onOrOff != isCurrentlyOn) {
         shouldUseDnsBlocking = onOrOff;
@@ -545,6 +546,8 @@ function setDnsBlocking(onOrOff) {
             browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
         }
         console.log('DNS blocking is now: '+onOrOff);
+    } else {
+        console.log('DNS blocking is already correctly set.');
     }
 }
 
@@ -737,6 +740,11 @@ browser.webRequest.onHeadersReceived.addListener(
   );
 
 ////////////////////////Actual Startup//////////////////////////////
+function updateFromSettings() {
+    browser.storage.local.get("is_dns_blocking").then(dnsResult=>
+    setDnsBlocking(dnsResult.is_dns_blocking == true));
+}
+
 function handleMessage(request, sender, sendResponse) {
     if(request.type=='setZone')
     {
@@ -756,10 +764,11 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setDnsBlocking')
     {
-        setDnsBlocking(request.value);
+        updateFromSettings();
     }
 }
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 wingman_startup();
+updateFromSettings();
