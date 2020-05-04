@@ -209,9 +209,11 @@ function submitImage(sqrxScore, blob, url) {
                 largestScore = sqrxScore[i];
             }
         }
+        /*
         if(finalClass == 0) {
             return;
         }
+        */
         console.log('!!!! Submitting '+finalClass+' '+url.slice(-20));
         var xhr = new XMLHttpRequest();
         xhr.open("POST", 'http://localhost:43234/store?wingman='+finalClass+'&url='+encodeURI(url), true);
