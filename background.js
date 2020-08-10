@@ -25,7 +25,6 @@ let isInReviewMode = false;
 let wingman;
 const wingman_startup = async () => {
     console.log('Launching TF.js!');
-    tf.ENV.set('WEBGL_PACK',false);
     tf.enableProdMode();
     await tf.ready();
     console.log('TensorflowJS backend is: '+tf.getBackend());
