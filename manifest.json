@@ -15,7 +15,7 @@
   
     "background": {
       "scripts": [
-          "tfjs_1.5.1.js",
+          "tfjs_2.3.0.js",
           "dns_blocking.js",
           "background.js"
         ]
@@ -33,5 +33,5 @@
       "default_popup" :  "popup.html"
     },
 
-    "content_security_policy": "script-src 'self';  object-src 'self' blob:; img-src blob: data:;"
+    "content_security_policy": "script-src 'self' 'unsafe-eval';  object-src 'self' blob:; img-src blob: data:;"
   }
