@@ -74,12 +74,24 @@
             {
                 background: skyblue;
             }
+            .switch_visible
+            {
+                display: block;
+            }
+            .switch_hidden
+            {
+                display: none;
+            }
 
         </style>
         <script src="popup.js"></script>
     </head>
     <body>
         <form id="popupForm">
+            <span id="isOnOffSection">
+                <input type="radio" name="on_off" id="on"><label for="on">On</label>
+                <input type="radio" name="on_off" id="off" checked><label for="off">Off</label>
+            </span>
             <input type="radio" name="zone" id="trusted"><label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones."><img src="icons/wingman_icon_32_trusted.png" />Trusted</label>
             <input type="radio" name="zone" id="neutral" checked><label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones."><img src="icons/wingman_icon_32_neutral.png" />Neutral</label>
             <input type="radio" name="zone" id="untrusted"><label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well."><img src="icons/wingman_icon_32_untrusted.png" />Untrusted</label>
