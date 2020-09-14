@@ -517,18 +517,19 @@ async function dnsBlockListener(details) {
 }
 
 function setDnsBlocking(onOrOff) {
-    console.log('DNS blocking set request: '+onOrOff);
+    let effectiveOnOrOff = onOrOff && isEnabled;
+    console.log('DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
-    if(onOrOff != isCurrentlyOn) {
-        shouldUseDnsBlocking = onOrOff;
-        if(onOrOff && !isCurrentlyOn) {
+    if(effectiveOnOrOff != isCurrentlyOn) {
+        shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
+        if(effectiveOnOrOff && !isCurrentlyOn) {
             console.log('DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
                 dnsBlockListener,
                 {urls:["<all_urls>"], types:["image","imageset","media"]},
                 ["blocking"]
               );
-        } else if (!onOrOff && isCurrentlyOn) {
+        } else if (!effectiveOnOrOff && isCurrentlyOn) {
             console.log('DNS Removing DNS block listener')
             browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
         }
@@ -536,6 +537,11 @@ function setDnsBlocking(onOrOff) {
     } else {
         console.log('DNS blocking is already correctly set.');
     }
+}
+
+//Use this if you change isEnabled
+function refreshDnsBlocking() {
+    setDnsBlocking(shouldUseDnsBlocking);
 }
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
@@ -764,6 +770,7 @@ function setEnabled(isOn) {
         unregisterAllCallbacks();
     }
     isEnabled = isOn;
+    refreshDnsBlocking();
     console.log('Callback wireups changed!');
 }
 
@@ -772,6 +779,8 @@ let isOnOffSwitchShown = false;
 function updateFromSettings() {
     browser.storage.local.get("is_dns_blocking").then(dnsResult=>
     setDnsBlocking(dnsResult.is_dns_blocking == true));
+    browser.storage.local.get("is_on_off_shown").then(onOffResult=>
+    isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
 }
 
 function handleMessage(request, sender, sendResponse) {
@@ -809,7 +818,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setOnOffSwitchShown')
     {
-        isOnOffSwitchShown = request.value;
+        updateFromSettings();
     }
 }
 browser.runtime.onMessage.addListener(handleMessage);
