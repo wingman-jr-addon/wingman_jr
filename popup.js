@@ -37,19 +37,18 @@ window.onload=function()
             console.log('Error getting zone automatic: '+error);
         }
     );
-    let radOnOff = document.getElementById('popupForm').on_off;
-    for (var i = 0; i < radOnOff.length; i++) {
-        radOnOff[i].addEventListener('change', function(e) {
-            browser.runtime.sendMessage({ type: 'setOnOff', onOff: e.target.id });
-            window.close();
-        });
-    }
+    let checkOnOff = document.getElementById('isOnOff');
+    checkOnOff.addEventListener('change', function(e) {
+        console.log('Setting on/off to '+e.target.checked);
+        browser.runtime.sendMessage({ type: 'setOnOff', onOff: e.target.checked ? 'on' : 'off' });
+        window.close();
+    })
     let sendingOnOff = browser.runtime.sendMessage({type:'getOnOff'});
     sendingOnOff.then(
         function(message)
         {
             console.log('Restoring on/off state to '+message.onOff);
-            document.getElementById(message.onOff).checked = true;
+            document.getElementById('isOnOff').checked = message.onOff=='on';
         },
         function(error)
         {
