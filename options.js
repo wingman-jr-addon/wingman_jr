@@ -31,7 +31,7 @@ function restoreOptions() {
         if(result) {
             document.getElementById('on_off_shown_yes').checked = true;
         } else {
-            document.getElementById('on_off_shown_yes').checked = true;
+            document.getElementById('on_off_shown_no').checked = true;
         }
         browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: result });
     }
