@@ -37,4 +37,34 @@ window.onload=function()
             console.log('Error getting zone automatic: '+error);
         }
     );
+    let checkOnOff = document.getElementById('isOnOff');
+    checkOnOff.addEventListener('change', function(e) {
+        console.log('Setting on/off to '+e.target.checked);
+        browser.runtime.sendMessage({ type: 'setOnOff', onOff: e.target.checked ? 'on' : 'off' });
+        window.close();
+    })
+    let sendingOnOff = browser.runtime.sendMessage({type:'getOnOff'});
+    sendingOnOff.then(
+        function(message)
+        {
+            console.log('Restoring on/off state to '+message.onOff);
+            document.getElementById('isOnOff').checked = message.onOff=='on';
+        },
+        function(error)
+        {
+            console.log('Error getting onOff: '+error);
+        }
+    )
+    let sendingOnOffShown = browser.runtime.sendMessage({type:'getOnOffSwitchShown'});
+    sendingOnOffShown.then(
+        function(message)
+        {
+            console.log('Restoring on/off shown state to '+message.isOnOffSwitchShown);
+            document.getElementById('isOnOffSection').className = message.isOnOffSwitchShown ? 'switch_visible' : 'switch_hidden';
+        },
+        function(error)
+        {
+            console.log('Error getting onOffShown: '+error);
+        }
+    )
 }

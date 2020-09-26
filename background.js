@@ -487,12 +487,6 @@ async function listener(details, shouldBlockSilently=false) {
     return details;
   }
 
-browser.webRequest.onHeadersReceived.addListener(
-    listener,
-    {urls:["<all_urls>"], types:["image","imageset"]},
-    ["blocking","responseHeaders"]
-  );
-
 async function direct_typed_url_listener(details) {
     //Try to see if there is an image MIME type
     for(let i=0; i<details.responseHeaders.length; i++) {
@@ -509,12 +503,6 @@ async function direct_typed_url_listener(details) {
     return details;
 }
 
-browser.webRequest.onHeadersReceived.addListener(
-    direct_typed_url_listener,
-    {urls:["<all_urls>"], types:["main_frame"]},
-    ["blocking","responseHeaders"]
-  );
-
 ///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
 
 shouldUseDnsBlocking = false;
@@ -529,18 +517,19 @@ async function dnsBlockListener(details) {
 }
 
 function setDnsBlocking(onOrOff) {
-    console.log('DNS blocking set request: '+onOrOff);
+    let effectiveOnOrOff = onOrOff && isEnabled;
+    console.log('DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
-    if(onOrOff != isCurrentlyOn) {
-        shouldUseDnsBlocking = onOrOff;
-        if(onOrOff && !isCurrentlyOn) {
+    if(effectiveOnOrOff != isCurrentlyOn) {
+        shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
+        if(effectiveOnOrOff && !isCurrentlyOn) {
             console.log('DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
                 dnsBlockListener,
                 {urls:["<all_urls>"], types:["image","imageset","media"]},
                 ["blocking"]
               );
-        } else if (!onOrOff && isCurrentlyOn) {
+        } else if (!effectiveOnOrOff && isCurrentlyOn) {
             console.log('DNS Removing DNS block listener')
             browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
         }
@@ -548,6 +537,11 @@ function setDnsBlocking(onOrOff) {
     } else {
         console.log('DNS blocking is already correctly set.');
     }
+}
+
+//Use this if you change isEnabled
+function refreshDnsBlocking() {
+    setDnsBlocking(shouldUseDnsBlocking);
 }
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
@@ -727,21 +721,66 @@ async function base64_listener(details) {
   return details;
 }
 
-browser.webRequest.onHeadersReceived.addListener(
-    base64_listener,
-    {
-        urls:[
-            "<all_urls>"
-        ],
-        types:["main_frame"]
-    },
-    ["blocking","responseHeaders"]
-  );
+
 
 ////////////////////////Actual Startup//////////////////////////////
+
+function registerAllCallbacks() {
+
+    browser.webRequest.onHeadersReceived.addListener(
+        listener,
+        {urls:["<all_urls>"], types:["image","imageset"]},
+        ["blocking","responseHeaders"]
+      );
+
+      browser.webRequest.onHeadersReceived.addListener(
+        direct_typed_url_listener,
+        {urls:["<all_urls>"], types:["main_frame"]},
+        ["blocking","responseHeaders"]
+      );
+
+      browser.webRequest.onHeadersReceived.addListener(
+        base64_listener,
+        {
+            urls:[
+                "<all_urls>"
+            ],
+            types:["main_frame"]
+        },
+        ["blocking","responseHeaders"]
+      );
+}
+
+function unregisterAllCallbacks() {
+    browser.webRequest.onHeadersReceived.removeListener(listener);
+    browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
+    browser.webRequest.onHeadersReceived.removeListener(base64_listener);
+}
+
+let isEnabled = false;
+function setEnabled(isOn) {
+    console.log('Setting enabled to '+isOn);
+    if(isOn == isEnabled) {
+        return;
+    }
+    console.log('Handling callback wireup change.');
+    if(isOn) {
+        registerAllCallbacks();
+    } else {
+        unregisterAllCallbacks();
+    }
+    isEnabled = isOn;
+    refreshDnsBlocking();
+    console.log('Callback wireups changed!');
+}
+
+let isOnOffSwitchShown = false;
+
 function updateFromSettings() {
     browser.storage.local.get("is_dns_blocking").then(dnsResult=>
     setDnsBlocking(dnsResult.is_dns_blocking == true));
+    browser.storage.local.get("is_on_off_shown").then(onOffResult=>
+    isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
 }
 
 function handleMessage(request, sender, sendResponse) {
@@ -765,9 +804,26 @@ function handleMessage(request, sender, sendResponse) {
     {
         updateFromSettings();
     }
+    else if(request.type=='getOnOff')
+    {
+        sendResponse({onOff:isEnabled ? 'on' : 'off'});
+    }
+    else if(request.type=='setOnOff')
+    {
+        setEnabled(request.onOff=='on');
+    }
+    else if(request.type=='getOnOffSwitchShown')
+    {
+        sendResponse({isOnOffSwitchShown: isOnOffSwitchShown});
+    }
+    else if(request.type=='setOnOffSwitchShown')
+    {
+        updateFromSettings();
+    }
 }
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 wingman_startup();
 updateFromSettings();
+setEnabled(true); //always start on
