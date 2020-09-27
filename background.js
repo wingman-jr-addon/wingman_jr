@@ -286,18 +286,19 @@ async function common_log_img(img, message)
     console.log('%c '+message, blockedCSS);
 }
 
-async function common_create_svg_from_blob(img, unsafeScore, blob)
+async function common_create_svg_from_blob(img, threshold, blob)
 {
     let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
-    return common_create_svg(img, unsafeScore, dataURL);
+    return common_create_svg(img, threshold, dataURL);
 }
 
 let iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 
-async function common_create_svg(img, unsafeScore, dataURL)
+async function common_create_svg(img, threshold, dataURL)
 {
-    let visibleScore = Math.floor(unsafeScore*100);
+    let confidence = findConfidence(threshold);
+    let visibleScore = Math.floor(confidence*100);
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
     +'<g transform="translate(20 20)">'
     + '<g transform="matrix(1.123 0 0 1.123 -10.412 -76.993)">'
@@ -320,7 +321,6 @@ async function common_create_svg(img, unsafeScore, dataURL)
 async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlockSilently) {
     try
     {
-        let unsafeScore = sqrxrScore[0];
         if(isSafe(sqrxrScore)) {
             console.log('Passed: '+sqrxrScore[0]+' '+url);
             incrementPassCount();
@@ -334,7 +334,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
             console.log('Blocked '+blockType+': '+sqrxrScore[0]+' '+url);
             incrementBlockCount();
             if (!shouldBlockSilently) {
-                let svgText = await common_create_svg_from_blob(img, unsafeScore, blob);
+                let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
                 common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
                 let encoder = new TextEncoder();
                 let encodedTypedBuffer = encoder.encode(svgText);

@@ -16,6 +16,7 @@
     "background": {
       "scripts": [
           "tfjs_2.3.0.js",
+          "roc.js",
           "dns_blocking.js",
           "background.js"
         ]
