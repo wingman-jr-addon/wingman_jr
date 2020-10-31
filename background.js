@@ -618,6 +618,9 @@ async function base64_listener(details) {
     //However, TextEncoder does NOT support other than utf-8, so we actually
     //need to change the MIME type on the header if we are filtering the output
     // to UTF-8.
+    //If modifying this block of code, ensure that the tests at
+    //https://www.w3.org/2006/11/mwbp-tests/index.xhtml
+    //all pass - current implementation only fails on #9 but fixes #3,4,5, and 8.
     let decodingCharset = 'utf-8';
     let detectedCharset = detectCharset(mimeType);
 
