@@ -562,14 +562,49 @@ async function base64_fast_filter(img,sqrxrScore, url) {
     }
 }
 
+function detectCharset(contentType) {
+    /*
+    From https://tools.ietf.org/html/rfc7231#section-3.1.1.5:
+
+    A parameter value that matches the token production can be
+    transmitted either as a token or within a quoted-string.  The quoted
+    and unquoted values are equivalent.  For example, the following
+    examples are all equivalent, but the first is preferred for
+    consistency:
+
+    text/html;charset=utf-8
+    text/html;charset=UTF-8
+    Text/HTML;Charset="utf-8"
+    text/html; charset="utf-8"
+
+    Internet media types ought to be registered with IANA according to
+    the procedures defined in [BCP13].
+
+    Note: Unlike some similar constructs in other header fields, media
+    type parameters do not allow whitespace (even "bad" whitespace)
+    around the "=" character.
+    */
+
+    let charsetMarker = "charset="; //spaces SHOULDN'T matter
+    let foundIndex = contentType.indexOf(charsetMarker);
+    if (foundIndex == -1) {
+        return undefined;
+    }
+    let charsetMaybeQuoted = contentType.substr(foundIndex+charsetMarker.length).trim(); //Left side should have no space, but...
+    let charset = charsetMaybeQuoted.replace(/\"/g, '');
+    return charset;
+}
+
 //listen for "above the fold" image search requests
 async function base64_listener(details) {
     console.log('base64 headers '+details.requestId+' '+details.url);
     let mimeType = '';
+    let headerIndex = -1;
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
-            mimeType = header.value;
+            mimeType = header.value.toLowerCase();
+            headerIndex = i;
             break;
         }
     }
@@ -578,11 +613,28 @@ async function base64_listener(details) {
         return;
     }
 
+    //We need to detect the charset to correctly initialize TextDecoder or
+    //else we run into garbage output sometimes.
+    //However, TextEncoder does NOT support other than utf-8, so we actually
+    //need to change the MIME type on the header if we are filtering the output
+    // to UTF-8.
+    //If modifying this block of code, ensure that the tests at
+    //https://www.w3.org/2006/11/mwbp-tests/index.xhtml
+    //all pass - current implementation only fails on #9 but fixes #3,4,5, and 8.
+    let decodingCharset = 'utf-8';
+    let detectedCharset = detectCharset(mimeType);
+
+    if(detectedCharset !== undefined) {
+        decodingCharset = detectedCharset; //decoding
+    }
+    details.responseHeaders[headerIndex].value = 'text/html;charset=utf-8'; //encoding
+    console.log('########## MIME TYPE '+mimeType+' with detected charset '+decodingCharset+'for '+details.url);
+
+    let decoder = new TextDecoder(decodingCharset);
+    let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
 
     const startTime = performance.now();
     let filter = browser.webRequest.filterResponseData(details.requestId);
-    let decoder = new TextDecoder("utf-8");
-    let encoder = new TextEncoder();
 
     let fullStr = ''; //ugh
 
