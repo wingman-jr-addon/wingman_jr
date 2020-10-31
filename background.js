@@ -620,11 +620,12 @@ async function base64_listener(details) {
     // to UTF-8.
     let decodingCharset = 'utf-8';
     let detectedCharset = detectCharset(mimeType);
-    if (detectedCharset) {
+
+    if(detectedCharset !== undefined) {
         decodingCharset = detectedCharset; //decoding
-        details.responseHeaders[headerIndex].value = 'text/html;charset=utf-8'; //encoding
-        console.log('########## MIME TYPE '+mimeType+' with detected charset '+decodingCharset+'for '+details.url);
     }
+    details.responseHeaders[headerIndex].value = 'text/html;charset=utf-8'; //encoding
+    console.log('########## MIME TYPE '+mimeType+' with detected charset '+decodingCharset+'for '+details.url);
 
     let decoder = new TextDecoder(decodingCharset);
     let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
