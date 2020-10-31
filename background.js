@@ -603,7 +603,7 @@ async function base64_listener(details) {
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
-            mimeType = header.value;
+            mimeType = header.value.toLowerCase();
             headerIndex = i;
             break;
         }
@@ -620,9 +620,9 @@ async function base64_listener(details) {
     // to UTF-8.
     let decodingCharset = 'utf-8';
     let detectedCharset = detectCharset(mimeType);
-    if (detectedCharset !== undefined) {
+    if (detectedCharset) {
         decodingCharset = detectedCharset; //decoding
-        details.responseHeaders[i].value = 'text/html;charset=utf-8'; //encoding
+        details.responseHeaders[headerIndex].value = 'text/html;charset=utf-8'; //encoding
         console.log('########## MIME TYPE '+mimeType+' with detected charset '+decodingCharset+'for '+details.url);
     }
 
