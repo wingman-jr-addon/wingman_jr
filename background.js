@@ -588,6 +588,7 @@ async function base64_listener(details) {
     filter.onstop = e => {
         try
         {
+            fullStr += decoder.decode(); //Flush the buffer
             console.log('base64 stop '+fullStr.length);
             incrementCheckCount();
 
