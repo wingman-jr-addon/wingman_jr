@@ -751,6 +751,9 @@ function detectCharsetAndSetupDecoderEncoder(details) {
     } else if(contentType.trim().startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
       console.log('Detected base type was '+baseType);
+    } else if(contentType.trim().startsWith('image/')) {
+      console.log('Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      return;
     } else {
       baseType = 'text/html';
       console.log('The Content-Type was '+contentType+', not text/html or application/xhtml+xml - results might be strange.');
