@@ -355,6 +355,9 @@ let capturedWorkQueue = {};
 let timingInfoDumpCount = 0;
 
 async function listener(details, shouldBlockSilently=false) {
+    if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -488,6 +491,9 @@ async function listener(details, shouldBlockSilently=false) {
   }
 
 async function direct_typed_url_listener(details) {
+    if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
     //Try to see if there is an image MIME type
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -565,6 +571,9 @@ async function base64_fast_filter(img,sqrxrScore, url) {
 // Listen for any Base 64 encoded images, particularly the first page of
 // "above the fold" image search requests in Google Images
 async function base64_listener(details) {
+    if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
     console.log('base64 headers '+details.requestId+' '+details.url);
     // The received data is a stream of bytes. In order to do text-based
     // modifications, it is necessary to decode the bytes into a string
