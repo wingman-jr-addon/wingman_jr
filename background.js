@@ -25,9 +25,15 @@ let isInReviewMode = false;
 let wingman;
 const wingman_startup = async () => {
     console.log('Launching TF.js!');
+    console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
-    console.log('TensorflowJS backend is: '+tf.getBackend());
+    let loadedBackend = tf.getBackend();
+    console.log('TensorflowJS backend is: '+loadedBackend);
+    if(loadedBackend == 'cpu') {
+        console.log('WARNING! Exiting because no fast predictor can be loaded!');
+        wingman = null;
+    }
     console.log('Loading model...');
     wingman = await tf.loadGraphModel(MODEL_PATH, { onProgress: onModelLoadProgress });
     console.log('Model loaded: ' + wingman+' at '+performance.now());
@@ -202,6 +208,7 @@ let inferenceCanvas = document.createElement('canvas');
 inferenceCanvas.width = IMAGE_SIZE;
 inferenceCanvas.height = IMAGE_SIZE;
 let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});
+console.log('Inference context: '+inferenceCtx);
 inferenceCtx.imageSmoothingEnabled = true;
 
 let processingTimeTotal = 0;
@@ -936,5 +943,7 @@ browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 wingman_startup();
-updateFromSettings();
-setEnabled(true); //always start on
+if(wingman !== null) {
+    updateFromSettings();
+    setEnabled(true); //always start on
+}
