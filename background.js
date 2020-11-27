@@ -591,6 +591,9 @@ async function base64_listener(details) {
     // and the complexity is hidden in a helper method.
     let decoder, encoder;
     [decoder, encoder] = detectCharsetAndSetupDecoderEncoder(details);
+    if(!decoder) {
+        return;
+    }
     const startTime = performance.now();
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -772,7 +775,8 @@ function detectCharsetAndSetupDecoderEncoder(details) {
       return;
     } else {
       baseType = 'text/html';
-      console.log('The Content-Type was '+contentType+', not text/html or application/xhtml+xml - results might be strange.');
+      console.log('The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
+      return;
     }
   
     // It is important to detect the charset to correctly initialize TextDecoder or
