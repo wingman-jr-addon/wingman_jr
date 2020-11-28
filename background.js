@@ -653,10 +653,10 @@ async function base64_listener(details) {
                 let byteCount = imageDataURI.length*3/4;
 
                 if(byteCount >= MIN_IMAGE_BYTES) {
-                    let img = await loadImagePromise(imageDataURI);
                     console.log('base64 image loaded: '+imageId);
                     try
                     {
+                        let img = await loadImagePromise(imageDataURI);
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                             console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                             let sqrxrScore = predict(img);
