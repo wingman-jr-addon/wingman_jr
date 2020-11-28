@@ -575,6 +575,12 @@ async function base64_fast_filter(img,sqrxrScore, url) {
     }
 }
 
+const loadImagePromise = url => new Promise( resolve => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.src = url
+});
+
 // Listen for any Base 64 encoded images, particularly the first page of
 // "above the fold" image search requests in Google Images
 async function base64_listener(details) {
@@ -604,7 +610,7 @@ async function base64_listener(details) {
         fullStr += str;
       }
 
-    filter.onstop = e => {
+    filter.onstop = async e => {
         try
         {
             fullStr += decoder.decode(); //Flush the buffer
@@ -618,43 +624,17 @@ async function base64_listener(details) {
             //However, we also must allow '\/' to show up, making for a nasty two character
             //allowed sequence when the rest are single chars up to the end. Double ugh.
             let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,([A-Za-z0-9=+\/ \-]|\\\/)+(\\x3[dD])*/g;
-            let imageDataURIs = fullStr.match(dataURIMatcher);
-            if (imageDataURIs === null) {
-                console.log('base64 no images detected, passing through original');
-                filter.write(encoder.encode(fullStr));
-                filter.close();
-                return;
-            }
-            console.log('base64 match count: '+imageDataURIs.length);
+            let endOfLastImage = 0;
+            let result;
+            while((result = dataURIMatcher.exec(fullStr))!==null) {
+                //We found an image. We can output from the end of the last image
+                //until the start of this one to start with.
+                let inBetweenStr = fullStr.substring(endOfLastImage, result.index);
+                filter.write(encoder.encode(inBetweenStr));
+                endOfLastImage = result.index + result[0].length;
 
-
-            let replacements = [];
-            let imageCheckCount = 0;
-
-            function ensureProgress() {
-                imageCheckCount++;
-                console.log('base64 progress: '+imageCheckCount+'/'+imageDataURIs.length);
-
-                if(imageCheckCount == imageDataURIs.length) {
-                    let filteredStr = fullStr;
-                    for(let j=0; j<replacements.length; j++) {
-                        let replacement = replacements[j];
-                        //Why on earth doesn't JS just have a replaceAll instead?
-                        //Arguably replaceAll might be better semantics but without caching, this should
-                        //get called once per time, so replace will get the right number of times
-                        //If I go with the regex method instead, it works BUT then it errors out
-                        //when the image gets too big.
-                        filteredStr = filteredStr.replace(replacement.old_img, replacement.new_img);
-                        //filteredStr = filteredStr.replace(new RegExp(escapeRegExp(replacement.old_img),'g'),replacement.new_img);
-                    }
-                    filter.write(encoder.encode(filteredStr));
-                    filter.close();
-                }
-            }
-            
-            for(let i=0; i<imageDataURIs.length; i++)
-            {
-                let rawImageDataURI = imageDataURIs[i];
+                //Now check the image and either output the original or the replacement
+                let rawImageDataURI = result[0];
                 //Note we now have move \x3d's into ='s for proper base64 decoding
                 let imageDataURI = rawImageDataURI;
                 let wasJSEncoded = imageDataURI.startsWith('data:image\\/'); //Unencoded, data:image\\/
@@ -667,53 +647,48 @@ async function base64_listener(details) {
                     console.log('base64 image no extra encoding detected: '+prefixId);
                 }
                 imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
+                let imageToOutput = imageDataURI;
                 let imageId = imageDataURI.slice(-20);
                 console.debug('base64 image loading: '+imageId);
-
-
                 let byteCount = imageDataURI.length*3/4;
 
                 if(byteCount >= MIN_IMAGE_BYTES) {
-                    let img = new Image();
-
-                    img.onload = async function(e) {
-                        console.log('base64 image loaded: '+imageId);
-                        try
-                        {
-                            if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                                console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                                let sqrxrScore = predict(img);
-                                console.log('base64 score: '+sqrxrScore);
-                                let replacement = await base64_fast_filter(img, sqrxrScore, details.url);
-                                const totalTime = performance.now() - startTime;
-                                console.log(`Total processing in ${Math.floor(totalTime)}ms`);
-                                if(replacement !== null) {
-                                    if(wasJSEncoded) {
-                                        console.log('base64 JS encoding replacement fixup for '+imageId);
-                                        replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
-                                    }
-                                    //Important! We have to use raw as the old so we don't miss the actual replacement match due to decoding vagaries
-                                    replacements.push({'old_img':rawImageDataURI,'new_img':replacement});
+                    let img = await loadImagePromise(imageDataURI);
+                    console.log('base64 image loaded: '+imageId);
+                    try
+                    {
+                        if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
+                            console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                            let sqrxrScore = predict(img);
+                            console.log('base64 score: '+sqrxrScore);
+                            let replacement = await base64_fast_filter(img, sqrxrScore, details.url);
+                            const totalTime = performance.now() - startTime;
+                            console.log(`Total processing in ${Math.floor(totalTime)}ms`);
+                            if(replacement !== null) {
+                                if(wasJSEncoded) {
+                                    console.log('base64 JS encoding replacement fixup for '+imageId);
+                                    replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
                                 }
-                            } else {
-                                console.debug('base64 skipping image with small dimensions: '+imageId);
+                                imageToOutput = replacement;
                             }
+                        } else {
+                            console.debug('base64 skipping image with small dimensions: '+imageId);
                         }
-                        catch(e)
-                        {
-                            console.error('base64 check failure for '+imageId+': '+e);
-                        }
-                        ensureProgress();
                     }
-                    img.onerror = function(e) {
-                        console.log('base64 img load error: '+e);
-                        ensureProgress();
+                    catch(e)
+                    {
+                        console.error('base64 check failure for '+imageId+': '+e);
                     }
-                    img.src = imageDataURI;
-                } else {
-                    ensureProgress();
+                    
                 }
+
+                filter.write(encoder.encode(imageToOutput));
             }
+            
+            //Now flush the last part
+            let finalNonImageChunk = fullStr.substring(endOfLastImage);
+            filter.write(encoder.encode(finalNonImageChunk));
+            filter.close();
         }
         catch(e)
         {
