@@ -481,21 +481,24 @@ async function listener(details, shouldBlockSilently=false) {
         console.log('QUEUE: queuing '+details.requestId);
         capturedWorkQueue[details.requestId] = capturedWork;
 
-        let lowestRequest = 10000000;
-        let remainingWorkCount = 0;
-        for(let key in capturedWorkQueue) {
-            if (capturedWorkQueue.hasOwnProperty(key)) { 
-                remainingWorkCount++;
-                if(key < lowestRequest) {
-                    lowestRequest = key;
+        let doOneJob = async () => {
+            let lowestRequest = 10000000;
+            let remainingWorkCount = 0;
+            for(let key in capturedWorkQueue) {
+                if (capturedWorkQueue.hasOwnProperty(key)) { 
+                    remainingWorkCount++;
+                    if(key < lowestRequest) {
+                        lowestRequest = key;
+                    }
                 }
             }
-        }
-        console.log('QUEUE: dequeuing '+lowestRequest);
-        let work = capturedWorkQueue[lowestRequest];
-        await work();
-        delete capturedWorkQueue[lowestRequest];
-        console.log('QUEUE: remaining: '+(remainingWorkCount-1));
+            console.log('QUEUE: dequeuing '+lowestRequest);
+            let work = capturedWorkQueue[lowestRequest];
+            await work();
+            delete capturedWorkQueue[lowestRequest];
+            console.log('QUEUE: remaining: '+(remainingWorkCount-1));
+        };
+        await doOneJob();
     }
     return details;
   }
