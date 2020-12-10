@@ -18,35 +18,36 @@ const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
 
 function onModelLoadProgress(percentage) {
-    console.log('Model load '+Math.round(percentage*100)+'% at '+performance.now());
+    console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
 
 let isInReviewMode = false;
 let wingman;
 const wingman_startup = async () => {
-    console.log('Launching TF.js!');
+    console.log('LIFECYCLE: Launching TF.js!');
     console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
     let loadedBackend = tf.getBackend();
-    console.log('TensorflowJS backend is: '+loadedBackend);
+    console.log('LIFECYCLE: TensorflowJS backend is: '+loadedBackend);
     if(loadedBackend == 'cpu') {
-        console.log('WARNING! Exiting because no fast predictor can be loaded!');
+        console.log('LIFECYCLE: WARNING! Exiting because no fast predictor can be loaded!');
         wingman = null;
+        return;
     }
-    console.log('Loading model...');
+    console.log('LIFECYCLE: Loading model...');
     wingman = await tf.loadGraphModel(MODEL_PATH, { onProgress: onModelLoadProgress });
-    console.log('Model loaded: ' + wingman+' at '+performance.now());
+    console.log('LIFECYCLE: Model loaded: ' + wingman+' at '+performance.now());
 
-    console.log('Warming up...');
+    console.log('LIFECYCLE: Warming up...');
     let dummy_data = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
     let warmup_result = null;
     let timingInfo = await tf.time(()=>warmup_result = wingman.predict(dummy_data));
     console.log(warmup_result);
-    console.log('TIMING LOADING: '+JSON.stringify(timingInfo));
+    console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
     warmup_result.print();
     warmup_result.dispose();
-    console.log('Ready to go at '+performance.now()+'!');
+    console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
     browser.browserAction.setTitle({title: "Wingman Jr."});
     browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
 
@@ -160,7 +161,7 @@ var zonePrecision = 5517/(113+5517);
 var zone = 'neutral';
 function setZone(newZone)
 {
-    console.log('Zone request to: '+newZone);
+    console.log('ZONE: Zone request to: '+newZone);
     let didZoneChange = false;
     switch(newZone)
     {
@@ -170,7 +171,7 @@ function setZone(newZone)
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now trusted!');
+            console.log('ZONE: Zone is now trusted!');
             break;
         case 'neutral':
             zoneThreshold = 0.9977756;
@@ -178,7 +179,7 @@ function setZone(newZone)
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now neutral!');
+            console.log('ZONE: Zone is now neutral!');
             break;
         case 'untrusted':
             zoneThreshold = 0.09442982;
@@ -186,7 +187,7 @@ function setZone(newZone)
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now untrusted!')
+            console.log('ZONE: Zone is now untrusted!')
             break;
     }
     if(didZoneChange) {
@@ -208,7 +209,7 @@ let inferenceCanvas = document.createElement('canvas');
 inferenceCanvas.width = IMAGE_SIZE;
 inferenceCanvas.height = IMAGE_SIZE;
 let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});
-console.log('Inference context: '+inferenceCtx);
+console.log('LIFECYCLE: Inference context: '+inferenceCtx);
 inferenceCtx.imageSmoothingEnabled = true;
 
 let processingTimeTotal = 0;
@@ -223,7 +224,7 @@ function predict(imgElement) {
   inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
   const rightSizeImageData = inferenceCtx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
   const totalDrawTime = performance.now() - drawStartTime;
-  console.log(`Draw time in ${Math.floor(totalDrawTime)}ms`);
+  console.log(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
   const startTime = performance.now();
   const logits = tf.tidy(() => {
@@ -247,9 +248,9 @@ function predict(imgElement) {
   inferenceTimeTotal += totalTime;
   inferenceCountTotal++;
   const avgTime = inferenceTimeTotal / inferenceCountTotal;
-  console.log(`Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${inferenceCountTotal} scanned images`);
+  console.log(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${inferenceCountTotal} scanned images`);
 
-  console.log('Prediction: '+syncedResult[0]);
+  console.log('ML: Prediction: '+syncedResult[0]);
   return syncedResult;
 }
 
@@ -289,7 +290,6 @@ async function common_log_img(img, message)
     logCtx.drawImage(img, 0, 0, newWidth, newHeight);
     let logDataUrl = logCanvas.toDataURL('image/jpeg', 0.7);
     let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+logDataUrl+'); background-size: contain; background-repeat: no-repeat;';
-    console.log(blockedCSS);
     console.log('%c '+message, blockedCSS);
 }
 
@@ -329,7 +329,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
     try
     {
         if(isSafe(sqrxrScore)) {
-            console.log('Passed: '+sqrxrScore[0]+' '+url);
+            console.log('ML: Passed: '+sqrxrScore[0]+' '+url);
             incrementPassCount();
             for(let i=0; i<allData.length; i++) {
                 filter.write(allData[i]);
@@ -338,7 +338,7 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
             URL.revokeObjectURL(img.src);
         } else {
             let blockType = shouldBlockSilently ? 'silently' : 'with SVG'
-            console.log('Blocked '+blockType+': '+sqrxrScore[0]+' '+url);
+            console.log('ML: Blocked '+blockType+': '+sqrxrScore[0]+' '+url);
             incrementBlockCount();
             if (!shouldBlockSilently) {
                 let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
@@ -376,7 +376,7 @@ async function listener(details, shouldBlockSilently=false) {
             break;
         }
     }
-    console.log('start headers '+details.requestId);
+    console.log('WEBREQ: start headers '+details.requestId);
     const startTime = performance.now();
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -387,7 +387,7 @@ async function listener(details, shouldBlockSilently=false) {
         if (dataStartTime == null) {
             dataStartTime = performance.now();
         }
-        console.log('data '+details.requestId);
+        console.log('WEBREQ: data '+details.requestId);
         allData.push(event.data);
     }
 
@@ -398,7 +398,7 @@ async function listener(details, shouldBlockSilently=false) {
         }
         catch(ex)
         {
-            console.log('Filter error: '+e+', '+ex);
+            console.log('WEBREQ: Filter error: '+e+', '+ex);
         }
     }
   
@@ -406,7 +406,7 @@ async function listener(details, shouldBlockSilently=false) {
         incrementCheckCount();
         let dataEndTime = performance.now();
         let capturedWork = async () => {
-            console.log('starting work for '+details.requestId +' from '+details.url);
+            console.log('WEBREQ: starting work for '+details.requestId +' from '+details.url);
             try
             {
                 let byteCount = 0;
@@ -422,13 +422,13 @@ async function listener(details, shouldBlockSilently=false) {
 
                     img.onload = async function(e) {
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                            console.log('predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                            console.log('ML: predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                             let imgLoadTime = performance.now();
                             let sqrxrScore = 0;
                             if(timingInfoDumpCount<10) {
                                 timingInfoDumpCount++;
                                 let timingInfo = await tf.time(()=>sqrxrScore=predict(img));
-                                console.log('TIMING NORMAL: '+JSON.stringify(timingInfo));
+                                console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
                             } else {
                                 sqrxrScore = predict(img);
                             }
@@ -443,7 +443,7 @@ async function listener(details, shouldBlockSilently=false) {
                             processingSinceDataEndTimeTotal += totalSinceDataEndTime;
                             processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
                             processingCountTotal++;
-                            console.log('Processed in '+totalTime
+                            console.log('PERF: Processed in '+totalTime
                                 +' ('+totalSinceDataStartTime+' data start, '
                                 +totalSinceDataEndTime+' data end, '+totalSinceImageLoadTime+' img load) with an avg of '
                                 +Math.round(processingTimeTotal/processingCountTotal)
@@ -451,23 +451,26 @@ async function listener(details, shouldBlockSilently=false) {
                                 +' data start, '+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
                                 +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
                                 +' img load) at a count of '+processingCountTotal);
+                            console.log('WEBREQ: Finishing '+details.requestId);
                         } else {
                             for(let i=0; i<allData.length; i++) {
                                 filter.write(allData[i]);
                             }
                             filter.close();
+                            console.log('WEBREQ: Finishing '+details.requestId);
                         }
                     }
                     img.src = url;
                 } else {
-                    console.log('tiny, skipping materialization '+details.requestId+' with '+byteCount+' bytes');
+                    console.log('WEBREQ: tiny, skipping materialization '+details.requestId+' with '+byteCount+' bytes');
                     for(let i=0; i<allData.length; i++) {
                         filter.write(allData[i]);
                     }
                     filter.close();
+                    console.log('WEBREQ: Finishing '+details.requestId);
                 }
             } catch(e) {
-                console.log('Error for '+details.url+': '+e)
+                console.log('WEBREQ: Error for '+details.url+': '+e)
                 for(let i=0; i<allData.length; i++) {
                     filter.write(allData[i]);
                 }
@@ -475,24 +478,27 @@ async function listener(details, shouldBlockSilently=false) {
             }
         };
 
-        console.log('queuing '+details.requestId);
+        console.log('QUEUE: queuing '+details.requestId);
         capturedWorkQueue[details.requestId] = capturedWork;
 
-        let lowestRequest = 10000000;
-        let remainingWorkCount = 0;
-        for(let key in capturedWorkQueue) {
-            if (capturedWorkQueue.hasOwnProperty(key)) { 
-                remainingWorkCount++;
-                if(key < lowestRequest) {
-                    lowestRequest = key;
+        let doOneJob = async () => {
+            let lowestRequest = 10000000;
+            let remainingWorkCount = 0;
+            for(let key in capturedWorkQueue) {
+                if (capturedWorkQueue.hasOwnProperty(key)) { 
+                    remainingWorkCount++;
+                    if(key < lowestRequest) {
+                        lowestRequest = key;
+                    }
                 }
             }
-        }
-        console.log('dequeuing '+lowestRequest);
-        let work = capturedWorkQueue[lowestRequest];
-        await work();
-        delete capturedWorkQueue[lowestRequest];
-        console.log('remaining: '+(remainingWorkCount-1));
+            console.log('QUEUE: dequeuing '+lowestRequest);
+            let work = capturedWorkQueue[lowestRequest];
+            await work();
+            delete capturedWorkQueue[lowestRequest];
+            console.log('QUEUE: remaining: '+(remainingWorkCount-1));
+        };
+        await doOneJob();
     }
     return details;
   }
@@ -507,7 +513,7 @@ async function direct_typed_url_listener(details) {
         if(header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
             if(mimeType.startsWith('image/')) {
-                console.log('Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
+                console.log('WEBREQ: Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
                 return listener(details,true);
             }
         }
@@ -523,7 +529,7 @@ shouldUseDnsBlocking = false;
 async function dnsBlockListener(details) {
     let dnsResult = await isDomainOk(details.url);
     if(!dnsResult) {
-        console.log('DNS Blocked '+details.url);
+        console.log('DNS: DNS Blocked '+details.url);
         return { cancel: true };
     }
     return details;
@@ -531,24 +537,24 @@ async function dnsBlockListener(details) {
 
 function setDnsBlocking(onOrOff) {
     let effectiveOnOrOff = onOrOff && isEnabled;
-    console.log('DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
+    console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
     if(effectiveOnOrOff != isCurrentlyOn) {
         shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
         if(effectiveOnOrOff && !isCurrentlyOn) {
-            console.log('DNS Adding DNS block listener')
+            console.log('CONFIG: DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
                 dnsBlockListener,
                 {urls:["<all_urls>"], types:["image","imageset","media"]},
                 ["blocking"]
               );
         } else if (!effectiveOnOrOff && isCurrentlyOn) {
-            console.log('DNS Removing DNS block listener')
+            console.log('CONFIG: DNS Removing DNS block listener')
             browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
         }
-        console.log('DNS blocking is now: '+onOrOff);
+        console.log('CONFIG: DNS blocking is now: '+onOrOff);
     } else {
-        console.log('DNS blocking is already correctly set.');
+        console.log('CONFIG: DNS blocking is already correctly set.');
     }
 }
 
@@ -560,11 +566,11 @@ function refreshDnsBlocking() {
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
 async function base64_fast_filter(img,sqrxrScore, url) {
-    console.log('base64 fast filter!');
+    console.log('ML: base64 fast filter!');
 	let unsafeScore = sqrxrScore[0];
     if(isSafe(sqrxrScore)) {
         incrementPassCount();
-        console.log('base64 filter Passed: '+sqrxrScore[0]+' '+url);
+        console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+url);
         return null;
     } else {
         incrementBlockCount();
@@ -587,7 +593,7 @@ async function base64_listener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    console.log('base64 headers '+details.requestId+' '+details.url);
+    console.log('WEBREQ: base64 headers '+details.requestId+' '+details.url);
     // The received data is a stream of bytes. In order to do text-based
     // modifications, it is necessary to decode the bytes into a string
     // using the proper character encoding, do any modifications, then
@@ -614,7 +620,7 @@ async function base64_listener(details) {
         try
         {
             fullStr += decoder.decode(); //Flush the buffer
-            console.log('base64 stop '+fullStr.length);
+            console.log('WEBREQ: base64 stop '+fullStr.length);
             incrementCheckCount();
 
             //Unfortunately, str.replace cannot accept a promise as a function,
@@ -642,42 +648,42 @@ async function base64_listener(details) {
                 if(wasJSEncoded) {
                     imageDataURI = imageDataURI.replace(/\\/g,''); //Unencoded, \ -> ''
                     let newPrefixId = imageDataURI.slice(0,20);
-                    console.log('base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
+                    console.log('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
                 } else {
-                    console.log('base64 image no extra encoding detected: '+prefixId);
+                    console.log('WEBREQ: base64 image no extra encoding detected: '+prefixId);
                 }
                 imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
                 let imageToOutput = imageDataURI;
                 let imageId = imageDataURI.slice(-20);
-                console.debug('base64 image loading: '+imageId);
+                console.debug('WEBREQ: base64 image loading: '+imageId);
                 let byteCount = imageDataURI.length*3/4;
 
                 if(byteCount >= MIN_IMAGE_BYTES) {
-                    console.log('base64 image loaded: '+imageId);
+                    console.log('WEBREQ: base64 image loaded: '+imageId);
                     try
                     {
                         let img = await loadImagePromise(imageDataURI);
                         if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                            console.log('base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                            console.log('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                             let sqrxrScore = predict(img);
-                            console.log('base64 score: '+sqrxrScore);
+                            console.log('ML: base64 score: '+sqrxrScore);
                             let replacement = await base64_fast_filter(img, sqrxrScore, details.url);
                             const totalTime = performance.now() - startTime;
-                            console.log(`Total processing in ${Math.floor(totalTime)}ms`);
+                            console.log(`PERF: Total processing in ${Math.floor(totalTime)}ms`);
                             if(replacement !== null) {
                                 if(wasJSEncoded) {
-                                    console.log('base64 JS encoding replacement fixup for '+imageId);
+                                    console.log('WEBREQ: base64 JS encoding replacement fixup for '+imageId);
                                     replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
                                 }
                                 imageToOutput = replacement;
                             }
                         } else {
-                            console.debug('base64 skipping image with small dimensions: '+imageId);
+                            console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
                         }
                     }
                     catch(e)
                     {
-                        console.error('base64 check failure for '+imageId+': '+e);
+                        console.error('WEBREQ: base64 check failure for '+imageId+': '+e);
                     }
                     
                 }
@@ -692,7 +698,7 @@ async function base64_listener(details) {
         }
         catch(e)
         {
-            console.log('Filter stop error: '+e);
+            console.log('WEBREQ: Filter stop error: '+e);
         }
     }
 
@@ -703,7 +709,7 @@ async function base64_listener(details) {
         }
         catch(e)
         {
-            console.log('Filter error: '+e);
+            console.log('WEBREQ: Filter error: '+e);
         }
     }
   
@@ -727,7 +733,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
         }
     }
     if (headerIndex == -1) {
-      console.log('No Content-Type header detected for '+details.url+', adding one.');
+      console.log('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
       headerIndex = details.responseHeaders.length;
       contentType = 'text/html';
       details.responseHeaders.push(
@@ -741,16 +747,16 @@ function detectCharsetAndSetupDecoderEncoder(details) {
     let baseType;
     if(contentType.trim().startsWith('text/html')) {
       baseType = 'text/html';
-      console.log('Detected base type was '+baseType);
+      console.log('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
-      console.log('Detected base type was '+baseType);
+      console.log('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('image/')) {
-      console.log('Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      console.log('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
       return;
     } else {
       baseType = 'text/html';
-      console.log('The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
+      console.log('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
       return;
     }
   
@@ -767,7 +773,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
   
     if(detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
-        console.log('Detected charset was ' + decodingCharset + ' for ' + details.url);
+        console.log('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
     }
     details.responseHeaders[headerIndex].value = baseType+';charset=utf-8';
   
@@ -856,11 +862,11 @@ function unregisterAllCallbacks() {
 
 let isEnabled = false;
 function setEnabled(isOn) {
-    console.log('Setting enabled to '+isOn);
+    console.log('CONFIG: Setting enabled to '+isOn);
     if(isOn == isEnabled) {
         return;
     }
-    console.log('Handling callback wireup change.');
+    console.log('CONFIG: Handling callback wireup change.');
     if(isOn) {
         registerAllCallbacks();
     } else {
@@ -868,7 +874,7 @@ function setEnabled(isOn) {
     }
     isEnabled = isOn;
     refreshDnsBlocking();
-    console.log('Callback wireups changed!');
+    console.log('CONFIG: Callback wireups changed!');
 }
 
 let isOnOffSwitchShown = false;
