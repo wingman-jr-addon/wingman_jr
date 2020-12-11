@@ -11,6 +11,42 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
+
+var connectedClients = [];
+let openFilters = {};
+
+function onClientConnected(port) {
+    connectedClients.push(port);
+    console.log('LIFECYCLE: There are now '+connectedClients.length+' processors');
+    port.onMessage.addListener(function(m) {
+        console.log('PROC: '+m);
+        console.dir(m);
+        let filter = openFilters[m.requestId];
+        filter.write(m.imageBytes);
+        filter.close();
+        delete openFilters[m.requestId];
+        console.log('OPEN FILTERS: '+openFilters.length);
+    });
+}
+
+let currentProcessorIndex = 0;
+function getNextProcessor() {
+    if(connectedClients.length == 0) {
+        return null;
+    }
+    currentProcessorIndex = (currentProcessorIndex+1) % connectedClients.length;
+    console.log('PERF: Using proc '+currentProcessorIndex);
+    return connectedClients[currentProcessorIndex];
+}
+      
+browser.runtime.onConnect.addListener(onClientConnected);
+browser.tabs.create({url:'/processor.html'})
+//browser.tabs.create({url:'/processor.html'})
+
+
+
+
+
 //Main plugin
 const MODEL_PATH = 'sqrxr_62_graphopt/model.json'
 const IMAGE_SIZE = 224;
@@ -270,9 +306,6 @@ async function readFileAsDataURL (inputFile) {
     });
   };
 
-function escapeRegExp(str) {
-    return str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
-}
 
 let LOG_IMG_SIZE = 150;
 let logCanvas = document.createElement('canvas');
@@ -358,7 +391,6 @@ async function fast_filter(filter,img,allData,sqrxrScore, url, blob, shouldBlock
     }
 }
 
-let capturedWorkQueue = {};
 let timingInfoDumpCount = 0;
 
 async function listener(details, shouldBlockSilently=false) {
@@ -380,6 +412,15 @@ async function listener(details, shouldBlockSilently=false) {
     const startTime = performance.now();
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
+
+    let processor = getNextProcessor();
+    processor.postMessage({
+        type: 'start',
+        requestId : details.requestId,
+        mimeType: mimeType,
+        url: details.url
+    });
+
     let allData = [];
     
   
@@ -389,11 +430,20 @@ async function listener(details, shouldBlockSilently=false) {
         }
         console.log('WEBREQ: data '+details.requestId);
         allData.push(event.data);
+        processor.postMessage({ 
+            type: 'ondata',
+            requestId: details.requestId,
+            data: event.data
+        });
     }
 
     filter.onerror = e => {
         try
         {
+            processor.postMessage({
+                type: 'onerror',
+                requestId: details.requestId
+            });
             filter.close();
         }
         catch(ex)
@@ -404,101 +454,11 @@ async function listener(details, shouldBlockSilently=false) {
   
     filter.onstop = async event => {
         incrementCheckCount();
-        let dataEndTime = performance.now();
-        let capturedWork = async () => {
-            console.log('WEBREQ: starting work for '+details.requestId +' from '+details.url);
-            try
-            {
-                let byteCount = 0;
-                for(let i=0; i<allData.length; i++) {
-                    byteCount += allData[i].byteLength;
-                }
-
-                if(byteCount >= MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
-
-                    let blob = new Blob(allData, {type: mimeType});
-                    let url = URL.createObjectURL(blob);
-                    let img = new Image();
-
-                    img.onload = async function(e) {
-                        if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                            console.log('ML: predict '+details.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                            let imgLoadTime = performance.now();
-                            let sqrxrScore = 0;
-                            if(timingInfoDumpCount<10) {
-                                timingInfoDumpCount++;
-                                let timingInfo = await tf.time(()=>sqrxrScore=predict(img));
-                                console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
-                            } else {
-                                sqrxrScore = predict(img);
-                            }
-                            await fast_filter(filter,img,allData,sqrxrScore,details.url,blob, shouldBlockSilently);
-                            const endTime = performance.now();
-                            const totalTime = endTime - startTime;
-                            const totalSinceDataStartTime = endTime - dataStartTime;
-                            const totalSinceDataEndTime = endTime - dataEndTime;
-                            const totalSinceImageLoadTime = endTime - imgLoadTime;
-                            processingTimeTotal += totalTime;
-                            processingSinceDataStartTimeTotal += totalSinceDataStartTime;
-                            processingSinceDataEndTimeTotal += totalSinceDataEndTime;
-                            processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
-                            processingCountTotal++;
-                            console.log('PERF: Processed in '+totalTime
-                                +' ('+totalSinceDataStartTime+' data start, '
-                                +totalSinceDataEndTime+' data end, '+totalSinceImageLoadTime+' img load) with an avg of '
-                                +Math.round(processingTimeTotal/processingCountTotal)
-                                +' ('+Math.round(processingSinceDataStartTimeTotal/processingCountTotal)
-                                +' data start, '+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
-                                +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
-                                +' img load) at a count of '+processingCountTotal);
-                            console.log('WEBREQ: Finishing '+details.requestId);
-                        } else {
-                            for(let i=0; i<allData.length; i++) {
-                                filter.write(allData[i]);
-                            }
-                            filter.close();
-                            console.log('WEBREQ: Finishing '+details.requestId);
-                        }
-                    }
-                    img.src = url;
-                } else {
-                    console.log('WEBREQ: tiny, skipping materialization '+details.requestId+' with '+byteCount+' bytes');
-                    for(let i=0; i<allData.length; i++) {
-                        filter.write(allData[i]);
-                    }
-                    filter.close();
-                    console.log('WEBREQ: Finishing '+details.requestId);
-                }
-            } catch(e) {
-                console.log('WEBREQ: Error for '+details.url+': '+e)
-                for(let i=0; i<allData.length; i++) {
-                    filter.write(allData[i]);
-                }
-                filter.close();
-            }
-        };
-
-        console.log('QUEUE: queuing '+details.requestId);
-        capturedWorkQueue[details.requestId] = capturedWork;
-
-        let doOneJob = async () => {
-            let lowestRequest = 10000000;
-            let remainingWorkCount = 0;
-            for(let key in capturedWorkQueue) {
-                if (capturedWorkQueue.hasOwnProperty(key)) { 
-                    remainingWorkCount++;
-                    if(key < lowestRequest) {
-                        lowestRequest = key;
-                    }
-                }
-            }
-            console.log('QUEUE: dequeuing '+lowestRequest);
-            let work = capturedWorkQueue[lowestRequest];
-            await work();
-            delete capturedWorkQueue[lowestRequest];
-            console.log('QUEUE: remaining: '+(remainingWorkCount-1));
-        };
-        await doOneJob();
+        openFilters[details.requestId] = filter;
+        processor.postMessage({
+            type: 'onstop',
+            requestId: details.requestId
+        });
     }
     return details;
   }
@@ -932,3 +892,4 @@ if(wingman !== null) {
     updateFromSettings();
     setEnabled(true); //always start on
 }
+
