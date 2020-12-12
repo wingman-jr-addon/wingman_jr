@@ -161,10 +161,17 @@ async function common_create_svg(img, threshold, dataURL)
     return svgText;
 }
 
-function isSafe(sqrxrScore) {
-    //TODO zone stuff is not plumbed in
-    return sqrxrScore[0] < 0.9977756;
+let _checkThreshold = 0.9977756;
+
+function setThreshold(threshold) {
+    _checkThreshold = threshold;
 }
+
+function isSafe(sqrxrScore) {
+    return sqrxrScore[0] < _checkThreshold;
+}
+
+
 
 const loadImagePromise = url => new Promise( resolve => {
     const img = new Image()
@@ -182,7 +189,7 @@ async function performFiltering(entry) {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
-        wasSafe: null
+        result: null
     };
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
@@ -209,7 +216,7 @@ async function performFiltering(entry) {
                 }
                 if(isSafe(sqrxrScore)) {
                     console.log('ML: Passed: '+sqrxrScore[0]+' '+entry.requestId);
-                    result.wasSafe = true
+                    result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
                 } else {
                     console.log('ML: Blocked: '+sqrxrScore[0]+' '+entry.requestId);
@@ -217,6 +224,7 @@ async function performFiltering(entry) {
                     common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
+                    result.result = 'block';
                     result.imageBytes = encodedTypedBuffer.buffer;
                 }
                 const endTime = performance.now();
@@ -237,10 +245,12 @@ async function performFiltering(entry) {
                 console.log('WEBREQ: Finishing '+entry.requestId);
             }
         } else {
+            result.result = 'tiny';
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
         console.log('WEBREQP: Error for '+details.url+': '+e);
+        result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
         console.log('WEBREQP: Finishing '+entry.requestId);
@@ -311,10 +321,18 @@ async function completeB64Filtering(b64Filter, outputPort) {
                     let unsafeScore = sqrxrScore[0];
                     let replacement = null; //safe
                     if(isSafe(sqrxrScore)) {
-                        //incrementPassCount();
+                        outputPort.postMessage({
+                            type:'stat',
+                            result:'pass',
+                            requestId: b64Filter.requestId+'_'+imageId
+                        });
                         console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+b64Filter.requestId);
                     } else {
-                        //incrementBlockCount();
+                        outputPort.postMessage({
+                            type:'stat',
+                            result:'block',
+                            requestId: b64Filter.requestId+'_'+imageId
+                        });
                         let svgText = await common_create_svg(img,unsafeScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
                         common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
@@ -331,11 +349,21 @@ async function completeB64Filtering(b64Filter, outputPort) {
                         imageToOutput = replacement;
                     }
                 } else {
+                    outputPort.postMessage({
+                        type:'stat',
+                        result:'tiny',
+                        requestId: b64Filter.requestId+'_'+imageId
+                    });
                     console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
                 }
             }
             catch(e)
             {
+                outputPort.postMessage({
+                    type:'stat',
+                    result:'error',
+                    requestId: b64Filter.requestId+'_'+imageId
+                });
                 console.error('WEBREQ: base64 check failure for '+imageId+': '+e);
             }
             
@@ -382,9 +410,18 @@ async function checkProcess() {
     let toProcess = processingQueue.shift();
     console.log('QUEUE: Processing request '+toProcess.requestId);
     let result = await performFiltering(toProcess);
-    port.postMessage(result);
     inFlight--;
-    await checkProcess(true);
+    try {
+        port.postMessage(result);
+        port.postMessage({
+            type:'stat',
+            result: result.result,
+            requestId: toProcess.requestId
+        });
+    } catch(e) {
+        console.log('ERROR: Processor failed to communicate to background: '+e);
+    }
+    await checkProcess();
 }
 
 port.onMessage.addListener(async function(m) {
@@ -430,6 +467,11 @@ port.onMessage.addListener(async function(m) {
         }
         case 'b64_onstop': {
             await completeB64Filtering(openB64Requests[m.requestId], port);
+        }
+        break;
+        case 'thresholdChange': {
+            console.log('PROC: Setting threshold '+m.threshold);
+            setThreshold(m.threshold);
         }
         break;
         default: {

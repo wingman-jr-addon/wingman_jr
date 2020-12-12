@@ -50,6 +50,21 @@ function onClientConnected(port) {
                 b64Filter.filter.close();
             }
             break;
+            case 'stat': {
+                console.log('STAT: '+m.requestId+' '+m.result);
+                incrementCheckCount();
+                switch(m.result) {
+                    case 'pass': {
+                        incrementPassCount();
+                    }
+                    break;
+                    case 'block': {
+                        incrementBlockCount();
+                    }
+                    //could also be tiny or error
+                }
+            }
+            break;
         }
     });
     if(!isInitialized) {
@@ -66,6 +81,12 @@ function getNextProcessor() {
     currentProcessorIndex = (currentProcessorIndex+1) % connectedClients.length;
     console.log('PERF: Using proc '+currentProcessorIndex);
     return connectedClients[currentProcessorIndex];
+}
+
+function broadcastMessage(m) {
+    connectedClients.forEach(c=>{
+        c.postMessage(m);
+    });
 }
       
 browser.runtime.onConnect.addListener(onClientConnected);
@@ -213,6 +234,10 @@ function setZone(newZone)
     }
     if(didZoneChange) {
         clearPredictionBuffer();
+        broadcastMessage({
+            type:'thresholdChange',
+            threshold: zoneThreshold
+        });
     }
 }
 
