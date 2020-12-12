@@ -251,11 +251,122 @@ async function performFiltering(entry) {
     return result;
 }
 
+async function advanceB64Filtering(dataStr, b64Filter, outputPort) {
+    b64Filter.fullStr += dataStr;
+}
+
+async function completeB64Filtering(b64Filter, outputPort) {
+    let startTime = performance.now();
+    let fullStr = b64Filter.fullStr;
+    console.log('WEBREQ: base64 stop '+fullStr.length);
+
+    //Unfortunately, str.replace cannot accept a promise as a function,
+    //so we simply set 'em up and knock 'em down.
+    //Note there is a funky bit at the end to catch = encoded as \x3d
+    //but we need to exclude e.g. \x22 from showing up inside the match. Ugh.
+    //However, we also must allow '\/' to show up, making for a nasty two character
+    //allowed sequence when the rest are single chars up to the end. Double ugh.
+    let dataURIMatcher = /data:image\\{0,2}\/[a-z]+;base64,([A-Za-z0-9=+\/ \-]|\\\/)+(\\x3[dD])*/g;
+    let endOfLastImage = 0;
+    let result;
+    while((result = dataURIMatcher.exec(fullStr))!==null) {
+        //We found an image. We can output from the end of the last image
+        //until the start of this one to start with.
+        let inBetweenStr = fullStr.substring(endOfLastImage, result.index);
+        outputPort.postMessage({
+            type: 'b64_data',
+            requestId: b64Filter.requestId,
+            dataStr: inBetweenStr
+        });
+        endOfLastImage = result.index + result[0].length;
+
+        //Now check the image and either output the original or the replacement
+        let rawImageDataURI = result[0];
+        //Note we now have move \x3d's into ='s for proper base64 decoding
+        let imageDataURI = rawImageDataURI;
+        let wasJSEncoded = imageDataURI.startsWith('data:image\\/'); //Unencoded, data:image\\/
+        let prefixId = imageDataURI.slice(0,20);
+        if(wasJSEncoded) {
+            imageDataURI = imageDataURI.replace(/\\/g,''); //Unencoded, \ -> ''
+            let newPrefixId = imageDataURI.slice(0,20);
+            console.log('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
+        } else {
+            console.log('WEBREQ: base64 image no extra encoding detected: '+prefixId);
+        }
+        imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
+        let imageToOutput = imageDataURI;
+        let imageId = imageDataURI.slice(-20);
+        console.debug('WEBREQ: base64 image loading: '+imageId);
+        let byteCount = imageDataURI.length*3/4;
+
+        if(byteCount >= MIN_IMAGE_BYTES) {
+            console.log('WEBREQ: base64 image loaded: '+imageId);
+            try
+            {
+                let img = await loadImagePromise(imageDataURI);
+                if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
+                    console.log('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                    let sqrxrScore = await predict(img);
+                    console.log('ML: base64 score: '+sqrxrScore);
+                    let unsafeScore = sqrxrScore[0];
+                    let replacement = null; //safe
+                    if(isSafe(sqrxrScore)) {
+                        //incrementPassCount();
+                        console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+b64Filter.requestId);
+                    } else {
+                        //incrementBlockCount();
+                        let svgText = await common_create_svg(img,unsafeScore,img.src);
+                        let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
+                        common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
+                        replacement = svgURI;
+                    }
+
+                    const totalTime = performance.now() - startTime;
+                    console.log(`PERF: Total processing in ${Math.floor(totalTime)}ms`);
+                    if(replacement !== null) {
+                        if(wasJSEncoded) {
+                            console.log('WEBREQ: base64 JS encoding replacement fixup for '+imageId);
+                            replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
+                        }
+                        imageToOutput = replacement;
+                    }
+                } else {
+                    console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
+                }
+            }
+            catch(e)
+            {
+                console.error('WEBREQ: base64 check failure for '+imageId+': '+e);
+            }
+            
+        }
+
+        outputPort.postMessage({
+            type: 'b64_data',
+            requestId: b64Filter.requestId,
+            dataStr: imageToOutput
+        });
+    }
+    
+    //Now flush the last part
+    let finalNonImageChunk = fullStr.substring(endOfLastImage);
+    outputPort.postMessage({
+        type: 'b64_data',
+        requestId: b64Filter.requestId,
+        dataStr: finalNonImageChunk
+    });
+    outputPort.postMessage({
+        type: 'b64_close',
+        requestId: b64Filter.requestId
+    });
+}
+
 wingman_startup();
 
 let port = browser.runtime.connect();
 
 let openRequests = {};
+let openB64Requests = {};
 let processingQueue = [];
 let inFlight = 0;
 async function checkProcess() {
@@ -302,5 +413,28 @@ port.onMessage.addListener(async function(m) {
             delete openRequests[m.requestId];
             await checkProcess();
         }
+        case 'b64_start': {
+            openB64Requests[m.requestId] = {
+                requestId: m.requestId,
+                startTime: performance.now(),
+                fullStr: ''
+            };
+        }
+        break;
+        case 'b64_ondata': {
+            await advanceB64Filtering(m.dataStr, openB64Requests[m.requestId], port);
+        }
+        break;
+        case 'b64_onerror': {
+            delete openB64Filters[m.requestId];
+        }
+        case 'b64_onstop': {
+            await completeB64Filtering(openB64Requests[m.requestId], port);
+        }
+        break;
+        default: {
+            console.error('ERROR: received unknown message: '+m);
+        }
+        break;
     }
 });
