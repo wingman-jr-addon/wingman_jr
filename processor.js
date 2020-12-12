@@ -34,9 +34,6 @@ const wingman_startup = async () => {
     warmup_result.print();
     warmup_result.dispose();
     console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
-    browser.browserAction.setTitle({title: "Wingman Jr."});
-    browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
-
 };
 
 
@@ -389,9 +386,13 @@ async function completeB64Filtering(b64Filter, outputPort) {
     });
 }
 
-wingman_startup();
-
-let port = browser.runtime.connect();
+let port = null;
+wingman_startup()
+.then(()=>
+{
+    port = browser.runtime.connect();
+    port.onMessage.addListener(onPortMessage);
+});
 
 let openRequests = {};
 let openB64Requests = {};
@@ -424,7 +425,7 @@ async function checkProcess() {
     await checkProcess();
 }
 
-port.onMessage.addListener(async function(m) {
+async function onPortMessage(m) {
     switch(m.type) {
         case 'start': {
             openRequests[m.requestId] = {
@@ -479,4 +480,4 @@ port.onMessage.addListener(async function(m) {
         }
         break;
     }
-});
+}

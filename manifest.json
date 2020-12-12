@@ -15,8 +15,6 @@
   
     "background": {
       "scripts": [
-          "tfjs_2.7.0.js",
-          "tf-backend-wasm.js",
           "roc.js",
           "dns_blocking.js",
           "background.js"
