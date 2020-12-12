@@ -166,9 +166,16 @@ function isSafe(sqrxrScore) {
     return sqrxrScore[0] < 0.9977756;
 }
 
+const loadImagePromise = url => new Promise( resolve => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.decoding = 'sync'
+    img.src = url
+});
+
 let timingInfoDumpCount = 0;
 
-async function performFiltering(entry, responsePort) {
+async function performFiltering(entry) {
     let dataEndTime = performance.now();
     console.log('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
     let result = {
@@ -187,74 +194,61 @@ async function performFiltering(entry, responsePort) {
     {
         if(byteCount >= MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
             url = URL.createObjectURL(blob);
-            let img = new Image();
-
-            img.onload = async function(e) {
-                console.log('img loaded '+entry.requestId)
-                if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                    console.log('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                    let imgLoadTime = performance.now();
-                    let sqrxrScore = [0];
-                    if(timingInfoDumpCount<10) {
-                        timingInfoDumpCount++;
-                        let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
-                        console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
-                    } else {
-                        sqrxrScore = await predict(img);
-                    }
-                    if(isSafe(sqrxrScore)) {
-                        console.log('ML: Passed: '+sqrxrScore[0]+' '+entry.requestId);
-                        result.wasSafe = true
-                        result.imageBytes = await blob.arrayBuffer();
-                    } else {
-                        console.log('ML: Blocked: '+sqrxrScore[0]+' '+entry.requestId);
-                        let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
-                        common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
-                        let encoder = new TextEncoder();
-                        let encodedTypedBuffer = encoder.encode(svgText);
-                        result.imageBytes = encodedTypedBuffer.buffer;
-                    }
-                    const endTime = performance.now();
-                    const totalTime = endTime - entry.startTime;
-                    const totalSinceDataEndTime = endTime - dataEndTime;
-                    const totalSinceImageLoadTime = endTime - imgLoadTime;
-                    processingTimeTotal += totalTime;
-                    processingSinceDataEndTimeTotal += totalSinceDataEndTime;
-                    processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
-                    processingCountTotal++;
-                    console.log('PERF: Processed in '+totalTime
-                        +' (' +totalSinceDataEndTime+' data end, '
-                        +totalSinceImageLoadTime+' img load) with an avg of '
-                        +Math.round(processingTimeTotal/processingCountTotal)
-                        +' ('+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
-                        +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
-                        +' img load) at a count of '+processingCountTotal);
-                    console.log('WEBREQ: Finishing '+entry.requestId);
+            let img = await loadImagePromise(url);
+            console.log('img loaded '+entry.requestId)
+            if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
+                console.log('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                let imgLoadTime = performance.now();
+                let sqrxrScore = [0];
+                if(timingInfoDumpCount<10) {
+                    timingInfoDumpCount++;
+                    let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
+                    console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
+                } else {
+                    sqrxrScore = await predict(img);
                 }
-                responsePort.postMessage(result);
-                URL.revokeObjectURL(url);
-                await checkProcess(true);
+                if(isSafe(sqrxrScore)) {
+                    console.log('ML: Passed: '+sqrxrScore[0]+' '+entry.requestId);
+                    result.wasSafe = true
+                    result.imageBytes = await blob.arrayBuffer();
+                } else {
+                    console.log('ML: Blocked: '+sqrxrScore[0]+' '+entry.requestId);
+                    let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
+                    common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
+                    let encoder = new TextEncoder();
+                    let encodedTypedBuffer = encoder.encode(svgText);
+                    result.imageBytes = encodedTypedBuffer.buffer;
+                }
+                const endTime = performance.now();
+                const totalTime = endTime - entry.startTime;
+                const totalSinceDataEndTime = endTime - dataEndTime;
+                const totalSinceImageLoadTime = endTime - imgLoadTime;
+                processingTimeTotal += totalTime;
+                processingSinceDataEndTimeTotal += totalSinceDataEndTime;
+                processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
+                processingCountTotal++;
+                console.log('PERF: Processed in '+totalTime
+                    +' (' +totalSinceDataEndTime+' data end, '
+                    +totalSinceImageLoadTime+' img load) with an avg of '
+                    +Math.round(processingTimeTotal/processingCountTotal)
+                    +' ('+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
+                    +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
+                    +' img load) at a count of '+processingCountTotal);
+                console.log('WEBREQ: Finishing '+entry.requestId);
             }
-            console.log('setting image source '+entry.requestId)
-            img.decoding = 'sync'
-            img.src = url;
         } else {
-            URL.revokeObjectURL(url);
             result.imageBytes = await blob.arrayBuffer();
-            responsePort.postMessage(result);
-            await checkProcess(true);
         }
     } catch(e) {
         console.log('WEBREQP: Error for '+details.url+': '+e);
+        result.imageBytes = result.imageBytes || await blob.arrayBuffer();
+    } finally {
+        console.log('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
             URL.revokeObjectURL(url);
         }
-        result.imageBytes = result.imageBytes || await blob.arrayBuffer();
-        responsePort.postMessage(result);
-        await checkProcess(true);
-    } finally {
-        console.log('WEBREQP: Finishing '+entry.requestId);
     }
+    return result;
 }
 
 wingman_startup();
@@ -264,10 +258,7 @@ let port = browser.runtime.connect();
 let openRequests = {};
 let processingQueue = [];
 let inFlight = 0;
-async function checkProcess(isPostProcessingCheck) {
-    if(isPostProcessingCheck) {
-        inFlight--;
-    }
+async function checkProcess() {
     console.log('QUEUE: In Flight: '+inFlight+' In Queue: '+processingQueue.length);
     if(processingQueue.length == 0) {
         return;
@@ -279,7 +270,10 @@ async function checkProcess(isPostProcessingCheck) {
     inFlight++;
     let toProcess = processingQueue.shift();
     console.log('QUEUE: Processing request '+toProcess.requestId);
-    await performFiltering(toProcess, port);
+    let result = await performFiltering(toProcess);
+    port.postMessage(result);
+    inFlight--;
+    await checkProcess(true);
 }
 
 port.onMessage.addListener(async function(m) {
@@ -306,7 +300,7 @@ port.onMessage.addListener(async function(m) {
         case 'onstop': {
             processingQueue.push(openRequests[m.requestId]);
             delete openRequests[m.requestId];
-            await checkProcess(false);
+            await checkProcess();
         }
     }
 });
