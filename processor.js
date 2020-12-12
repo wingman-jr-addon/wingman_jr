@@ -1,6 +1,3 @@
-let openRequests = {};
-
-
 const MODEL_PATH = 'sqrxr_62_graphopt/model.json'
 const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
@@ -236,7 +233,7 @@ async function performFiltering(entry, responsePort) {
                 }
                 responsePort.postMessage(result);
                 URL.revokeObjectURL(url);
-                
+                await checkProcess(true);
             }
             console.log('setting image source '+entry.requestId)
             img.decoding = 'sync'
@@ -245,6 +242,7 @@ async function performFiltering(entry, responsePort) {
             URL.revokeObjectURL(url);
             result.imageBytes = await blob.arrayBuffer();
             responsePort.postMessage(result);
+            await checkProcess(true);
         }
     } catch(e) {
         console.log('WEBREQP: Error for '+details.url+': '+e);
@@ -253,6 +251,7 @@ async function performFiltering(entry, responsePort) {
         }
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
         responsePort.postMessage(result);
+        await checkProcess(true);
     } finally {
         console.log('WEBREQP: Finishing '+entry.requestId);
     }
@@ -261,6 +260,28 @@ async function performFiltering(entry, responsePort) {
 wingman_startup();
 
 let port = browser.runtime.connect();
+
+let openRequests = {};
+let processingQueue = [];
+let inFlight = 0;
+async function checkProcess(isPostProcessingCheck) {
+    if(isPostProcessingCheck) {
+        inFlight--;
+    }
+    console.log('QUEUE: In Flight: '+inFlight+' In Queue: '+processingQueue.length);
+    if(processingQueue.length == 0) {
+        return;
+    }
+    if(inFlight > 1) {
+        console.log('QUEUE: Throttling ('+inFlight+')');
+        return;
+    }
+    inFlight++;
+    let toProcess = processingQueue.shift();
+    console.log('QUEUE: Processing request '+toProcess.requestId);
+    await performFiltering(toProcess, port);
+}
+
 port.onMessage.addListener(async function(m) {
     switch(m.type) {
         case 'start': {
@@ -274,6 +295,7 @@ port.onMessage.addListener(async function(m) {
         }
         break;
         case 'ondata': {
+            console.log('DATA: '+m.requestId);
             openRequests[m.requestId].buffers.push(m.data);
         }
         break;
@@ -282,9 +304,9 @@ port.onMessage.addListener(async function(m) {
         }
         break;
         case 'onstop': {
-            let result = await performFiltering(openRequests[m.requestId], port);
+            processingQueue.push(openRequests[m.requestId]);
             delete openRequests[m.requestId];
-            port.postMessage(result);
+            await checkProcess(false);
         }
     }
 });
