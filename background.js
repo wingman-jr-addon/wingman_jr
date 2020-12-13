@@ -111,7 +111,7 @@ function onProcessorMessage(m) {
             filter.write(m.imageBytes);
             filter.close();
             delete openFilters[m.requestId];
-            console.log('OPEN FILTERS: '+openFilters.keys().length);
+            console.log('OPEN FILTERS: '+Object.keys(openFilters).length);
         }
         break;
         case 'b64_data': {
