@@ -15,7 +15,9 @@ const wingman_startup = async () => {
     let params = (new URL(document.location)).searchParams;
     let backendRequested = params.get('backend');
     console.log('LIFECYCLE: Backend requested '+backendRequested);
-    tf.setBackend(backendRequested || 'wasm');
+    if(backendRequested != 'default') {
+        tf.setBackend(backendRequested || 'wasm');
+    }
     console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
@@ -50,7 +52,7 @@ let inferenceCountTotal = 0;
 let inferenceCanvas = document.createElement('canvas');
 inferenceCanvas.width = IMAGE_SIZE;
 inferenceCanvas.height = IMAGE_SIZE;
-let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false, powerPreference: 'high-performance'});
+let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
 console.log('LIFECYCLE: Inference context: '+inferenceCtx);
 inferenceCtx.imageSmoothingEnabled = true;
 
@@ -245,6 +247,9 @@ async function performFiltering(entry) {
                     +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
                     +' img load) at a count of '+processingCountTotal);
                 console.log('WEBREQ: Finishing '+entry.requestId);
+            } else {
+                result.result = 'tiny';
+                result.imageBytes = await blob.arrayBuffer();
             }
         } else {
             result.result = 'tiny';
@@ -493,7 +498,7 @@ async function onPortMessage(m) {
 let port = null;
 let processorId = (new URL(document.location)).searchParams.get('id');
 wingman_startup()
-.then(()=>
+.then(async ()=>
 {
     port = browser.runtime.connect(browser.runtime.id, {name:processorId});
     port.onMessage.addListener(onPortMessage);

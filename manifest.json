@@ -10,7 +10,8 @@
       "<all_urls>",
       "menus",
       "proxy",
-      "storage"
+      "storage",
+      "tabHide"
     ],
   
     "background": {

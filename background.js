@@ -32,6 +32,7 @@ function onClientConnected(port) {
     connectedClientList.push(registration);
     console.log('LIFECYCLE: There are now '+connectedClientList.length+' processors');
     port.onMessage.addListener(onProcessorMessage);
+    notifyThreshold();
     if(!isInitialized) {
         isInitialized = true;
         initialize();
@@ -88,13 +89,14 @@ function getAcceleratedProcessor() {
 }
 
 function broadcastMessage(m) {
-    connectedClients.forEach(c=>{
-        c.postMessage(m);
+    connectedClientList.forEach(c=>{
+        c.port.postMessage(m);
     });
 }
       
 browser.runtime.onConnect.addListener(onClientConnected);
-browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-1'});
+browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: false})
+    .then(async tab=>await browser.tabs.hide(tab.id));
 //browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
@@ -109,7 +111,7 @@ function onProcessorMessage(m) {
             filter.write(m.imageBytes);
             filter.close();
             delete openFilters[m.requestId];
-            console.log('OPEN FILTERS: '+openFilters.length);
+            console.log('OPEN FILTERS: '+openFilters.keys().length);
         }
         break;
         case 'b64_data': {
@@ -157,12 +159,14 @@ let blockCount = 0;
 let passCount = 0;
 let checkCount = 0;
 function updateStatVisuals() {
-    if (blockCount > 0) {
+    if(blockCount > 0) {
         let txt = (blockCount < 1000) ? blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
-        browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' total images\r\n'+
-        'Blocked '+Math.round(100*estimatedTruePositivePercentage)+'% of the last '+predictionBuffer.length+' in this zone' });
     }
+    let openRequestIds = Object.keys(openFilters);
+    browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' total images\r\n'+
+    'Blocked '+Math.round(100*estimatedTruePositivePercentage)+'% of the last '+predictionBuffer.length+' in this zone\r\n'+
+    openRequestIds.length +' open requests: '+openRequestIds });
 }
 
 var isZoneAutomatic = true;
@@ -290,11 +294,16 @@ function setZone(newZone)
     }
     if(didZoneChange) {
         clearPredictionBuffer();
-        broadcastMessage({
-            type:'thresholdChange',
-            threshold: zoneThreshold
-        });
+        console.log('CONFIG: Threshold change '+zoneThreshold);
+        notifyThreshold();
     }
+}
+
+function notifyThreshold() {
+    broadcastMessage({
+        type:'thresholdChange',
+        threshold: zoneThreshold
+    });
 }
 
 function isSafe(sqrxrScore)
