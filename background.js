@@ -12,7 +12,8 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 
-var connectedClients = [];
+let connectedClients = {};
+let connectedClientList = [];
 let openFilters = {};
 let openB64Filters = {};
 
@@ -25,48 +26,12 @@ function initialize() {
 }
 
 function onClientConnected(port) {
-    connectedClients.push(port);
-    console.log('LIFECYCLE: There are now '+connectedClients.length+' processors');
-    port.onMessage.addListener(function(m) {
-        switch(m.type) {
-            case 'scan': {
-                console.log('PROC: '+m);
-                console.dir(m);
-                let filter = openFilters[m.requestId];
-                filter.write(m.imageBytes);
-                filter.close();
-                delete openFilters[m.requestId];
-                console.log('OPEN FILTERS: '+openFilters.length);
-            }
-            break;
-            case 'b64_data': {
-                let b64Filter = openB64Filters[m.requestId];
-                let b64Text = b64Filter.encoder.encode(m.dataStr);
-                b64Filter.filter.write(b64Text);
-            }
-            break;
-            case 'b64_close': {
-                let b64Filter = openB64Filters[m.requestId];
-                b64Filter.filter.close();
-            }
-            break;
-            case 'stat': {
-                console.log('STAT: '+m.requestId+' '+m.result);
-                incrementCheckCount();
-                switch(m.result) {
-                    case 'pass': {
-                        incrementPassCount();
-                    }
-                    break;
-                    case 'block': {
-                        incrementBlockCount();
-                    }
-                    //could also be tiny or error
-                }
-            }
-            break;
-        }
-    });
+    console.log('LIFECYCLE: Processor '+port.name+' connected.');
+    let registration = { port: port, processorId: port.name, isBusy: false, backend: 'unknown' };
+    connectedClients[port.name] = registration;
+    connectedClientList.push(registration);
+    console.log('LIFECYCLE: There are now '+connectedClientList.length+' processors');
+    port.onMessage.addListener(onProcessorMessage);
     if(!isInitialized) {
         isInitialized = true;
         initialize();
@@ -75,12 +40,51 @@ function onClientConnected(port) {
 
 let currentProcessorIndex = 0;
 function getNextProcessor() {
-    if(connectedClients.length == 0) {
+    if(connectedClientList.length == 0) {
         return null;
     }
-    currentProcessorIndex = (currentProcessorIndex+1) % connectedClients.length;
-    console.log('PERF: Using proc '+currentProcessorIndex);
-    return connectedClients[currentProcessorIndex];
+    currentProcessorIndex = (currentProcessorIndex+1) % connectedClientList.length;
+    let preferredProcessor = connectedClientList[currentProcessorIndex];
+    if (preferredProcessor.isBusy) {
+        //Are any free? If so, return next one.
+        for(let i=1; i<connectedClientList.length; i++) {
+            let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
+            let processor = connectedClientList[pIndex];
+            if(!processor.isBusy) {
+                console.log('PERF: Choosing free processor '+processor.processorId);
+                return processor;
+            }
+        }
+        //Are any WebGL? If so, return next one.
+        for(let i=1; i<connectedClientList.length; i++) {
+            let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
+            let processor = connectedClientList[pIndex];
+            if(processor.backend == 'webgl') {
+                console.log('PERF: Choosing webgl processor '+processor.processorId);
+                return processor;
+            }
+        }
+    }
+    console.log('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
+    return preferredProcessor;
+}
+
+function getAcceleratedProcessor() {
+    if(connectedClientList.length == 0) {
+        return null;
+    }
+    currentProcessorIndex = (currentProcessorIndex+1) % connectedClientList.length;
+    //Are any WebGL? If so, return next one.
+    for(let i=1; i<connectedClientList.length; i++) {
+        let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
+        let processor = connectedClientList[pIndex];
+        if(processor.backend == 'webgl') {
+            console.log('PERF: Accelerated choosing webgl processor '+processor.processorId);
+            return processor;
+        }
+    }
+    //fallback
+    return getNextProcessor();
 }
 
 function broadcastMessage(m) {
@@ -90,9 +94,61 @@ function broadcastMessage(m) {
 }
       
 browser.runtime.onConnect.addListener(onClientConnected);
-browser.tabs.create({url:'/processor.html'})
-//browser.tabs.create({url:'/processor.html'})
+browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-1'});
+//browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
+//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
+//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
 
+
+function onProcessorMessage(m) {
+    switch(m.type) {
+        case 'scan': {
+            console.log('PROC: '+m);
+            console.dir(m);
+            let filter = openFilters[m.requestId];
+            filter.write(m.imageBytes);
+            filter.close();
+            delete openFilters[m.requestId];
+            console.log('OPEN FILTERS: '+openFilters.length);
+        }
+        break;
+        case 'b64_data': {
+            let b64Filter = openB64Filters[m.requestId];
+            let b64Text = b64Filter.encoder.encode(m.dataStr);
+            b64Filter.filter.write(b64Text);
+        }
+        break;
+        case 'b64_close': {
+            let b64Filter = openB64Filters[m.requestId];
+            b64Filter.filter.close();
+        }
+        break;
+        case 'stat': {
+            console.log('STAT: '+m.requestId+' '+m.result);
+            incrementCheckCount();
+            switch(m.result) {
+                case 'pass': {
+                    incrementPassCount();
+                }
+                break;
+                case 'block': {
+                    incrementBlockCount();
+                }
+                //could also be tiny or error
+            }
+        }
+        break;
+        case 'registration': {
+            connectedClients[m.processorId].backend = m.backend;
+        }
+        break;
+        case 'qos': {
+            console.log('QOS: '+m.processorId+' isBusy: '+m.isBusy);
+            connectedClients[m.processorId].isBusy = m.isBusy;
+        }
+        break;
+    }
+}
 
 
 //Note: checks can occur that fail and do not result in either a block or a pass.
@@ -283,7 +339,7 @@ async function listener(details, shouldBlockSilently=false) {
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
-    let processor = getNextProcessor();
+    let processor = getNextProcessor().port;
     processor.postMessage({
         type: 'start',
         requestId : details.requestId,
@@ -419,7 +475,8 @@ async function base64_listener(details) {
     };
     openB64Filters[details.requestId] = b64Filter;
 
-    let processor = getNextProcessor();
+    //Choose highest power here because we have many images possibly
+    let processor = getAcceleratedProcessor().port; 
     processor.postMessage({
         type: 'b64_start',
         requestId : details.requestId

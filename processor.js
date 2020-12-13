@@ -9,12 +9,17 @@ function onModelLoadProgress(percentage) {
 
 let isInReviewMode = false;
 let wingman;
+let loadedBackend;
 const wingman_startup = async () => {
     console.log('LIFECYCLE: Launching TF.js!');
+    let params = (new URL(document.location)).searchParams;
+    let backendRequested = params.get('backend');
+    console.log('LIFECYCLE: Backend requested '+backendRequested);
+    tf.setBackend(backendRequested || 'wasm');
     console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
-    let loadedBackend = tf.getBackend();
+    loadedBackend = tf.getBackend();
     console.log('LIFECYCLE: TensorflowJS backend is: '+loadedBackend);
     if(loadedBackend == 'cpu') {
         console.log('LIFECYCLE: WARNING! Exiting because no fast predictor can be loaded!');
@@ -386,14 +391,6 @@ async function completeB64Filtering(b64Filter, outputPort) {
     });
 }
 
-let port = null;
-wingman_startup()
-.then(()=>
-{
-    port = browser.runtime.connect();
-    port.onMessage.addListener(onPortMessage);
-});
-
 let openRequests = {};
 let openB64Requests = {};
 let processingQueue = [];
@@ -401,6 +398,11 @@ let inFlight = 0;
 async function checkProcess() {
     console.log('QUEUE: In Flight: '+inFlight+' In Queue: '+processingQueue.length);
     if(processingQueue.length == 0) {
+        port.postMessage({
+            type: 'qos',
+            processorId: processorId,
+            isBusy: false
+        })
         return;
     }
     if(inFlight > 1) {
@@ -408,6 +410,11 @@ async function checkProcess() {
         return;
     }
     inFlight++;
+    port.postMessage({
+        type: 'qos',
+        processorId: processorId,
+        isBusy: true
+    })
     let toProcess = processingQueue.shift();
     console.log('QUEUE: Processing request '+toProcess.requestId);
     let result = await performFiltering(toProcess);
@@ -435,6 +442,7 @@ async function onPortMessage(m) {
                 startTime: performance.now(),
                 buffers: []
             };
+            console.log('PERF: '+processorId+' has open requests queue size '+Object.keys(openRequests).length);
         }
         break;
         case 'ondata': {
@@ -481,3 +489,17 @@ async function onPortMessage(m) {
         break;
     }
 }
+
+let port = null;
+let processorId = (new URL(document.location)).searchParams.get('id');
+wingman_startup()
+.then(()=>
+{
+    port = browser.runtime.connect(browser.runtime.id, {name:processorId});
+    port.onMessage.addListener(onPortMessage);
+    port.postMessage({
+        type: 'registration',
+        processorId: processorId,
+        backend: loadedBackend
+    });
+});
