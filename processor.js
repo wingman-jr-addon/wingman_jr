@@ -410,7 +410,7 @@ async function checkProcess() {
         })
         return;
     }
-    if(inFlight > 1) {
+    if(inFlight > 0) { //Note, if increasing, consider inference context reuse strategy!
         console.log('QUEUE: Throttling ('+inFlight+')');
         return;
     }
