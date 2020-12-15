@@ -333,6 +333,10 @@ async function listener(details, shouldBlockSilently=false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
+    if (isWhitelisted(details.url)) {
+        console.log('WEBREQ: Normal whitelist '+details.url);
+        return;
+    }
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -398,6 +402,10 @@ async function direct_typed_url_listener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
+    if (isWhitelisted(details.url)) {
+        console.log('WEBREQ: Direct typed whitelist '+details.url);
+        return;
+    }
     //Try to see if there is an image MIME type
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -461,6 +469,10 @@ function refreshDnsBlocking() {
 // "above the fold" image search requests in Google Images
 async function base64_listener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
+    if (isWhitelisted(details.url)) {
+        console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
     console.log('WEBREQ: base64 headers '+details.requestId+' '+details.url);
