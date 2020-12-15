@@ -61,11 +61,13 @@ let processingSinceDataEndTimeTotal = 0;
 let processingSinceImageLoadTimeTotal = 0;
 let processingCountTotal = 0;
 
-async function predict(imgElement) {
-
+async function predict(imgElement, ctx) {
+  if(ctx === undefined) {
+      ctx = inferenceCtx;
+  }
   const drawStartTime = performance.now();
-  inferenceCtx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
-  const rightSizeImageData = inferenceCtx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
+  ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
+  const rightSizeImageData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
   const totalDrawTime = performance.now() - drawStartTime;
   console.log(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
@@ -398,6 +400,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
 
 let openRequests = {};
 let openB64Requests = {};
+let openVidRequests = {};
 let processingQueue = [];
 let inFlight = 0;
 async function checkProcess() {
@@ -435,6 +438,17 @@ async function checkProcess() {
         console.log('ERROR: Processor failed to communicate to background: '+e);
     }
     await checkProcess();
+}
+
+let videoCanvas = document.createElement('canvas');
+videoCanvas.width = IMAGE_SIZE;
+videoCanvas.height = IMAGE_SIZE;
+let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
+console.log('LIFECYCLE: Inference context: '+videoCtx);
+videoCtx.imageSmoothingEnabled = true;
+
+async function isVideoSafe(buffers) {
+    return true;
 }
 
 async function onPortMessage(m) {
@@ -481,6 +495,52 @@ async function onPortMessage(m) {
         }
         case 'b64_onstop': {
             await completeB64Filtering(openB64Requests[m.requestId], port);
+        }
+        break;
+        case 'vid_start': {
+            openVidRequests[m.requestId] = {
+                requestId: m.requestId,
+                url: m.url,
+                mimeType: m.mimeType,
+                buffers: [],
+                isComplete: false,
+                totalSize: 0
+            };
+        }
+        case 'vid_ondata': {
+            console.log('DATAV: '+m.requestId);
+            let vidFilter = openVidRequests[m.requestId];
+            if(vidFilter === undefined) {
+                break;
+            }
+            vidFilter.buffers.push(m.data);
+            vidFilter.totalSize += m.data.byteLength;
+            if(vidFilter.totalSize >= 1024*1024) {
+                port.postMessage({
+                    type: 'vid_scan',
+                    requestId: vidFilter.requestId,
+                    status: 'pass'
+                });
+                delete openVidRequests[m.requestId];
+            }
+        }
+        break;
+        case 'vid_onerror': {
+            delete openVidRequests[m.requestId];
+        }
+        break;
+        case 'vid_onstop': {
+            console.log('DATAV: vid_onstop'+m.requestId);
+            let vidFilter = openVidRequests[m.requestId];
+            if(vidFilter === undefined) {
+                break;
+            }
+            port.postMessage({
+                type: 'vid_scan',
+                requestId: vidFilter.requestId,
+                status: 'pass'
+            });
+            delete openVidRequests[m.requestId];
         }
         break;
         case 'thresholdChange': {

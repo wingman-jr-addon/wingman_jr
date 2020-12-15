@@ -16,6 +16,7 @@ let connectedClients = {};
 let connectedClientList = [];
 let openFilters = {};
 let openB64Filters = {};
+let openVidFilters = {};
 
 let isInitialized = false;
 function initialize() {
@@ -123,6 +124,19 @@ function onProcessorMessage(m) {
         case 'b64_close': {
             let b64Filter = openB64Filters[m.requestId];
             b64Filter.filter.close();
+            delete openB64Filters[m.requestId];
+        }
+        break;
+        case 'vid_scan': {
+            let vidFilter = openVidFilters[m.requestId];
+            console.log('WEBREQV: video result '+vidFilter.requestId+' was '+m.status);
+            if(m.status == 'block') {
+                vidFilter.close();
+            } else {
+                vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
+                vidFilter.filter.disconnect();
+            }
+            delete openVidFilters[m.requestId];
         }
         break;
         case 'stat': {
@@ -421,8 +435,15 @@ async function direct_typed_url_listener(details) {
 }
 
 ///////////////////////////////////////////////// Video ////////////////////////////////////////////////////////////////
-async function video_listener(details, shouldBlockSilently=false) {
+
+// The video listener behaves a bit differently in that it both queues up the data locally as well
+// as passes it to the processor until it hears back a response.
+async function video_listener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
+    if (isWhitelisted(details.url)) {
+        console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -430,9 +451,6 @@ async function video_listener(details, shouldBlockSilently=false) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-type") {
             mimeType = header.value;
-            if(!shouldBlockSilently) {
-                header.value = 'image/svg+xml';
-            }
             break;
         }
     }
@@ -449,20 +467,25 @@ async function video_listener(details, shouldBlockSilently=false) {
         }
     }
 
-    console.log('WEBREQ: video start headers '+details.requestId);
+    console.log('WEBREQV: video start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
-    /*
     let processor = getNextProcessor().port;
     processor.postMessage({
-        type: 'start',
+        type: 'vid_start',
         requestId : details.requestId,
+        url: details.url,
         mimeType: mimeType,
         url: details.url
     });
-    */
 
+    let vidFilter = {
+        requestId: details.requestId,
+        filter: filter,
+        buffers: []
+    };
+    openVidFilters[details.requestId] = vidFilter;
     let totalSize = 0;
   
     filter.ondata = event => {
@@ -470,27 +493,25 @@ async function video_listener(details, shouldBlockSilently=false) {
             dataStartTime = performance.now();
         }
         console.log('WEBREQV: video data '+details.requestId+' size '+event.data.byteLength);
-        /*
+        totalSize += event.data.byteLength;
+        vidFilter.buffers.push(event.data);
+        
         processor.postMessage({ 
-            type: 'ondata',
+            type: 'vid_ondata',
             requestId: details.requestId,
             data: event.data
         });
-        */
-        totalSize += event.data.byteLength;
-        filter.write(event.data);
+        
     }
 
     filter.onerror = e => {
         try
         {
-            /*
             processor.postMessage({
-                type: 'onerror',
+                type: 'vid_onerror',
                 requestId: details.requestId
             });
-            */
-            filter.close();
+            filter.disconnect();
         }
         catch(ex)
         {
@@ -501,14 +522,10 @@ async function video_listener(details, shouldBlockSilently=false) {
     filter.onstop = async event => {
         let dataStopTime = performance.now();
         console.log('WEBREQV: Video request '+details.requestId+' had '+totalSize+' bytes and took '+(dataStopTime-dataStartTime)+' ms, it had MIME type '+mimeType+' and came from source '+details.type);
-        filter.close();
-        /*
-        openFilters[details.requestId] = filter;
         processor.postMessage({
-            type: 'onstop',
+            type: 'vid_onstop',
             requestId: details.requestId
         });
-        */
     }
     return details;
   }
