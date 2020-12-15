@@ -413,6 +413,99 @@ async function direct_typed_url_listener(details) {
     return details;
 }
 
+///////////////////////////////////////////////// Video ////////////////////////////////////////////////////////////////
+async function video_listener(details, shouldBlockSilently=false) {
+    if (details.statusCode < 200 || 300 <= details.statusCode) {
+        return;
+    }
+    let mimeType = '';
+    for(let i=0; i<details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        if(header.name.toLowerCase() == "content-type") {
+            mimeType = header.value;
+            if(!shouldBlockSilently) {
+                header.value = 'image/svg+xml';
+            }
+            break;
+        }
+    }
+
+    console.log('VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type);
+    let isVideo =  mimeType.startsWith('video/');
+    if(!isVideo) {
+        let isImage = mimeType.startsWith('image/');
+        if(isImage) {
+            console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
+            return listener(details);
+        } else {
+            return;
+        }
+    }
+
+    console.log('WEBREQ: video start headers '+details.requestId);
+    let dataStartTime = null;
+    let filter = browser.webRequest.filterResponseData(details.requestId);
+
+    /*
+    let processor = getNextProcessor().port;
+    processor.postMessage({
+        type: 'start',
+        requestId : details.requestId,
+        mimeType: mimeType,
+        url: details.url
+    });
+    */
+
+    let totalSize = 0;
+  
+    filter.ondata = event => {
+        if (dataStartTime == null) {
+            dataStartTime = performance.now();
+        }
+        console.log('WEBREQV: video data '+details.requestId+' size '+event.data.byteLength);
+        /*
+        processor.postMessage({ 
+            type: 'ondata',
+            requestId: details.requestId,
+            data: event.data
+        });
+        */
+        totalSize += event.data.byteLength;
+        filter.write(event.data);
+    }
+
+    filter.onerror = e => {
+        try
+        {
+            /*
+            processor.postMessage({
+                type: 'onerror',
+                requestId: details.requestId
+            });
+            */
+            filter.close();
+        }
+        catch(ex)
+        {
+            console.log('WEBREQ: Filter video error: '+e+', '+ex);
+        }
+    }
+  
+    filter.onstop = async event => {
+        let dataStopTime = performance.now();
+        console.log('WEBREQV: Video request '+details.requestId+' had '+totalSize+' bytes and took '+(dataStopTime-dataStartTime)+' ms, it had MIME type '+mimeType+' and came from source '+details.type);
+        filter.close();
+        /*
+        openFilters[details.requestId] = filter;
+        processor.postMessage({
+            type: 'onstop',
+            requestId: details.requestId
+        });
+        */
+    }
+    return details;
+  }
+
 ///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
 
 shouldUseDnsBlocking = false;
@@ -656,6 +749,12 @@ function registerAllCallbacks() {
         ["blocking","responseHeaders"]
       );
 
+    browser.webRequest.onHeadersReceived.addListener(
+        video_listener,
+        {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+        ["blocking","responseHeaders"]
+      );
+
       browser.webRequest.onHeadersReceived.addListener(
         base64_listener,
         {
@@ -671,6 +770,7 @@ function registerAllCallbacks() {
 function unregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(listener);
     browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
+    browser.webRequest.onHeadersReceived.removeListener(video_listener);
     browser.webRequest.onHeadersReceived.removeListener(base64_listener);
 }
 
