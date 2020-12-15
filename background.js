@@ -388,7 +388,6 @@ async function listener(details, shouldBlockSilently=false) {
     }
   
     filter.onstop = async event => {
-        incrementCheckCount();
         openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
