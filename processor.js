@@ -440,6 +440,18 @@ async function checkProcess() {
     await checkProcess();
 }
 
+
+const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
+    video.addEventListener('error', e=>reject(e), {once: true});
+    video.addEventListener('seeked',  () => {
+        video.width = video.videoWidth;
+        video.height = video.videoHeight;
+        resolve();
+    } , {once:true});
+    video.src = url
+    video.currentTime = seekTime;
+});
+
 let videoCanvas = document.createElement('canvas');
 videoCanvas.width = IMAGE_SIZE;
 videoCanvas.height = IMAGE_SIZE;
@@ -447,8 +459,45 @@ let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference
 console.log('LIFECYCLE: Inference context: '+videoCtx);
 videoCtx.imageSmoothingEnabled = true;
 
-async function isVideoSafe(buffers) {
-    return true;
+async function getVideoScanStatus(vidFilter) {
+    let inferenceVideo, url, sqrxrScore, status;
+    try {
+        console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize);
+        inferenceVideo = document.createElement('video');
+        //inferenceVideo.type = vidFilter.mimeType;
+        inferenceVideo.autoplay = false;
+
+        let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
+        url = URL.createObjectURL(blob);
+
+        let seekTimes = [0.25, 1.0, 2.5, 5.0, 10.0];
+
+        for(var i=0; i<seekTimes.length; i++) {
+            let seekTime = seekTimes[i];
+            await videoLoadedData(inferenceVideo, url, seekTime);
+
+            console.log('MLV: predicting video '+vidFilter.requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime);
+            
+            sqrxrScore = await predict(inferenceVideo, videoCtx);
+            if(isSafe(sqrxrScore))
+            {
+                status = 'pass';
+            }
+            else
+            {
+                status = 'block';
+                common_log_img(inferenceVideo, 'MLV: BLOCKED VID @'+seekTime+' '+sqrxrScore);
+                break;
+            }
+            console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? '+status+' type '+vidFilter.requestType);
+        }
+    } catch(e) {
+        console.log('MLV: Error scanning '+e);
+        status = 'error';
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+    return status;
 }
 
 async function onPortMessage(m) {
@@ -500,29 +549,40 @@ async function onPortMessage(m) {
         case 'vid_start': {
             openVidRequests[m.requestId] = {
                 requestId: m.requestId,
+                requestType: m.requestType,
                 url: m.url,
                 mimeType: m.mimeType,
                 buffers: [],
-                isComplete: false,
+                hasScanningBegun: false,
                 totalSize: 0
             };
         }
+        break;
         case 'vid_ondata': {
-            console.log('DATAV: '+m.requestId);
+            console.log('DATAV: '+m.requestId+' packet '+m.packetNo);
             let vidFilter = openVidRequests[m.requestId];
             if(vidFilter === undefined) {
                 break;
             }
             vidFilter.buffers.push(m.data);
             vidFilter.totalSize += m.data.byteLength;
-            if(vidFilter.totalSize >= 1024*1024) {
-                port.postMessage({
-                    type: 'vid_scan',
-                    requestId: vidFilter.requestId,
-                    status: 'pass'
-                });
-                delete openVidRequests[m.requestId];
+            
+            if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*1024) {
+                vidFilter.hasScanningBegun = true;
+                let scanStatus = await getVideoScanStatus(vidFilter);
+                if(status != 'error') {
+                    port.postMessage({
+                        type: 'vid_scan',
+                        requestId: vidFilter.requestId,
+                        status: scanStatus
+                    });
+                    delete openVidRequests[m.requestId];
+                } else {
+                    //try it again
+                    vidFilter.hasScanningBegun = false;
+                }
             }
+            
         }
         break;
         case 'vid_onerror': {
@@ -530,15 +590,16 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_onstop': {
-            console.log('DATAV: vid_onstop'+m.requestId);
+            console.log('DATAV: vid_onstop '+m.requestId);
             let vidFilter = openVidRequests[m.requestId];
             if(vidFilter === undefined) {
                 break;
             }
+            let scanStatus = await getVideoScanStatus(vidFilter);
             port.postMessage({
                 type: 'vid_scan',
                 requestId: vidFilter.requestId,
-                status: 'pass'
+                status: scanStatus
             });
             delete openVidRequests[m.requestId];
         }

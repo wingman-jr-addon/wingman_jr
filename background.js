@@ -102,6 +102,9 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
 
+let placeholderArrayBuffer = null;
+fetch('wingman_placeholder.mp4')
+.then(async r => placeholderArrayBuffer = await r.arrayBuffer());
 
 function onProcessorMessage(m) {
     switch(m.type) {
@@ -131,7 +134,8 @@ function onProcessorMessage(m) {
             let vidFilter = openVidFilters[m.requestId];
             console.log('WEBREQV: video result '+vidFilter.requestId+' was '+m.status);
             if(m.status == 'block') {
-                vidFilter.close();
+                vidFilter.filter.write(placeholderArrayBuffer);
+                vidFilter.filter.close();
             } else {
                 vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
                 vidFilter.filter.disconnect();
@@ -475,6 +479,7 @@ async function video_listener(details) {
     processor.postMessage({
         type: 'vid_start',
         requestId : details.requestId,
+        requestType: details.type,
         url: details.url,
         mimeType: mimeType,
         url: details.url
@@ -487,6 +492,7 @@ async function video_listener(details) {
     };
     openVidFilters[details.requestId] = vidFilter;
     let totalSize = 0;
+    let packetCounter = 0;
   
     filter.ondata = event => {
         if (dataStartTime == null) {
@@ -499,9 +505,10 @@ async function video_listener(details) {
         processor.postMessage({ 
             type: 'vid_ondata',
             requestId: details.requestId,
+            packetNo: packetCounter,
             data: event.data
         });
-        
+        packetCounter++;
     }
 
     filter.onerror = e => {
