@@ -452,14 +452,14 @@ const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) =
     video.currentTime = seekTime;
 });
 
-let videoCanvas = document.createElement('canvas');
-videoCanvas.width = IMAGE_SIZE;
-videoCanvas.height = IMAGE_SIZE;
-let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
-console.log('LIFECYCLE: Inference context: '+videoCtx);
-videoCtx.imageSmoothingEnabled = true;
+
 
 async function getVideoScanStatus(vidFilter) {
+    let videoCanvas = document.createElement('canvas');
+    videoCanvas.width = IMAGE_SIZE;
+    videoCanvas.height = IMAGE_SIZE;
+    let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
+    videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, url, sqrxrScore, status;
     try {
         console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize);
@@ -470,10 +470,14 @@ async function getVideoScanStatus(vidFilter) {
         let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
         url = URL.createObjectURL(blob);
 
-        let seekTimes = [0.25, 1.0, 2.5, 5.0, 10.0];
+        let step = 0.5;
+        let initial = 1.0;
+        let stepCount = 10;
+        let blockCount = 0;
+        let blockThreshold = 3;
 
-        for(var i=0; i<seekTimes.length; i++) {
-            let seekTime = seekTimes[i];
+        for(var i=0; i<stepCount; i++) {
+            let seekTime = initial+step*i;
             await videoLoadedData(inferenceVideo, url, seekTime);
 
             console.log('MLV: predicting video '+vidFilter.requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime);
@@ -481,16 +485,17 @@ async function getVideoScanStatus(vidFilter) {
             sqrxrScore = await predict(inferenceVideo, videoCtx);
             if(isSafe(sqrxrScore))
             {
-                status = 'pass';
+                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? pass, type '+vidFilter.requestType);
             }
             else
             {
-                status = 'block';
-                common_log_img(inferenceVideo, 'MLV: BLOCKED VID @'+seekTime+' '+sqrxrScore);
-                break;
+                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? block, type '+vidFilter.requestType);
+                await common_log_img(inferenceVideo, 'MLV: BLOCKED VID @'+seekTime+' '+sqrxrScore);
+                blockCount++;
             }
-            console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? '+status+' type '+vidFilter.requestType);
         }
+        status = blockCount >= blockThreshold ? 'block' : 'pass';
+        console.log('MLV: video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+status+' blocks '+blockCount+'/'+stepCount+' with status');
     } catch(e) {
         console.log('MLV: Error scanning '+e);
         status = 'error';
