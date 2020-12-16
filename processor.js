@@ -470,9 +470,9 @@ async function getVideoScanStatus(vidFilter) {
         let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
         url = URL.createObjectURL(blob);
 
-        let step = 0.5;
-        let initial = 1.0;
-        let stepCount = 10;
+        let step = 0.75;
+        let initial = 0.5;
+        let stepCount = 7;
         let blockCount = 0;
         let blockThreshold = 3;
 
