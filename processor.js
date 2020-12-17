@@ -583,7 +583,7 @@ async function onPortMessage(m) {
             vidFilter.buffers.push(m.data);
             vidFilter.totalSize += m.data.byteLength;
             
-            if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*1024) {
+            if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*300) {
                 vidFilter.hasScanningBegun = true;
                 let scanStatus = await getVideoScanStatus(vidFilter);
                 if(status != 'error') {
