@@ -417,25 +417,36 @@ async function checkProcess() {
         console.log('QUEUE: Throttling ('+inFlight+')');
         return;
     }
-    inFlight++;
-    port.postMessage({
-        type: 'qos',
-        processorId: processorId,
-        isBusy: true
-    })
+    //It is critical that inFlight always goes up AND DOWN, hence all the try/catch action.
     let toProcess = processingQueue.shift();
-    console.log('QUEUE: Processing request '+toProcess.requestId);
-    let result = await performFiltering(toProcess);
-    inFlight--;
-    try {
-        port.postMessage(result);
-        port.postMessage({
-            type:'stat',
-            result: result.result,
-            requestId: toProcess.requestId
-        });
-    } catch(e) {
-        console.log('ERROR: Processor failed to communicate to background: '+e);
+    if(toProcess !== undefined) {
+        inFlight++;
+        let result;
+        try {
+            port.postMessage({
+                type: 'qos',
+                processorId: processorId,
+                isBusy: true
+            })
+            console.log('QUEUE: Processing request '+toProcess.requestId);
+            result = await performFiltering(toProcess);
+            
+        } catch(ex) {
+            console.log('ML: Error scanning image '+ex);
+        }
+        inFlight--;
+        try {
+            port.postMessage(result);
+            port.postMessage({
+                type:'stat',
+                result: result.result,
+                requestId: toProcess.requestId
+            });
+        } catch(e) {
+            console.log('ERROR: Processor failed to communicate to background: '+e);
+        }
+    } else {
+        console.log('QUEUE: Rare time where processing queue drained? Length: '+processingQueue.length);
     }
     await checkProcess();
 }
