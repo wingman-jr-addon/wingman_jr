@@ -179,8 +179,9 @@ function isSafe(sqrxrScore) {
 
 
 
-const loadImagePromise = url => new Promise( resolve => {
+const loadImagePromise = url => new Promise( (resolve, reject) => {
     const img = new Image()
+    img.onerror = e => reject(e)
     img.onload = () => resolve(img)
     img.decoding = 'sync'
     img.src = url
@@ -258,7 +259,7 @@ async function performFiltering(entry) {
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
-        console.log('WEBREQP: Error for '+details.url+': '+e);
+        console.log('WEBREQP: Error for '+entry.url+': '+e);
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
@@ -414,8 +415,13 @@ async function checkProcess() {
         return;
     }
     if(inFlight > 0) { //Note, if increasing, consider inference context reuse strategy!
-        console.log('QUEUE: Throttling ('+inFlight+')');
-        return;
+        if(processingQueue.length > 30) {
+            console.log('QUEUE: Pressure warning! '+processingQueue.length+' Setting inFlight=0');
+            inFlight = 0;
+        } else {
+            console.log('QUEUE: Throttling ('+inFlight+')');
+            return;
+        }
     }
     //It is critical that inFlight always goes up AND DOWN, hence all the try/catch action.
     let toProcess = processingQueue.shift();
@@ -428,13 +434,17 @@ async function checkProcess() {
                 processorId: processorId,
                 isBusy: true
             })
-            console.log('QUEUE: Processing request '+toProcess.requestId);
+            console.log('QUEUE: Processing (inFlight='+inFlight+') request '+toProcess.requestId);
             result = await performFiltering(toProcess);
             
         } catch(ex) {
             console.log('ML: Error scanning image '+ex);
         }
         inFlight--;
+        if(inFlight < 0) {
+            console.log('QUEUE: Recovering from pressure release, upping to inFlight=0');
+            inFlight = 0;
+        }
         try {
             port.postMessage(result);
             port.postMessage({
