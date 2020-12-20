@@ -1,15 +1,15 @@
-const MODEL_PATH = 'sqrxr_107_graphopt/model.json'
-const IMAGE_SIZE = 224;
-const MIN_IMAGE_SIZE = 36;
-const MIN_IMAGE_BYTES = 1024;
+const PROC_MODEL_PATH = 'sqrxr_107_graphopt/model.json'
+const PROC_IMAGE_SIZE = 224;
+const PROC_MIN_IMAGE_SIZE = 36;
+const PROC_MIN_IMAGE_BYTES = 1024;
 
 function onModelLoadProgress(percentage) {
     console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
 
-let isInReviewMode = false;
-let wingman;
-let loadedBackend;
+let PROC_isInReviewMode = false;
+let PROC_wingman;
+let PROC_loadedBackend;
 const wingman_startup = async () => {
     console.log('LIFECYCLE: Launching TF.js!');
     let params = (new URL(document.location)).searchParams;
@@ -21,21 +21,21 @@ const wingman_startup = async () => {
     console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
-    loadedBackend = tf.getBackend();
-    console.log('LIFECYCLE: TensorflowJS backend is: '+loadedBackend);
-    if(loadedBackend == 'cpu') {
+    PROC_loadedBackend = tf.getBackend();
+    console.log('LIFECYCLE: TensorflowJS backend is: '+PROC_loadedBackend);
+    if(PROC_loadedBackend == 'cpu') {
         console.log('LIFECYCLE: WARNING! Exiting because no fast predictor can be loaded!');
-        wingman = null;
+        PROC_wingman = null;
         return;
     }
     console.log('LIFECYCLE: Loading model...');
-    wingman = await tf.loadGraphModel(MODEL_PATH, { onProgress: onModelLoadProgress });
-    console.log('LIFECYCLE: Model loaded: ' + wingman+' at '+performance.now());
+    PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: onModelLoadProgress });
+    console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
 
     console.log('LIFECYCLE: Warming up...');
-    let dummy_data = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
+    let dummy_data = tf.zeros([1, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE, 3]);
     let warmup_result = null;
-    let timingInfo = await tf.time(()=>warmup_result = wingman.predict(dummy_data));
+    let timingInfo = await tf.time(()=>warmup_result = PROC_wingman.predict(dummy_data));
     console.log(warmup_result);
     console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
     warmup_result.print();
@@ -45,29 +45,29 @@ const wingman_startup = async () => {
 
 
 /**
- * Given an image element, makes a prediction through wingman
+ * Given an image element, makes a prediction through PROC_wingman
  */
-let inferenceTimeTotal = 0;
-let inferenceCountTotal = 0;
-let inferenceCanvas = document.createElement('canvas');
-inferenceCanvas.width = IMAGE_SIZE;
-inferenceCanvas.height = IMAGE_SIZE;
-let inferenceCtx = inferenceCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
-console.log('LIFECYCLE: Inference context: '+inferenceCtx);
-inferenceCtx.imageSmoothingEnabled = true;
+let PROC_inferenceTimeTotal = 0;
+let PROC_inferenceCountTotal = 0;
+let PROC_inferenceCanvas = document.createElement('canvas');
+PROC_inferenceCanvas.width = PROC_IMAGE_SIZE;
+PROC_inferenceCanvas.height = PROC_IMAGE_SIZE;
+let PROC_inferenceCtx = PROC_inferenceCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
+console.log('LIFECYCLE: Inference context: '+PROC_inferenceCtx);
+PROC_inferenceCtx.imageSmoothingEnabled = true;
 
-let processingTimeTotal = 0;
-let processingSinceDataEndTimeTotal = 0;
-let processingSinceImageLoadTimeTotal = 0;
-let processingCountTotal = 0;
+let PROC_processingTimeTotal = 0;
+let PROC_processingSinceDataEndTimeTotal = 0;
+let PROC_processingSinceImageLoadTimeTotal = 0;
+let PROC_processingCountTotal = 0;
 
 async function predict(imgElement, ctx) {
   if(ctx === undefined) {
-      ctx = inferenceCtx;
+      ctx = PROC_inferenceCtx;
   }
   const drawStartTime = performance.now();
-  ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, IMAGE_SIZE,IMAGE_SIZE);
-  const rightSizeImageData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
+  ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
+  const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
   const totalDrawTime = performance.now() - drawStartTime;
   console.log(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
@@ -83,17 +83,17 @@ async function predict(imgElement, ctx) {
     const normalized = scaled.sub(tf.scalar(1));
     // Reshape to a single-element batch so we can pass it to predict.
     const batched = tf.stack([normalized]);
-    const result = wingman.predict(batched, {batchSize: 1});
+    const result = PROC_wingman.predict(batched, {batchSize: 1});
 
     return result;
   });
 
   let syncedResult = logits.dataSync();
   const totalTime = performance.now() - startTime;
-  inferenceTimeTotal += totalTime;
-  inferenceCountTotal++;
-  const avgTime = inferenceTimeTotal / inferenceCountTotal;
-  console.log(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${inferenceCountTotal} scanned images`);
+  PROC_inferenceTimeTotal += totalTime;
+  PROC_inferenceCountTotal++;
+  const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
+  console.log(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
 
   console.log('ML: Prediction: '+syncedResult[0]);
   return syncedResult;
@@ -117,31 +117,31 @@ async function readFileAsDataURL (inputFile) {
 
 
 let LOG_IMG_SIZE = 150;
-let logCanvas = document.createElement('canvas');
-logCanvas.width = LOG_IMG_SIZE;
-logCanvas.height = LOG_IMG_SIZE;
-let logCtx = logCanvas.getContext('2d', { alpha: false});
-logCanvas.imageSmoothingEnabled = true;
+let PROC_logCanvas = document.createElement('canvas');
+PROC_logCanvas.width = LOG_IMG_SIZE;
+PROC_logCanvas.height = LOG_IMG_SIZE;
+let PROC_logCtx = PROC_logCanvas.getContext('2d', { alpha: false});
+PROC_logCanvas.imageSmoothingEnabled = true;
 async function common_log_img(img, message)
 {
     let maxSide = Math.max(img.width, img.height);
     let ratio = LOG_IMG_SIZE/maxSide;
     let newWidth = img.width*ratio;
     let newHeight = img.height*ratio;
-    logCtx.clearRect(0,0,logCanvas.width,logCanvas.height);
-    logCtx.drawImage(img, 0, 0, newWidth, newHeight);
-    let logDataUrl = logCanvas.toDataURL('image/jpeg', 0.7);
+    PROC_logCtx.clearRect(0,0,PROC_logCanvas.width,PROC_logCanvas.height);
+    PROC_logCtx.drawImage(img, 0, 0, newWidth, newHeight);
+    let logDataUrl = PROC_logCanvas.toDataURL('image/jpeg', 0.7);
     let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+logDataUrl+'); background-size: contain; background-repeat: no-repeat;';
     console.log('%c '+message, blockedCSS);
 }
 
 async function common_create_svg_from_blob(img, threshold, blob)
 {
-    let dataURL = isInReviewMode ? await readFileAsDataURL(blob) : null;
+    let dataURL = PROC_isInReviewMode ? await readFileAsDataURL(blob) : null;
     return common_create_svg(img, threshold, dataURL);
 }
 
-let iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
+let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 
 async function common_create_svg(img, threshold, dataURL)
@@ -160,21 +160,21 @@ async function common_create_svg(img, threshold, dataURL)
     + '</g>'
     + '<circle cx="29.338" cy="87.549" r=".33705" stroke="#13151c" stroke-width=".093848"/>'
     + '</g>'
-    + (isInReviewMode ? '<image href="'+dataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" opacity="0.2" />' : '')
+    + (PROC_isInReviewMode ? '<image href="'+dataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" opacity="0.2" />' : '')
     +'<text transform="translate(12 20)" font-size="20" fill="red">'+visibleScore+'</text>'
     +'</g>'
     +'</svg>';
     return svgText;
 }
 
-let _checkThreshold = neutralRoc;
+let PROC_checkThreshold = ROC_neutralRoc;
 
 function setThreshold(threshold) {
-    _checkThreshold = threshold;
+    PROC_checkThreshold = threshold;
 }
 
 function isSafe(sqrxrScore) {
-    return sqrxrScore[0] < _checkThreshold;
+    return sqrxrScore[0] < PROC_checkThreshold;
 }
 
 
@@ -187,7 +187,7 @@ const loadImagePromise = url => new Promise( (resolve, reject) => {
     img.src = url
 });
 
-let timingInfoDumpCount = 0;
+let PROC_timingInfoDumpCount = 0;
 
 async function performFiltering(entry) {
     let dataEndTime = performance.now();
@@ -206,16 +206,16 @@ async function performFiltering(entry) {
     let url = null;
     try
     {
-        if(byteCount >= MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
+        if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
             url = URL.createObjectURL(blob);
             let img = await loadImagePromise(url);
             console.log('img loaded '+entry.requestId)
-            if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
+            if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 console.log('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = [0];
-                if(timingInfoDumpCount<10) {
-                    timingInfoDumpCount++;
+                if(PROC_timingInfoDumpCount<10) {
+                    PROC_timingInfoDumpCount++;
                     let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
                     console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
                 } else {
@@ -238,17 +238,17 @@ async function performFiltering(entry) {
                 const totalTime = endTime - entry.startTime;
                 const totalSinceDataEndTime = endTime - dataEndTime;
                 const totalSinceImageLoadTime = endTime - imgLoadTime;
-                processingTimeTotal += totalTime;
-                processingSinceDataEndTimeTotal += totalSinceDataEndTime;
-                processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
-                processingCountTotal++;
+                PROC_processingTimeTotal += totalTime;
+                PROC_processingSinceDataEndTimeTotal += totalSinceDataEndTime;
+                PROC_processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
+                PROC_processingCountTotal++;
                 console.log('PERF: Processed in '+totalTime
                     +' (' +totalSinceDataEndTime+' data end, '
                     +totalSinceImageLoadTime+' img load) with an avg of '
-                    +Math.round(processingTimeTotal/processingCountTotal)
-                    +' ('+Math.round(processingSinceDataEndTimeTotal/processingCountTotal)
-                    +' data end, ' + Math.round(processingSinceImageLoadTimeTotal/processingCountTotal)
-                    +' img load) at a count of '+processingCountTotal);
+                    +Math.round(PROC_processingTimeTotal/PROC_processingCountTotal)
+                    +' ('+Math.round(PROC_processingSinceDataEndTimeTotal/PROC_processingCountTotal)
+                    +' data end, ' + Math.round(PROC_processingSinceImageLoadTimeTotal/PROC_processingCountTotal)
+                    +' img load) at a count of '+PROC_processingCountTotal);
                 console.log('WEBREQ: Finishing '+entry.requestId);
             } else {
                 result.result = 'tiny';
@@ -271,11 +271,11 @@ async function performFiltering(entry) {
     return result;
 }
 
-async function advanceB64Filtering(dataStr, b64Filter, outputPort) {
+async function advanceB64Filtering(dataStr, b64Filter, outputPROC_port) {
     b64Filter.fullStr += dataStr;
 }
 
-async function completeB64Filtering(b64Filter, outputPort) {
+async function completeB64Filtering(b64Filter, outputPROC_port) {
     let startTime = performance.now();
     let fullStr = b64Filter.fullStr;
     console.log('WEBREQ: base64 stop '+fullStr.length);
@@ -293,7 +293,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
         //We found an image. We can output from the end of the last image
         //until the start of this one to start with.
         let inBetweenStr = fullStr.substring(endOfLastImage, result.index);
-        outputPort.postMessage({
+        outputPROC_port.postMessage({
             type: 'b64_data',
             requestId: b64Filter.requestId,
             dataStr: inBetweenStr
@@ -319,26 +319,26 @@ async function completeB64Filtering(b64Filter, outputPort) {
         console.debug('WEBREQ: base64 image loading: '+imageId);
         let byteCount = imageDataURI.length*3/4;
 
-        if(byteCount >= MIN_IMAGE_BYTES) {
+        if(byteCount >= PROC_MIN_IMAGE_BYTES) {
             console.log('WEBREQ: base64 image loaded: '+imageId);
             try
             {
                 let img = await loadImagePromise(imageDataURI);
-                if(img.width>=MIN_IMAGE_SIZE && img.height>=MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
+                if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                     console.log('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await predict(img);
                     console.log('ML: base64 score: '+sqrxrScore);
                     let unsafeScore = sqrxrScore[0];
                     let replacement = null; //safe
                     if(isSafe(sqrxrScore)) {
-                        outputPort.postMessage({
+                        outputPROC_port.postMessage({
                             type:'stat',
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
                         console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+b64Filter.requestId);
                     } else {
-                        outputPort.postMessage({
+                        outputPROC_port.postMessage({
                             type:'stat',
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId
@@ -359,7 +359,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
                         imageToOutput = replacement;
                     }
                 } else {
-                    outputPort.postMessage({
+                    outputPROC_port.postMessage({
                         type:'stat',
                         result:'tiny',
                         requestId: b64Filter.requestId+'_'+imageId
@@ -369,7 +369,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
             }
             catch(e)
             {
-                outputPort.postMessage({
+                outputPROC_port.postMessage({
                     type:'stat',
                     result:'error',
                     requestId: b64Filter.requestId+'_'+imageId
@@ -379,7 +379,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
             
         }
 
-        outputPort.postMessage({
+        outputPROC_port.postMessage({
             type: 'b64_data',
             requestId: b64Filter.requestId,
             dataStr: imageToOutput
@@ -388,66 +388,66 @@ async function completeB64Filtering(b64Filter, outputPort) {
     
     //Now flush the last part
     let finalNonImageChunk = fullStr.substring(endOfLastImage);
-    outputPort.postMessage({
+    outputPROC_port.postMessage({
         type: 'b64_data',
         requestId: b64Filter.requestId,
         dataStr: finalNonImageChunk
     });
-    outputPort.postMessage({
+    outputPROC_port.postMessage({
         type: 'b64_close',
         requestId: b64Filter.requestId
     });
 }
 
-let openRequests = {};
-let openB64Requests = {};
-let openVidRequests = {};
-let processingQueue = [];
-let inFlight = 0;
+let PROC_openRequests = {};
+let PROC_openB64Requests = {};
+let PROC_openVidRequests = {};
+let PROC_processingQueue = [];
+let PROC_inFlight = 0;
 async function checkProcess() {
-    console.log('QUEUE: In Flight: '+inFlight+' In Queue: '+processingQueue.length);
-    if(processingQueue.length == 0) {
-        port.postMessage({
+    console.log('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
+    if(PROC_processingQueue.length == 0) {
+        PROC_port.postMessage({
             type: 'qos',
-            processorId: processorId,
+            processorId: PROC_processorId,
             isBusy: false
         })
         return;
     }
-    if(inFlight > 0) { //Note, if increasing, consider inference context reuse strategy!
-        if(processingQueue.length > 30) {
-            console.log('QUEUE: Pressure warning! '+processingQueue.length+' Setting inFlight=0');
-            inFlight = 0;
+    if(PROC_inFlight > 0) { //Note, if increasing, consider inference context reuse strategy!
+        if(PROC_processingQueue.length > 30) {
+            console.log('QUEUE: Pressure warning! '+PROC_processingQueue.length+' Setting PROC_inFlight=0');
+            PROC_inFlight = 0;
         } else {
-            console.log('QUEUE: Throttling ('+inFlight+')');
+            console.log('QUEUE: Throttling ('+PROC_inFlight+')');
             return;
         }
     }
-    //It is critical that inFlight always goes up AND DOWN, hence all the try/catch action.
-    let toProcess = processingQueue.shift();
+    //It is critical that PROC_inFlight always goes up AND DOWN, hence all the try/catch action.
+    let toProcess = PROC_processingQueue.shift();
     if(toProcess !== undefined) {
-        inFlight++;
+        PROC_inFlight++;
         let result;
         try {
-            port.postMessage({
+            PROC_port.postMessage({
                 type: 'qos',
-                processorId: processorId,
+                processorId: PROC_processorId,
                 isBusy: true
             })
-            console.log('QUEUE: Processing (inFlight='+inFlight+') request '+toProcess.requestId);
+            console.log('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
             result = await performFiltering(toProcess);
             
         } catch(ex) {
             console.log('ML: Error scanning image '+ex);
         }
-        inFlight--;
-        if(inFlight < 0) {
-            console.log('QUEUE: Recovering from pressure release, upping to inFlight=0');
-            inFlight = 0;
+        PROC_inFlight--;
+        if(PROC_inFlight < 0) {
+            console.log('QUEUE: Recovering from pressure release, upping to PROC_inFlight=0');
+            PROC_inFlight = 0;
         }
         try {
-            port.postMessage(result);
-            port.postMessage({
+            PROC_port.postMessage(result);
+            PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
                 requestId: toProcess.requestId
@@ -456,7 +456,7 @@ async function checkProcess() {
             console.log('ERROR: Processor failed to communicate to background: '+e);
         }
     } else {
-        console.log('QUEUE: Rare time where processing queue drained? Length: '+processingQueue.length);
+        console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
     }
     await checkProcess();
 }
@@ -477,8 +477,8 @@ const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) =
 
 async function getVideoScanStatus(vidFilter) {
     let videoCanvas = document.createElement('canvas');
-    videoCanvas.width = IMAGE_SIZE;
-    videoCanvas.height = IMAGE_SIZE;
+    videoCanvas.width = PROC_IMAGE_SIZE;
+    videoCanvas.height = PROC_IMAGE_SIZE;
     let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
     videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, url, sqrxrScore, status;
@@ -526,35 +526,35 @@ async function getVideoScanStatus(vidFilter) {
     return status;
 }
 
-async function onPortMessage(m) {
+async function onPROC_portMessage(m) {
     switch(m.type) {
         case 'start': {
-            openRequests[m.requestId] = {
+            PROC_openRequests[m.requestId] = {
                 requestId: m.requestId,
                 url: m.url,
                 mimeType: m.mimeType,
                 startTime: performance.now(),
                 buffers: []
             };
-            console.log('PERF: '+processorId+' has open requests queue size '+Object.keys(openRequests).length);
+            console.log('PERF: '+PROC_processorId+' has open requests queue size '+Object.keys(PROC_openRequests).length);
         }
         break;
         case 'ondata': {
             console.log('DATA: '+m.requestId);
-            openRequests[m.requestId].buffers.push(m.data);
+            PROC_openRequests[m.requestId].buffers.push(m.data);
         }
         break;
         case 'onerror': {
-            delete openRequests[m.requestId];
+            delete PROC_openRequests[m.requestId];
         }
         break;
         case 'onstop': {
-            processingQueue.push(openRequests[m.requestId]);
-            delete openRequests[m.requestId];
+            PROC_processingQueue.push(PROC_openRequests[m.requestId]);
+            delete PROC_openRequests[m.requestId];
             await checkProcess();
         }
         case 'b64_start': {
-            openB64Requests[m.requestId] = {
+            PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
                 startTime: performance.now(),
                 fullStr: ''
@@ -562,18 +562,18 @@ async function onPortMessage(m) {
         }
         break;
         case 'b64_ondata': {
-            await advanceB64Filtering(m.dataStr, openB64Requests[m.requestId], port);
+            await advanceB64Filtering(m.dataStr, PROC_openB64Requests[m.requestId], PROC_port);
         }
         break;
         case 'b64_onerror': {
             delete openB64Filters[m.requestId];
         }
         case 'b64_onstop': {
-            await completeB64Filtering(openB64Requests[m.requestId], port);
+            await completeB64Filtering(PROC_openB64Requests[m.requestId], PROC_port);
         }
         break;
         case 'vid_start': {
-            openVidRequests[m.requestId] = {
+            PROC_openVidRequests[m.requestId] = {
                 requestId: m.requestId,
                 requestType: m.requestType,
                 url: m.url,
@@ -586,7 +586,7 @@ async function onPortMessage(m) {
         break;
         case 'vid_ondata': {
             console.log('DATAV: '+m.requestId+' packet '+m.packetNo);
-            let vidFilter = openVidRequests[m.requestId];
+            let vidFilter = PROC_openVidRequests[m.requestId];
             if(vidFilter === undefined) {
                 break;
             }
@@ -597,12 +597,12 @@ async function onPortMessage(m) {
                 vidFilter.hasScanningBegun = true;
                 let scanStatus = await getVideoScanStatus(vidFilter);
                 if(status != 'error') {
-                    port.postMessage({
+                    PROC_port.postMessage({
                         type: 'vid_scan',
                         requestId: vidFilter.requestId,
                         status: scanStatus
                     });
-                    delete openVidRequests[m.requestId];
+                    delete PROC_openVidRequests[m.requestId];
                 } else {
                     //try it again
                     vidFilter.hasScanningBegun = false;
@@ -612,22 +612,22 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_onerror': {
-            delete openVidRequests[m.requestId];
+            delete PROC_openVidRequests[m.requestId];
         }
         break;
         case 'vid_onstop': {
             console.log('DATAV: vid_onstop '+m.requestId);
-            let vidFilter = openVidRequests[m.requestId];
+            let vidFilter = PROC_openVidRequests[m.requestId];
             if(vidFilter === undefined) {
                 break;
             }
             let scanStatus = await getVideoScanStatus(vidFilter);
-            port.postMessage({
+            PROC_port.postMessage({
                 type: 'vid_scan',
                 requestId: vidFilter.requestId,
                 status: scanStatus
             });
-            delete openVidRequests[m.requestId];
+            delete PROC_openVidRequests[m.requestId];
         }
         break;
         case 'thresholdChange': {
@@ -642,16 +642,16 @@ async function onPortMessage(m) {
     }
 }
 
-let port = null;
-let processorId = (new URL(document.location)).searchParams.get('id');
+let PROC_port = null;
+let PROC_processorId = (new URL(document.location)).searchParams.get('id');
 wingman_startup()
 .then(async ()=>
 {
-    port = browser.runtime.connect(browser.runtime.id, {name:processorId});
-    port.onMessage.addListener(onPortMessage);
-    port.postMessage({
+    PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
+    PROC_port.onMessage.addListener(onPROC_portMessage);
+    PROC_port.postMessage({
         type: 'registration',
-        processorId: processorId,
-        backend: loadedBackend
+        processorId: PROC_processorId,
+        backend: PROC_loadedBackend
     });
 });

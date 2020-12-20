@@ -9003,11 +9003,11 @@ let ROC_VALUES = [
   ];
 
 
-var trustedRoc = findROCEntryByFPR(0.005);
-console.log("Trusted ROC: "+getROCString(trustedRoc));
-var trustedToNeutralPercentage = 0.04;
-var neutralRoc = findROCEntryByFPR(0.05);
-console.log("Neutral ROC: "+getROCString(neutralRoc));
-var neutralToUntrustedPercentage = 0.08;
-var untrustedRoc = findROCEntryByTPR(0.90);
-console.log("Untrusted ROC: "+getROCString(untrustedRoc));
+var ROC_trustedRoc = findROCEntryByFPR(0.005);
+console.log("Trusted ROC: "+getROCString(ROC_trustedRoc));
+var ROC_trustedToNeutralPercentage = 0.04;
+var ROC_neutralRoc = findROCEntryByFPR(0.05);
+console.log("Neutral ROC: "+getROCString(ROC_neutralRoc));
+var ROC_neutralToUntrustedPercentage = 0.08;
+var ROC_untrustedRoc = findROCEntryByTPR(0.90);
+console.log("Untrusted ROC: "+getROCString(ROC_untrustedRoc));
