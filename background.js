@@ -277,8 +277,8 @@ function setZone(newZone)
     switch(newZone)
     {
         case 'trusted':
-            BK_zoneThreshold = BK_trustedRoc.threshold;
-            BK_zonePrecision = calculatePrecision(BK_trustedRoc);
+            BK_zoneThreshold = ROC_trustedRoc.threshold;
+            BK_zonePrecision = calculatePrecision(ROC_trustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             BK_zone = newZone;
             didZoneChange = true;
@@ -293,8 +293,8 @@ function setZone(newZone)
             console.log('Zone is now neutral!');
             break;
         case 'untrusted':
-            BK_zoneThreshold = BK_untrustedRoc.threshold;
-            BK_zonePrecision = calculatePrecision(BK_untrustedRoc);
+            BK_zoneThreshold = ROC_untrustedRoc.threshold;
+            BK_zonePrecision = calculatePrecision(ROC_untrustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             BK_zone = newZone;
             didZoneChange = true;
@@ -810,15 +810,15 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getZone')
     {
-        sendResponse({zone: zone});
+        sendResponse({zone: BK_zone});
     }
     else if(request.type=='setZoneAutomatic')
     {
-        setZoneAutomatic(request.BK_isZoneAutomatic);
+        setZoneAutomatic(request.isZoneAutomatic);
     }
     else if(request.type=='getZoneAutomatic')
     {
-        sendResponse({BK_isZoneAutomatic:isZoneAutomatic});
+        sendResponse({isZoneAutomatic:BK_isZoneAutomatic});
     }
     else if(request.type=='setDnsBlocking')
     {
@@ -826,7 +826,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getOnOff')
     {
-        sendResponse({onOff:sEnabled ? 'on' : 'off'});
+        sendResponse({onOff:BK_isEnabled ? 'on' : 'off'});
     }
     else if(request.type=='setOnOff')
     {
@@ -834,7 +834,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getOnOffSwitchShown')
     {
-        sendResponse({BK_isOnOffSwitchShown: isOnOffSwitchShown});
+        sendResponse({isOnOffSwitchShown: BK_isOnOffSwitchShown});
     }
     else if(request.type=='setOnOffSwitchShown')
     {
