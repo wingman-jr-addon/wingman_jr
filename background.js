@@ -145,14 +145,14 @@ function onProcessorMessage(m) {
         break;
         case 'stat': {
             console.log('STAT: '+m.requestId+' '+m.result);
-            incrementBK_checkCount();
+            incrementCheckCount();
             switch(m.result) {
                 case 'pass': {
-                    incrementBK_passCount();
+                    incrementPassCount();
                 }
                 break;
                 case 'block': {
-                    incrementBK_blockCount();
+                    incrementBlockCount();
                 }
                 //could also be tiny or error
             }
@@ -196,7 +196,7 @@ var BK_predictionBuffer = [];
 var BK_estimatedTruePositivePercentage = 0;
 var BK_isEstimateValid = false;
 
-function addToBK_predictionBuffer(prediction)
+function addToPredictionBuffer(prediction)
 {
     BK_predictionBuffer.push(prediction);
     if(prediction>0) {
@@ -218,27 +218,27 @@ function addToBK_predictionBuffer(prediction)
     }
 }
 
-function clearBK_predictionBuffer() {
+function clearPredictionBuffer() {
     BK_predictionBufferBlockCount = 0;
     BK_predictionBuffer = [];
     BK_estimatedTruePositivePercentage = 0;
 }
 
-function incrementBK_checkCount() {
+function incrementCheckCount() {
     BK_checkCount++;
     updateStatVisuals();
 }
 
-function incrementBK_blockCount() {
+function incrementBlockCount() {
     BK_blockCount++;
-    addToBK_predictionBuffer(1);
+    addToPredictionBuffer(1);
     checkZone();
     updateStatVisuals();
 }
 
-function incrementBK_passCount() {
+function incrementPassCount() {
     BK_passCount++;
-    addToBK_predictionBuffer(0);
+    addToPredictionBuffer(0);
     checkZone();
     updateStatVisuals();
 }
@@ -256,12 +256,12 @@ function checkZone()
         return;
     }
     let requestedZone = 'untrusted';
-    if(BK_estimatedTruePositivePercentage < trustedToNeutralPercentage) {
+    if(BK_estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
         requestedZone = 'trusted';
-    } else if(BK_estimatedTruePositivePercentage < neutralToUntrustedPercentage) {
+    } else if(BK_estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
         requestedZone = 'neutral';
     }
-    if(requestedZone != zone) {
+    if(requestedZone != BK_zone) {
         setZone(requestedZone);
     }
 }
@@ -303,7 +303,7 @@ function setZone(newZone)
     }
     if(didZoneChange) {
         console.log("Zone precision is: "+BK_zonePrecision);
-        clearBK_predictionBuffer();
+        clearPredictionBuffer();
         notifyThreshold();
     }
 }
