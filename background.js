@@ -235,9 +235,9 @@ function checkZone()
         return;
     }
     let requestedZone = 'untrusted';
-    if(estimatedTruePositivePercentage < 0.015) {
+    if(estimatedTruePositivePercentage < trustedToNeutralPercentage) {
         requestedZone = 'trusted';
-    } else if(estimatedTruePositivePercentage < 0.04) {
+    } else if(estimatedTruePositivePercentage < neutralToUntrustedPercentage) {
         requestedZone = 'neutral';
     }
     if(requestedZone != zone) {
@@ -245,56 +245,44 @@ function checkZone()
     }
 }
 
-//FPR, TPR, Threshold - Positive=Unsafe
-//((0.0049182506978598965, 0.6592216129463688), 0.9987614) //Trusted
-//Binary confusion matrix at threshold = 0.9987614
-//[[7486   37]
-// [2548 4929]]
-//((0.015020603482653197, 0.7378627791895145), 0.9977756) //Neutral
-//Binary confusion matrix at threshold = 0.9977756
-//[[7410  113]
-// [1960 5517]]
-//((0.10022597368071248, 0.9025010030761), 0.09442982) //Untrusted
-//Binary confusion matrix at threshold = 0.09442982
-//[[6769  754]
-// [ 729 6748]]
-var zoneThreshold = 0.9401961;
-var zonePrecision = 5517/(113+5517);
+var zoneThreshold = neutralRoc.threshold;
+var zonePrecision = calculatePrecision(neutralRoc);
+console.log("Zone precision is: "+zonePrecision);
 var zone = 'neutral';
 function setZone(newZone)
 {
-    console.log('ZONE: Zone request to: '+newZone);
+    console.log('Zone request to: '+newZone);
     let didZoneChange = false;
     switch(newZone)
     {
         case 'trusted':
-            zoneThreshold = 0.9987614;
-            zonePrecision = 4929/(37+4929);
+            zoneThreshold = trustedRoc.threshold;
+            zonePrecision = calculatePrecision(trustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('ZONE: Zone is now trusted!');
+            console.log('Zone is now trusted!');
             break;
         case 'neutral':
-            zoneThreshold = 0.9977756;
-            zonePrecision = 5517/(113+5517);
+            zoneThreshold = neutralRoc.threshold;
+            zonePrecision = calculatePrecision(neutralRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('ZONE: Zone is now neutral!');
+            console.log('Zone is now neutral!');
             break;
         case 'untrusted':
-            zoneThreshold = 0.09442982;
-            zonePrecision = 6784/(754+6784);
+            zoneThreshold = untrustedRoc.threshold;
+            zonePrecision = calculatePrecision(untrustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             zone = newZone;
             didZoneChange = true;
-            console.log('ZONE: Zone is now untrusted!')
+            console.log('Zone is now untrusted!')
             break;
     }
     if(didZoneChange) {
+        console.log("Zone precision is: "+zonePrecision);
         clearPredictionBuffer();
-        console.log('CONFIG: Threshold change '+zoneThreshold);
         notifyThreshold();
     }
 }

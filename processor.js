@@ -1,4 +1,4 @@
-const MODEL_PATH = 'sqrxr_62_graphopt/model.json'
+const MODEL_PATH = 'sqrxr_107_graphopt/model.json'
 const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
@@ -165,7 +165,7 @@ async function common_create_svg(img, threshold, dataURL)
     return svgText;
 }
 
-let _checkThreshold = 0.9977756;
+let _checkThreshold = neutralRoc;
 
 function setThreshold(threshold) {
     _checkThreshold = threshold;
@@ -177,8 +177,9 @@ function isSafe(sqrxrScore) {
 
 
 
-const loadImagePromise = url => new Promise( resolve => {
+const loadImagePromise = url => new Promise( (resolve,reject) => {
     const img = new Image()
+    img.onerror = e => reject(e)
     img.onload = () => resolve(img)
     img.decoding = 'sync'
     img.src = url
