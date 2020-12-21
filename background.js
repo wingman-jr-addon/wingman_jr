@@ -132,15 +132,19 @@ function onProcessorMessage(m) {
         break;
         case 'vid_scan': {
             let vidFilter = BK_openVidFilters[m.requestId];
-            console.log('WEBREQV: video result '+m.requestId+' was '+m.status);
-            if(m.status == 'block') {
-                vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
-                vidFilter.filter.close();
+            console.log('WEBREQV: video result '+m.requestId+' was '+m.status+' filter '+vidFilter);
+            if(vidFilter !== undefined) { //We sometimes end up with a second extraneous event
+                if(m.status == 'block') {
+                    vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
+                    vidFilter.filter.close();
+                } else {
+                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
+                    vidFilter.filter.disconnect();
+                }
+                delete BK_openVidFilters[m.requestId];
             } else {
-                vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
-                vidFilter.filter.disconnect();
+                console.log('WEBREQV: extra video result '+m.requestId+' was '+m.status);
             }
-            delete BK_openVidFilters[m.requestId];
         }
         break;
         case 'stat': {
@@ -442,6 +446,7 @@ async function video_listener(details) {
     }
 
     console.log('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength);
+    console.dir(details);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
         let isImage = mimeType.startsWith('image/');

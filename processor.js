@@ -505,7 +505,7 @@ async function getVideoScanStatus(vidFilter) {
     videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, url, sqrxrScore, status;
     try {
-        console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType);
+        console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+', URL '+vidFilter.url);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
             console.log('MLV: encrypted: '+vidFilter.requestId); //This will fail :(
