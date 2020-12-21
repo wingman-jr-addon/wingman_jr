@@ -527,11 +527,11 @@ async function getVideoScanStatus(vidFilter) {
             sqrxrScore = await predict(inferenceVideo, videoCtx);
             if(isSafe(sqrxrScore))
             {
-                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? pass, type '+vidFilter.requestType);
+                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? pass, type '+vidFilter.requestType+', MIME '+vidFilter.mimeType);
             }
             else
             {
-                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? block, type '+vidFilter.requestType);
+                console.log('MLV: video score @'+seekTime+': '+sqrxrScore+' status? block, type '+vidFilter.requestType+', MIME '+vidFilter.mimeType);
                 await common_log_img(inferenceVideo, 'MLV: BLOCKED VID @'+seekTime+' '+sqrxrScore);
                 blockCount++;
             }
@@ -594,6 +594,7 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_start': {
+            console.log('DATAV: vid_start '+m.requestId);
             PROC_openVidRequests[m.requestId] = {
                 requestId: m.requestId,
                 requestType: m.requestType,
@@ -613,11 +614,12 @@ async function onPortMessage(m) {
             }
             vidFilter.buffers.push(m.data);
             vidFilter.totalSize += m.data.byteLength;
+            console.log('DATAV: '+m.requestId+' packet '+m.packetNo+' total size '+vidFilter.totalSize);
             
             if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*300) {
                 vidFilter.hasScanningBegun = true;
                 let scanStatus = await getVideoScanStatus(vidFilter);
-                if(status != 'error') {
+                if(scanStatus != 'error') {
                     PROC_port.postMessage({
                         type: 'vid_scan',
                         requestId: vidFilter.requestId,
@@ -633,6 +635,7 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_onerror': {
+            console.log('DATAV: vid_onerror '+m.requestId);
             delete PROC_openVidRequests[m.requestId];
         }
         break;

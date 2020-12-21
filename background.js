@@ -427,7 +427,21 @@ async function video_listener(details) {
         }
     }
 
-    console.log('VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type);
+    let expectedContentLength = -1;
+    try {
+        for(let i=0; i<details.responseHeaders.length; i++) {
+            let header = details.responseHeaders[i];
+            if(header.name.toLowerCase() == "content-length") {
+                expectedContentLength = parseInt(header.value);
+                break;
+            }
+        }
+    }
+    catch(e) {
+        console.log('WEBREQV: Weird error parsing content-length '+e);
+    }
+
+    console.log('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
         let isImage = mimeType.startsWith('image/');
