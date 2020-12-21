@@ -271,11 +271,11 @@ async function performFiltering(entry) {
     return result;
 }
 
-async function advanceB64Filtering(dataStr, b64Filter, outputPROC_port) {
+async function advanceB64Filtering(dataStr, b64Filter, outputPort) {
     b64Filter.fullStr += dataStr;
 }
 
-async function completeB64Filtering(b64Filter, outputPROC_port) {
+async function completeB64Filtering(b64Filter, outputPort) {
     let startTime = performance.now();
     let fullStr = b64Filter.fullStr;
     console.log('WEBREQ: base64 stop '+fullStr.length);
@@ -293,7 +293,7 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
         //We found an image. We can output from the end of the last image
         //until the start of this one to start with.
         let inBetweenStr = fullStr.substring(endOfLastImage, result.index);
-        outputPROC_port.postMessage({
+        outputPort.postMessage({
             type: 'b64_data',
             requestId: b64Filter.requestId,
             dataStr: inBetweenStr
@@ -331,14 +331,14 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
                     let unsafeScore = sqrxrScore[0];
                     let replacement = null; //safe
                     if(isSafe(sqrxrScore)) {
-                        outputPROC_port.postMessage({
+                        outputPort.postMessage({
                             type:'stat',
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
                         console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+b64Filter.requestId);
                     } else {
-                        outputPROC_port.postMessage({
+                        outputPort.postMessage({
                             type:'stat',
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId
@@ -359,7 +359,7 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
                         imageToOutput = replacement;
                     }
                 } else {
-                    outputPROC_port.postMessage({
+                    outputPort.postMessage({
                         type:'stat',
                         result:'tiny',
                         requestId: b64Filter.requestId+'_'+imageId
@@ -369,7 +369,7 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
             }
             catch(e)
             {
-                outputPROC_port.postMessage({
+                outputPort.postMessage({
                     type:'stat',
                     result:'error',
                     requestId: b64Filter.requestId+'_'+imageId
@@ -379,7 +379,7 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
             
         }
 
-        outputPROC_port.postMessage({
+        outputPort.postMessage({
             type: 'b64_data',
             requestId: b64Filter.requestId,
             dataStr: imageToOutput
@@ -388,12 +388,12 @@ async function completeB64Filtering(b64Filter, outputPROC_port) {
     
     //Now flush the last part
     let finalNonImageChunk = fullStr.substring(endOfLastImage);
-    outputPROC_port.postMessage({
+    outputPort.postMessage({
         type: 'b64_data',
         requestId: b64Filter.requestId,
         dataStr: finalNonImageChunk
     });
-    outputPROC_port.postMessage({
+    outputPort.postMessage({
         type: 'b64_close',
         requestId: b64Filter.requestId
     });
@@ -469,7 +469,7 @@ const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) =
         video.height = video.videoHeight;
         resolve();
     } , {once:true});
-    video.src = url
+    video.src = url;
     video.currentTime = seekTime;
 });
 
@@ -483,9 +483,9 @@ async function getVideoScanStatus(vidFilter) {
     videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, url, sqrxrScore, status;
     try {
-        console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize);
+        console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType);
         inferenceVideo = document.createElement('video');
-        //inferenceVideo.type = vidFilter.mimeType;
+        //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
 
         let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
@@ -526,7 +526,7 @@ async function getVideoScanStatus(vidFilter) {
     return status;
 }
 
-async function onPROC_portMessage(m) {
+async function onPortMessage(m) {
     switch(m.type) {
         case 'start': {
             PROC_openRequests[m.requestId] = {
@@ -648,7 +648,7 @@ wingman_startup()
 .then(async ()=>
 {
     PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
-    PROC_port.onMessage.addListener(onPROC_portMessage);
+    PROC_port.onMessage.addListener(onPortMessage);
     PROC_port.postMessage({
         type: 'registration',
         processorId: PROC_processorId,

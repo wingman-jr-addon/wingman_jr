@@ -132,7 +132,7 @@ function onProcessorMessage(m) {
         break;
         case 'vid_scan': {
             let vidFilter = BK_openVidFilters[m.requestId];
-            console.log('WEBREQV: video result '+vidFilter.requestId+' was '+m.status);
+            console.log('WEBREQV: video result '+m.requestId+' was '+m.status);
             if(m.status == 'block') {
                 vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
                 vidFilter.filter.close();
