@@ -507,6 +507,9 @@ async function getVideoScanStatus(vidFilter) {
     try {
         console.log('MLV: scanning video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType);
         inferenceVideo = document.createElement('video');
+        inferenceVideo.onencrypted = function() {
+            console.log('MLV: encrypted: '+vidFilter.requestId); //This will fail :(
+        };
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
 
