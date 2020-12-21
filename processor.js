@@ -473,6 +473,28 @@ const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) =
     video.currentTime = seekTime;
 });
 
+function getVideoUrl(vidFilter) {
+    if(vidFilter.mimeType.toLowerCase().startsWith('video/mp2t')) {
+        console.log('MLV: URL MP2T detected for '+vidFilter.requestId+', mime '+vidFilter.mimeType);
+        //remux that sucker to MP4 quick
+        let transmuxer = new muxjs.mp4.Transmuxer();
+        let tBuffers = [];
+        transmuxer.on('data', (segment) => {
+            if(tBuffers.length == 0) {
+                tBuffers.push(segment.initSegment);
+            }
+            tBuffers.push(segment.data);
+        });
+        vidFilter.buffers.forEach(b=>transmuxer.push(new Uint8Array(b)));
+        transmuxer.flush();
+        let blob = new Blob(tBuffers, {type: 'video/mp4'});
+        return URL.createObjectURL(blob);
+    } else {
+        console.log('MLV: URL default detected for '+vidFilter.requestId+', mime '+vidFilter.mimeType);
+        let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
+        return URL.createObjectURL(blob);
+    }
+}
 
 
 async function getVideoScanStatus(vidFilter) {
@@ -488,8 +510,7 @@ async function getVideoScanStatus(vidFilter) {
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
 
-        let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
-        url = URL.createObjectURL(blob);
+        url = getVideoUrl(vidFilter);
 
         let step = 0.75;
         let initial = 0.5;
