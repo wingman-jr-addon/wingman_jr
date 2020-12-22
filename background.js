@@ -134,13 +134,31 @@ function onProcessorMessage(m) {
             let vidFilter = BK_openVidFilters[m.requestId];
             console.log('WEBREQV: video result '+m.requestId+' was '+m.status+' filter '+vidFilter);
             if(vidFilter !== undefined) { //We sometimes end up with a second extraneous event
-                createVideoGroup(vidFilter.url, m.status);
+                let videoGroup = BK_videoGroups[vidFilter.videoGroupId];
+                videoGroup.status = m.status;
+                videoGroup.startStep = Math.max(m.startStep, videoGroup.startStep);
+                videoGroup.blockCount = Math.max(m.blockCount, videoGroup.blockCount);
+                console.log('WEBREQV: video status '+m.requestId+' was '+m.status+' video group '+vidFilter.videoGroupId);
                 if(m.status == 'block') {
                     vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
                     vidFilter.filter.close();
-                } else {
+                    videoGroup.buffers = []; //final, cleanup!
+                } else if (m.status == 'pass') {
                     vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
                     vidFilter.filter.disconnect();
+                    videoGroup.buffers = []; //final, cleanup!
+                } else if (m.status == 'error') {
+                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
+                    vidFilter.filter.disconnect();
+                    videoGroup.buffers = []; //final, cleanup!
+                } else if(m.status == 'pass_incomplete') {
+                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
+                    vidFilter.filter.disconnect();
+                    if(videoGroup.type !== 'default') {
+                        vidFilter.buffers.forEach(b=>videoGroup.buffers.push(b));
+                    } else { //no group, do cleanup
+                        delete BK_videoGroups[vidFilter.videoGroupId];
+                    }
                 }
                 delete BK_openVidFilters[m.requestId];
             } else {
@@ -413,7 +431,7 @@ async function direct_typed_url_listener(details) {
 
 ///////////////////////////////////////////////// Video ////////////////////////////////////////////////////////////////
 
-let BK_videoGroupsByType = { 'youtube': {} };
+let BK_videoGroups = { };
 
 function getYoutubeCpn(parsedUrl) {
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
@@ -422,33 +440,46 @@ function getYoutubeCpn(parsedUrl) {
     return undefined;
 }
 
-function createVideoGroup(rawUrl, status) {
+function createVideoGroup(rawUrl, requestId) {
+    let url, cpn;
+    try {
+        url = new URL(rawUrl);
+        cpn = getYoutubeCpn(url);
+    } catch(e) {
+        console.log('WEBREQV: Error while trying to check/create video group for url '+rawUrl+': '+e);
+    }
+    let group = {
+        url: rawUrl,
+        status: 'unknown',
+        startStep: 0,
+        blockCount: 0,
+        buffers: []
+    };
+    if(cpn !== undefined) {
+        console.log('WEBREQV: Creating video group type youtube cpn='+cpn+' status '+status);
+        group.type = 'youtube';
+        group.id = 'youtube-'+cpn;
+        group.cpn = cpn;
+
+    } else {
+        console.log('WEBREQV: Creating default video group for '+rawUrl);
+        group.type = 'default';
+        group.id = 'default-'+requestId;
+    }
+    BK_videoGroups[group.id] = group;
+    return group;
+
+}
+
+function getVideoGroup(rawUrl) {
     try {
         let url = new URL(rawUrl);
         let cpn = getYoutubeCpn(url);
         if(cpn !== undefined) {
-            console.log('WEBREQV: Creating video group type youtube cpn='+cpn+' status '+status);
-            BK_videoGroupsByType['youtube'][cpn]= {
-                type: 'youtube',
-                url: rawUrl,
-                cpn: cpn,
-                status: status
-            };
+            return BK_videoGroups['youtube-'+cpn];
         }
     } catch(e) {
-        console.log('WEBREQV: Error while trying to check/create video group for url '+rawUrl+': '+e);
-    }
-}
-
-function getVideoGroup(details) {
-    try {
-        let url = new URL(details.url);
-        let cpn = getYoutubeCpn(url);
-        if(cpn !== undefined) {
-            return BK_videoGroupsByType['youtube'][cpn];
-        }
-    } catch(e) {
-        console.log('WEBREQV: Error parsing URL '+details.url+': '+e);
+        console.log('WEBREQV: Error parsing URL '+rawUrl+': '+e);
     }
     return undefined; //no group
 }
@@ -462,18 +493,6 @@ async function video_listener(details) {
     if (isWhitelisted(details.url)) {
         console.log('WEBREQV: Video whitelist '+details.url);
         return;
-    }
-
-    let videoGroup = getVideoGroup(details);
-    if(videoGroup !== undefined) {
-        console.log('WEBREQV: Video group exists with type '+videoGroup.type+' status '+videoGroup.status+' for '+videoGroup.url);
-        if(videoGroup.status == 'pass') {
-            return;
-        } else if (videoGroup.status == 'block') {
-            return { cancel: true };
-        } else {
-            return; //Generally this is error and we want to pass it through
-        }
     }
 
     let mimeType = '';
@@ -512,6 +531,22 @@ async function video_listener(details) {
         }
     }
 
+    let videoGroup = getVideoGroup(details.url);
+    if(videoGroup !== undefined) {
+        console.log('WEBREQV: Video group exists with type '+videoGroup.type+' status '+videoGroup.status+' for '+videoGroup.id);
+        if(videoGroup.status == 'pass') {
+            return;
+        } else if (videoGroup.status == 'block') {
+            return { cancel: true };
+        } else if (videoGroup.status == 'pass_incomplete') {
+            console.log('WEBREQV: Video group was pass_incomplete, continuing scanning.');
+        } else {
+            return; //Generally this is error and we want to pass it through
+        }
+    } else {
+        videoGroup = createVideoGroup(details.url, 'unknown');
+    }
+
     console.log('WEBREQV: video start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -522,7 +557,11 @@ async function video_listener(details) {
         requestId : details.requestId,
         requestType: details.type,
         url: details.url,
-        mimeType: mimeType
+        mimeType: mimeType,
+        videoGroupId: videoGroup.id,
+        existingBuffers: videoGroup.buffers,
+        startStep: videoGroup.startStep,
+        blockCount: videoGroup.blockCount
     });
 
     let vidFilter = {
@@ -531,6 +570,7 @@ async function video_listener(details) {
         url: details.url,
         mimeType: mimeType,
         filter: filter,
+        videoGroupId: videoGroup.id,
         buffers: []
     };
     BK_openVidFilters[details.requestId] = vidFilter;
