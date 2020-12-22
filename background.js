@@ -134,6 +134,7 @@ function onProcessorMessage(m) {
             let vidFilter = BK_openVidFilters[m.requestId];
             console.log('WEBREQV: video result '+m.requestId+' was '+m.status+' filter '+vidFilter);
             if(vidFilter !== undefined) { //We sometimes end up with a second extraneous event
+                createVideoGroup(vidFilter.url, m.status);
                 if(m.status == 'block') {
                     vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
                     vidFilter.filter.close();
@@ -412,6 +413,46 @@ async function direct_typed_url_listener(details) {
 
 ///////////////////////////////////////////////// Video ////////////////////////////////////////////////////////////////
 
+let BK_videoGroupsByType = { 'youtube': {} };
+
+function getYoutubeCpn(parsedUrl) {
+    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
+        return parsedUrl.searchParams.get('cpn');
+    }
+    return undefined;
+}
+
+function createVideoGroup(rawUrl, status) {
+    try {
+        let url = new URL(rawUrl);
+        let cpn = getYoutubeCpn(url);
+        if(cpn !== undefined) {
+            console.log('WEBREQV: Creating video group type youtube cpn='+cpn+' status '+status);
+            BK_videoGroupsByType['youtube'][cpn]= {
+                type: 'youtube',
+                url: rawUrl,
+                cpn: cpn,
+                status: status
+            };
+        }
+    } catch(e) {
+        console.log('WEBREQV: Error while trying to check/create video group for url '+rawUrl+': '+e);
+    }
+}
+
+function getVideoGroup(details) {
+    try {
+        let url = new URL(details.url);
+        let cpn = getYoutubeCpn(url);
+        if(cpn !== undefined) {
+            return BK_videoGroupsByType['youtube'][cpn];
+        }
+    } catch(e) {
+        console.log('WEBREQV: Error parsing URL '+details.url+': '+e);
+    }
+    return undefined; //no group
+}
+
 // The video listener behaves a bit differently in that it both queues up the data locally as well
 // as passes it to the processor until it hears back a response.
 async function video_listener(details) {
@@ -422,6 +463,19 @@ async function video_listener(details) {
         console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
+
+    let videoGroup = getVideoGroup(details);
+    if(videoGroup !== undefined) {
+        console.log('WEBREQV: Video group exists with type '+videoGroup.type+' status '+videoGroup.status+' for '+videoGroup.url);
+        if(videoGroup.status == 'pass') {
+            return;
+        } else if (videoGroup.status == 'block') {
+            return { cancel: true };
+        } else {
+            return; //Generally this is error and we want to pass it through
+        }
+    }
+
     let mimeType = '';
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -468,12 +522,14 @@ async function video_listener(details) {
         requestId : details.requestId,
         requestType: details.type,
         url: details.url,
-        mimeType: mimeType,
-        url: details.url
+        mimeType: mimeType
     });
 
     let vidFilter = {
-        requestId: details.requestId,
+        requestId : details.requestId,
+        requestType: details.type,
+        url: details.url,
+        mimeType: mimeType,
         filter: filter,
         buffers: []
     };
