@@ -102,9 +102,7 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
 
-let BK_videoPlaceholderArrayBuffer = null;
-fetch('wingman_placeholder.mp4')
-.then(async r => BK_videoPlaceholderArrayBuffer = await r.arrayBuffer());
+
 
 function onProcessorMessage(m) {
     switch(m.type) {
@@ -131,39 +129,7 @@ function onProcessorMessage(m) {
         }
         break;
         case 'vid_scan': {
-            let vidFilter = BK_openVidFilters[m.requestId];
-            console.log('WEBREQV: video result '+m.requestId+' was '+m.status+' filter '+vidFilter);
-            if(vidFilter !== undefined) { //We sometimes end up with a second extraneous event
-                let videoGroup = BK_videoGroups[vidFilter.videoGroupId];
-                videoGroup.status = m.status;
-                videoGroup.startStep = Math.max(m.startStep, videoGroup.startStep);
-                videoGroup.blockCount = Math.max(m.blockCount, videoGroup.blockCount);
-                console.log('WEBREQV: video status '+m.requestId+' was '+m.status+' video group '+vidFilter.videoGroupId);
-                if(m.status == 'block') {
-                    vidFilter.filter.write(BK_videoPlaceholderArrayBuffer);
-                    vidFilter.filter.close();
-                    videoGroup.buffers = []; //final, cleanup!
-                } else if (m.status == 'pass') {
-                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
-                    vidFilter.filter.disconnect();
-                    videoGroup.buffers = []; //final, cleanup!
-                } else if (m.status == 'error') {
-                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
-                    vidFilter.filter.disconnect();
-                    videoGroup.buffers = []; //final, cleanup!
-                } else if(m.status == 'pass_incomplete') {
-                    vidFilter.buffers.forEach(b=>vidFilter.filter.write(b));
-                    vidFilter.filter.disconnect();
-                    if(videoGroup.type !== 'default') {
-                        vidFilter.buffers.forEach(b=>videoGroup.buffers.push(b));
-                    } else { //no group, do cleanup
-                        delete BK_videoGroups[vidFilter.videoGroupId];
-                    }
-                }
-                delete BK_openVidFilters[m.requestId];
-            } else {
-                console.log('WEBREQV: extra video result '+m.requestId+' was '+m.status);
-            }
+            VID_onVidScan(m);
         }
         break;
         case 'stat': {
@@ -429,197 +395,6 @@ async function direct_typed_url_listener(details) {
     return details;
 }
 
-///////////////////////////////////////////////// Video ////////////////////////////////////////////////////////////////
-
-let BK_videoGroups = { };
-
-function getYoutubeCpn(parsedUrl) {
-    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
-        return parsedUrl.searchParams.get('cpn');
-    }
-    return undefined;
-}
-
-function createVideoGroup(rawUrl, requestId) {
-    let url, cpn;
-    try {
-        url = new URL(rawUrl);
-        cpn = getYoutubeCpn(url);
-    } catch(e) {
-        console.log('WEBREQV: Error while trying to check/create video group for url '+rawUrl+': '+e);
-    }
-    let group = {
-        url: rawUrl,
-        status: 'unknown',
-        startStep: 0,
-        blockCount: 0,
-        buffers: []
-    };
-    if(cpn !== undefined) {
-        console.log('WEBREQV: Creating video group type youtube cpn='+cpn+' status '+status);
-        group.type = 'youtube';
-        group.id = 'youtube-'+cpn;
-        group.cpn = cpn;
-
-    } else {
-        console.log('WEBREQV: Creating default video group for '+rawUrl);
-        group.type = 'default';
-        group.id = 'default-'+requestId;
-    }
-    BK_videoGroups[group.id] = group;
-    return group;
-
-}
-
-function getVideoGroup(rawUrl) {
-    try {
-        let url = new URL(rawUrl);
-        let cpn = getYoutubeCpn(url);
-        if(cpn !== undefined) {
-            return BK_videoGroups['youtube-'+cpn];
-        }
-    } catch(e) {
-        console.log('WEBREQV: Error parsing URL '+rawUrl+': '+e);
-    }
-    return undefined; //no group
-}
-
-// The video listener behaves a bit differently in that it both queues up the data locally as well
-// as passes it to the processor until it hears back a response.
-async function video_listener(details) {
-    if (details.statusCode < 200 || 300 <= details.statusCode) {
-        return;
-    }
-    if (isWhitelisted(details.url)) {
-        console.log('WEBREQV: Video whitelist '+details.url);
-        return;
-    }
-
-    let mimeType = '';
-    for(let i=0; i<details.responseHeaders.length; i++) {
-        let header = details.responseHeaders[i];
-        if(header.name.toLowerCase() == "content-type") {
-            mimeType = header.value;
-            break;
-        }
-    }
-
-    let expectedContentLength = -1;
-    try {
-        for(let i=0; i<details.responseHeaders.length; i++) {
-            let header = details.responseHeaders[i];
-            if(header.name.toLowerCase() == "content-length") {
-                expectedContentLength = parseInt(header.value);
-                break;
-            }
-        }
-    }
-    catch(e) {
-        console.log('WEBREQV: Weird error parsing content-length '+e);
-    }
-
-    console.log('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength);
-    console.dir(details);
-    let isVideo =  mimeType.startsWith('video/');
-    if(!isVideo) {
-        let isImage = mimeType.startsWith('image/');
-        if(isImage) {
-            console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
-            return listener(details);
-        } else {
-            return;
-        }
-    }
-
-    let videoGroup = getVideoGroup(details.url);
-    if(videoGroup !== undefined) {
-        console.log('WEBREQV: Video group exists with type '+videoGroup.type+' status '+videoGroup.status+' for '+videoGroup.id);
-        if(videoGroup.status == 'pass') {
-            return;
-        } else if (videoGroup.status == 'block') {
-            return { cancel: true };
-        } else if (videoGroup.status == 'pass_incomplete') {
-            console.log('WEBREQV: Video group was pass_incomplete, continuing scanning.');
-        } else {
-            return; //Generally this is error and we want to pass it through
-        }
-    } else {
-        videoGroup = createVideoGroup(details.url, 'unknown');
-    }
-
-    console.log('WEBREQV: video start headers '+details.requestId);
-    let dataStartTime = null;
-    let filter = browser.webRequest.filterResponseData(details.requestId);
-
-    let processor = getNextProcessor().port;
-    processor.postMessage({
-        type: 'vid_start',
-        requestId : details.requestId,
-        requestType: details.type,
-        url: details.url,
-        mimeType: mimeType,
-        videoGroupId: videoGroup.id,
-        existingBuffers: videoGroup.buffers,
-        startStep: videoGroup.startStep,
-        blockCount: videoGroup.blockCount
-    });
-
-    let vidFilter = {
-        requestId : details.requestId,
-        requestType: details.type,
-        url: details.url,
-        mimeType: mimeType,
-        filter: filter,
-        videoGroupId: videoGroup.id,
-        buffers: []
-    };
-    BK_openVidFilters[details.requestId] = vidFilter;
-    let totalSize = 0;
-    let packetCounter = 0;
-  
-    filter.ondata = event => {
-        if (dataStartTime == null) {
-            dataStartTime = performance.now();
-        }
-        console.log('WEBREQV: video data '+details.requestId+' size '+event.data.byteLength);
-        totalSize += event.data.byteLength;
-        vidFilter.buffers.push(event.data);
-        
-        processor.postMessage({ 
-            type: 'vid_ondata',
-            requestId: details.requestId,
-            packetNo: packetCounter,
-            data: event.data
-        });
-        packetCounter++;
-    }
-
-    filter.onerror = e => {
-        try
-        {
-            processor.postMessage({
-                type: 'vid_onerror',
-                requestId: details.requestId
-            });
-            filter.disconnect();
-        }
-        catch(ex)
-        {
-            console.log('WEBREQ: Filter video error: '+e+', '+ex);
-        }
-    }
-  
-    filter.onstop = async event => {
-        let dataStopTime = performance.now();
-        console.log('WEBREQV: Video request '+details.requestId+' had '+totalSize+' bytes and took '+(dataStopTime-dataStartTime)+' ms, it had MIME type '+mimeType+' and came from source '+details.type);
-        processor.postMessage({
-            type: 'vid_onstop',
-            requestId: details.requestId
-        });
-    }
-    return details;
-  }
-
 ///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
 
 BK_shouldUseDnsBlocking = false;
@@ -868,7 +643,7 @@ function registerAllCallbacks() {
       );
 
     browser.webRequest.onHeadersReceived.addListener(
-        video_listener,
+        VID_video_listener,
         {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
         ["blocking","responseHeaders"]
       );

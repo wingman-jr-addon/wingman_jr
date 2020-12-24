@@ -18,6 +18,7 @@
       "scripts": [
           "roc.js",
           "dns_blocking.js",
+          "background_video.js",
           "background.js",
           "whitelist.js"
         ]

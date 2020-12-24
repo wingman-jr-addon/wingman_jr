@@ -582,7 +582,7 @@ async function getVideoScanStatus(vidFilter) {
                 break;
             }
         }
-        vidFilter.status = vidFilter.blockCount >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_incomplete' : 'pass');
+        vidFilter.status = vidFilter.blockCount >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_request' : 'pass');
         console.log('MLV: SCAN video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+vidFilter.status+' blocks '+vidFilter.blockCount+'/'+stepCount+' for video group '+vidFilter.videoGroupId);
     } catch(e) {
         console.log('MLV: SCAN Error scanning video group '+vidFilter.videoGroupId+':'+e);
@@ -647,15 +647,15 @@ async function onPortMessage(m) {
         case 'vid_start': {
             console.log('DATAV: vid_start '+m.requestId+' with existing buffers length '+m.existingBuffers.length+' for video group '+m.videoGroupId);
             PROC_openVidRequests[m.requestId] = {
+                videoChainId: m.videoChainId,
                 requestId: m.requestId,
                 requestType: m.requestType,
-                videoGroupId: m.videoGroupId,
                 url: m.url,
                 mimeType: m.mimeType,
                 buffers: m.existingBuffers,
                 hasScanningBegun: false,
-                startStep: m.startStep,
-                blockCount: m.blockCount,
+                startStep: 0,
+                blockCount: 0,
                 totalSize: m.existingBuffers.reduce((acc,v)=>acc+v.byteLength,0) //sum
             };
             console.log()
@@ -670,7 +670,7 @@ async function onPortMessage(m) {
             console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoGroupId);
             vidFilter.buffers.push(m.data);
             vidFilter.totalSize += m.data.byteLength;
-            console.log('DATAV: '+m.requestId+' packet '+m.packetNo+' for video group '+vidFilter.videoGroupId +' total size '+vidFilter.totalSize);
+            console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoGroupId +' total size '+vidFilter.totalSize);
             
             /*
             if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*1024) {
@@ -679,10 +679,13 @@ async function onPortMessage(m) {
                 if(vidFilter.status != 'error') {
                     PROC_port.postMessage({
                         type: 'vid_scan',
+                        videoChainId: videoChainId,
                         requestId: vidFilter.requestId,
                         status: vidFilter.status,
-                        startStep: vidFilter.startStep,
-                        blockCount: vidFilter.blockCount
+                        processorState: {
+                            startStep: vidFilter.startStep,
+                            processorState: vidFilter.blockCount
+                        }
                     });
                     delete PROC_openVidRequests[m.requestId];
                 } else {
@@ -709,10 +712,13 @@ async function onPortMessage(m) {
             await getVideoScanStatus(vidFilter);
             PROC_port.postMessage({
                 type: 'vid_scan',
+                videoChainId: m.videoChainId,
                 requestId: vidFilter.requestId,
                 status: vidFilter.status,
-                startStep: vidFilter.startStep,
-                blockCount: vidFilter.blockCount
+                processorState: {
+                    startStep: vidFilter.startStep,
+                    blockCount: vidFilter.blockCount
+                }
             });
             delete PROC_openVidRequests[m.requestId];
         }
