@@ -314,7 +314,7 @@ async function VID_video_listener(details) {
         console.log('WEBREQV: Weird error parsing content-length '+e);
     }
 
-    console.log('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' url '+details.url);
+    console.log('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
     console.dir(details);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
