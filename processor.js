@@ -515,7 +515,7 @@ function getVideoUrl(vidFilter) {
         let blob = new Blob(vidFilter.buffers, {type: vidFilter.mimeType});
 
         //let parsedMp4 = getMp4Parsed(vidFilter.buffers);
-        //console.log('MLV: SCAN DEBUG '+vidFilter.requestId+' '+vidFilter.videoGroupId);
+        //console.log('MLV: SCAN DEBUG '+vidFilter.requestId+' '+vidFilter.videoChainId);
         //console.dir(parsedMp4);
         return URL.createObjectURL(blob);
     }
@@ -529,13 +529,13 @@ async function getVideoScanStatus(vidFilter) {
     let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
     videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, url, sqrxrScore;
-    let step = 0.5;
+    let step = 1.0;
     let initial = 0.1;
-    let stepCount = 20;
+    let stepCount = 45;
     let blockThreshold = 4;
     let errorBlockThreshold = 2;
     try {
-        console.log('MLV: SCAN video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoGroupId+' startStep '+vidFilter.startStep+', blockCount '+vidFilter.blockCount);
+        console.log('MLV: SCAN video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId+' startStep '+vidFilter.startStep+', blockedTimes '+vidFilter.blocked);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
             console.log('MLV: encrypted: '+vidFilter.requestId); //This will fail :(
@@ -551,43 +551,44 @@ async function getVideoScanStatus(vidFilter) {
             let seekTime = initial+step*i;
             await videoLoadedData(inferenceVideo, url, seekTime);
             let maxTime = getMaxVideoTime(inferenceVideo);
-            console.log('MLV: SCAN max time '+maxTime+' for '+vidFilter.videoGroupId);
+            console.log('MLV: SCAN max time '+maxTime+' for '+vidFilter.videoChainId+' at request '+vidFilter.requestId);
+            let maxSeekTime = initial+step*stepCount;
+            isUnableToScanWholeRange = maxTime < maxSeekTime;
             if(maxTime < seekTime) {
                 break; //invalid even though it tried to seek!
             }
-            let maxSeekTime = initial+step*stepCount;
-            isUnableToScanWholeRange = maxTime < maxSeekTime;
             /*
             if(isUnableToScanWholeRange) {
-                console.log('MLV: bailing on video '+vidFilter.requestId+' video group '+vidFilter.videoGroupId+' max time '+maxTime+' vs seek time '+seekTime+' vs max seek time '+maxSeekTime);
+                console.log('MLV: bailing on video '+vidFilter.requestId+' video group '+vidFilter.videoChainId+' max time '+maxTime+' vs seek time '+seekTime+' vs max seek time '+maxSeekTime);
                 break;
             }
             */
 
-            console.log('MLV: predicting video '+vidFilter.requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+vidFilter.videoGroupId);
+            console.log('MLV: predicting video '+vidFilter.requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+vidFilter.videoChainId);
             
             sqrxrScore = await predict(inferenceVideo, videoCtx);
             if(isSafe(sqrxrScore))
             {
-                console.log('MLV: SCAN PASS video score @'+seekTime+': '+sqrxrScore+' type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoGroupId);
+                console.log('MLV: SCAN PASS video score @'+seekTime+': '+sqrxrScore+' type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId);
+                await common_log_img(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+sqrxrScore);
             }
             else
             {
-                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+sqrxrScore+' type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoGroupId);
+                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+sqrxrScore+' type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId);
                 await common_log_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+sqrxrScore);
-                vidFilter.blockCount++;
+                vidFilter.blocked.push(seekTime);
             }
             vidFilter.startStep = i+1; //e.g. if we finished 0, pick up at 1
-            if(vidFilter.blockCount >= blockThreshold) {
+            if(vidFilter.blocked.length >= blockThreshold) {
                 break;
             }
         }
-        vidFilter.status = vidFilter.blockCount >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_request' : 'pass');
-        console.log('MLV: SCAN video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+vidFilter.status+' blocks '+vidFilter.blockCount+'/'+stepCount+' for video group '+vidFilter.videoGroupId);
+        vidFilter.status = vidFilter.blocked.length >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_request' : 'pass');
+        console.log('MLV: SCAN video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+vidFilter.status+' blocks '+vidFilter.blocked+'/'+stepCount+' for video group '+vidFilter.videoChainId+' at start step '+vidFilter.startStep+' blocked times '+vidFilter.blocked);
     } catch(e) {
-        console.log('MLV: SCAN Error scanning video group '+vidFilter.videoGroupId+':'+e);
-        if(vidFilter.blockCount >= errorBlockThreshold) { //Well, should we make a call?
-            console.log('MLV: SCAN Error video group '+vidFilter.videoGroupId+', blocking based on limited blockCount '+vidFilter.blockCount);
+        console.log('MLV: SCAN Error scanning video group '+vidFilter.videoChainId+':'+e);
+        if(vidFilter.blocked.length >= errorBlockThreshold) { //Well, should we make a call?
+            console.log('MLV: SCAN Error video group '+vidFilter.videoChainId+', blocking based on limited blocked times '+vidFilter.blocked);
             vidFilter.status = 'block';
         } else {
             vidFilter.status = (vidFilter.status == 'block') ? 'block' : 'error';
@@ -645,7 +646,7 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_start': {
-            console.log('DATAV: vid_start '+m.requestId+' with existing buffers length '+m.existingBuffers.length+' for video group '+m.videoGroupId);
+            console.log('DATAV: vid_start '+m.requestId+' with existing buffers length '+m.existingBuffers.length+' for video group '+m.videoChainId);
             PROC_openVidRequests[m.requestId] = {
                 videoChainId: m.videoChainId,
                 requestId: m.requestId,
@@ -654,8 +655,8 @@ async function onPortMessage(m) {
                 mimeType: m.mimeType,
                 buffers: m.existingBuffers,
                 hasScanningBegun: false,
-                startStep: 0,
-                blockCount: 0,
+                startStep: m.processorState == null ? 0 : m.processorState.startStep,
+                blocked: m.processorState == null ? [] : m.processorState.blocked,
                 totalSize: m.existingBuffers.reduce((acc,v)=>acc+v.byteLength,0) //sum
             };
             console.log()
@@ -667,24 +668,23 @@ async function onPortMessage(m) {
             if(vidFilter === undefined) {
                 break;
             }
-            console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoGroupId);
+            console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoChainId);
             vidFilter.buffers.push(m.data);
             vidFilter.totalSize += m.data.byteLength;
-            console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoGroupId +' total size '+vidFilter.totalSize);
+            console.log('DATAV: '+m.requestId+' for video group '+vidFilter.videoChainId +' total size '+vidFilter.totalSize);
             
-            /*
             if(!vidFilter.hasScanningBegun && vidFilter.totalSize >= 1024*1024) {
                 vidFilter.hasScanningBegun = true;
                 await getVideoScanStatus(vidFilter);
                 if(vidFilter.status != 'error') {
                     PROC_port.postMessage({
                         type: 'vid_scan',
-                        videoChainId: videoChainId,
+                        videoChainId: vidFilter.videoChainId,
                         requestId: vidFilter.requestId,
                         status: vidFilter.status,
                         processorState: {
                             startStep: vidFilter.startStep,
-                            processorState: vidFilter.blockCount
+                            blocked: vidFilter.blocked
                         }
                     });
                     delete PROC_openVidRequests[m.requestId];
@@ -693,8 +693,6 @@ async function onPortMessage(m) {
                     vidFilter.hasScanningBegun = false;
                 }
             }
-            */
-            
         }
         break;
         case 'vid_onerror': {
@@ -708,16 +706,21 @@ async function onPortMessage(m) {
             if(vidFilter === undefined) {
                 break;
             }
-            console.log('DATAV: vid_onstop '+m.requestId+ ' for video group ' + vidFilter.videoGroupId);
+            console.log('DATAV: vid_onstop '+m.requestId+ ' for video group ' + vidFilter.videoChainId);
             await getVideoScanStatus(vidFilter);
+            let effectiveStatus = (
+                vidFilter.status == 'error' &&
+                !m.isSingleStream &&
+                vidFilter.totalSize < 1024*1024) 
+                ? 'pass_request' : vidFilter.status;
             PROC_port.postMessage({
                 type: 'vid_scan',
                 videoChainId: m.videoChainId,
                 requestId: vidFilter.requestId,
-                status: vidFilter.status,
+                status: effectiveStatus,
                 processorState: {
                     startStep: vidFilter.startStep,
-                    blockCount: vidFilter.blockCount
+                    blocked: vidFilter.blocked
                 }
             });
             delete PROC_openVidRequests[m.requestId];

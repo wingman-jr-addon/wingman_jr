@@ -11,12 +11,16 @@ function getExistingChain(requestId) {
 }
 
 function findCreateYoutubeGroup(cpn) {
-    let result = {
-        cpn: cpn,
-        chains: []
-    };
-    VID_youtubeGroupsByCpn[cpn] = result;
-    return result;
+    let existing = VID_youtubeGroupsByCpn[cpn];
+    if(existing === undefined) {
+        existing = {
+            cpn: cpn,
+            chains: [],
+            orphans: []
+        };
+        VID_youtubeGroupsByCpn[cpn] = existing;
+    }
+    return existing;
 }
 
 function createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive) {
@@ -41,10 +45,15 @@ function createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclu
         type: 'youtube',
         status: 'unknown',
         endInclusive: -1,
+        processorState: null,
         links: [ ],
+        shadowLinks: [ ],
         setFilterStream: function(requestId, filterStream) {
             let link = this.links.find(l=>l.requestId == requestId);
             link.filterStream = filterStream;
+        },
+        getIsSingleStream: function() {
+            return false;
         },
         _isStatusFinal: function() {
             return ['pass','block','error'].indexOf(status) >= 0;
@@ -74,8 +83,7 @@ function createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclu
             return allBuffers;
         },
         getProcessorState: function(requestId) {
-            let link = this.links.find(l=>l.requestId == requestId);
-            return link.processorState;
+            return this.processorState;
         },
         updateStatus: function(requestId, status, processorState) {
             console.log('WEBREQV: Youtube update '+this.cpn+' '+this.status+'->'+status+' '+JSON.stringify(processorState));
@@ -88,8 +96,9 @@ function createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclu
                 return;
             }
             let link = this.links.find(l=>l.requestId == requestId);
-            link.processorState = processorState;
+            this.processorState = processorState;
             link.status = status;
+            this.status = status;
             console.log('WEBREQV: Youtube chain status '+link.status+' for request '+requestId+' '+this.cpn+', '+this.links.length+' '+link.flushingBuffers.length);
             switch(link.status) {
                 case 'pass_request':
@@ -126,23 +135,47 @@ function createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclu
 }
 
 function findCreateYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclusive) {
-    let existingChain;
     console.log('WEBREQV: findCreateYoutubeChain '+group+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
     if(rangeStartInclusive == 0) { //start new group
         let newChain = createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclusive);
         console.log('WEBREQV: findCreateYoutubeChain new '+group+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        VID_chainsByRequestId[requestId] = newChain;
         group.chains.push(newChain);
-        existingChain = newChain;
-    } else {
-        existingChain = group.chains.find(c => c.endInclusive+1 == rangeStartInclusive);
-        console.log('WEBREQV: findCreateYoutubeChain existing '+group+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        if(existingChain === undefined) {
-            throw `Orphan link ${group.cpn} ${requestId} ${rangeStartInclusive} ${rangeEndInclusive}`;
-        }
+        newChain.appendLink(requestId, rangeStartInclusive, rangeEndInclusive);
+        return newChain;
     }
-    existingChain.appendLink(requestId, rangeStartInclusive, rangeEndInclusive);
-    return existingChain;
+    
+    let existingChain = group.chains.find(c => c.endInclusive+1 == rangeStartInclusive);
+    if(existingChain !== undefined) {
+        existingChain.appendLink(requestId, rangeStartInclusive, rangeEndInclusive);
+        console.log('WEBREQV: findCreateYoutubeChain existing '+existingChain.id+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
+        return existingChain;
+    }
+    //Youtube will try to pick up where it started failing - as in the case of a block.
+    //So, we will try to check the last link of any failed chains and see if it matches.
+    let blockedChain = group.chains.find(c=>
+        c.status=='block' &&
+        c.links.length >= 1 &&
+        c.links[c.links.length-1].rangeStartInclusive == rangeStartInclusive);
+    if(blockedChain !== undefined) {
+        console.log('WEBREQV: findCreateYoutubeChain blocked shadow link '+blockedChain.id+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
+        let shadowLink = createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive);
+        blockedChain.shadowLinks.push(shadowLink);
+        return blockedChain;
+    }
+    //Ok, one last ditch effort - if it's a true orphan AND one of the video chains
+    //for this group is already blocked, then we should block too by returning
+    //a dummy chain with a block status
+    let anyBlockedChain = group.chains.find(c=>c.status=='block');
+    if(anyBlockedChain !== undefined) {
+        console.log('WEBREQV: findCreateYoutubeChain orphan but others blocked '+group.cpn+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
+        return { status: 'block' };
+    }
+
+    console.log('WEBREQV: findCreateYoutubeChain orphan '+group.cpn+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
+
+    let orphan = createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive);
+    group.orphans.push(orphan);
+    throw `Orphan link ${group.cpn} ${requestId} ${rangeStartInclusive} ${rangeEndInclusive}`;
 }
 
 function createDefaultVideoChain(requestId) {
@@ -157,6 +190,9 @@ function createDefaultVideoChain(requestId) {
         setFilterStream: function(requestId, filterStream) {
             this.filterStream = filterStream;
         },
+        getIsSingleStream: function() {
+            return true;
+        },
         _isStatusFinal: function() {
             return ['pass','block','error'].indexOf(status) >= 0;
         },
@@ -165,6 +201,7 @@ function createDefaultVideoChain(requestId) {
                 return;
             }
             this.buffers.push(buffer);
+            this.flushingBuffers.push(buffer);
         },
         getBuffers: function(requestId) { //not valid after status is final
             if(this._isStatusFinal()) {
@@ -213,12 +250,13 @@ function createDefaultVideoChain(requestId) {
             }
         }
     };
-    VID_chainsByRequestId[requestId] = newChain;
     return newChain;
 }
 
 function findCreateChain(details) {
+    console.log('WEBREQV: findCreateChain for '+details.requestId);
     let parsedUrl = new URL(details.url);
+    let newChain;
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         let cpn = parsedUrl.searchParams.get('cpn');
         let youtubeGroup = findCreateYoutubeGroup(cpn);
@@ -227,12 +265,12 @@ function findCreateChain(details) {
         let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
         let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
         let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
-        let youtubeChain = findCreateYoutubeChain(youtubeGroup, details.requestId, rangeStart, rangeEnd);
-        return youtubeChain;
+        newChain = findCreateYoutubeChain(youtubeGroup, details.requestId, rangeStart, rangeEnd);
     } else {
-        let defaultChain = createDefaultVideoChain(requestId);
-        return defaultChain;
+        newChain = createDefaultVideoChain(details.requestId);
     }
+    VID_chainsByRequestId[details.requestId] = newChain;
+    return newChain;
 }
 
 
@@ -293,17 +331,24 @@ async function VID_video_listener(details) {
     try {
         videoChain = findCreateChain(details);
     } catch(e) {
-        //LOG
+        console.log('WEBREQV: Video group error for '+details.requestId+': '+e);
+        console.dir(e);
         return; //Don't filter
     }
-    console.log('WEBREQV: Video group exists with type '+videoChain.type+' status '+videoChain.status+' for '+videoChain.id);
+    console.log('WEBREQV: Video group exists with type '+videoChain.type+' status '+videoChain.status+' for '+videoChain.id+' at request '+details.requestId);
     if(videoChain.status == 'pass') {
         return;
     } else if (videoChain.status == 'block') {
-        return { cancel: true };
+        //Note I tried doing { cancel:true } here but cannot because we are too
+        //late by onHeadersReceived.
+        let blockFilter = browser.webRequest.filterResponseData(details.requestId);
+        blockFilter.ondata = _ => {
+            blockFilter.write(VID_videoPlaceholderArrayBuffer);
+            blockFilter.close();
+        };
+        return details;
     } else if (videoChain.status == 'pass_request') {
         //continue scanning
-        //console.log('WEBREQV: Video chain was pass_incomplete, continuing scanning.');
     } else if(videoChain.status == 'unknown') {
         //continue scanning
     } else {
@@ -359,7 +404,8 @@ async function VID_video_listener(details) {
         processor.postMessage({
             type: 'vid_onstop',
             videoChainId: videoChain.id,
-            requestId: details.requestId
+            requestId: details.requestId,
+            isSingleStream: videoChain.getIsSingleStream()
         });
     }
     return details;
