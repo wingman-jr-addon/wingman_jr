@@ -418,7 +418,7 @@ function setDnsBlocking(onOrOff) {
             console.log('CONFIG: DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
                 dnsBlockListener,
-                {urls:["<all_urls>"], types:["image","imageset","media"]},
+                {urls:["<all_urls>"], types:["image","imageset","media","xmlhttprequest"]},
                 ["blocking"]
               );
         } else if (!effectiveOnOrOff && isCurrentlyOn) {
