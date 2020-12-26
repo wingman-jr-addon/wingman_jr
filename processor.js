@@ -535,7 +535,13 @@ async function getVideoScanStatus(vidFilter) {
     let blockThreshold = 4;
     let errorBlockThreshold = 2;
     try {
-        console.log('MLV: SCAN video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId+' startStep '+vidFilter.startStep+', blockedTimes '+vidFilter.blocked);
+        if(!vidFilter.processorState) {
+            vidFilter.processorState = {
+                startStep: 0,
+                blocked: []
+            };
+        }
+        console.log('MLV: SCAN video '+vidFilter.requestId+' size '+vidFilter.totalSize+', type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId+' startStep '+vidFilter.processorState.startStep+', blockedTimes '+vidFilter.processorState.blocked);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
             console.log('MLV: encrypted: '+vidFilter.requestId); //This will fail :(
@@ -547,7 +553,7 @@ async function getVideoScanStatus(vidFilter) {
         
         let isUnableToScanWholeRange = false; // We have to load at least once, otherwise startStep could be greater
 
-        for(var i=vidFilter.startStep; i<stepCount; i++) {
+        for(var i=vidFilter.processorState.startStep; i<stepCount; i++) {
             let seekTime = initial+step*i;
             await videoLoadedData(inferenceVideo, url, seekTime);
             let maxTime = getMaxVideoTime(inferenceVideo);
@@ -576,19 +582,19 @@ async function getVideoScanStatus(vidFilter) {
             {
                 console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+sqrxrScore+' type '+vidFilter.requestType+', MIME '+vidFilter.mimeType+' for video group '+vidFilter.videoChainId);
                 await common_log_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+sqrxrScore);
-                vidFilter.blocked.push(seekTime);
+                vidFilter.processorState.blocked.push(seekTime);
             }
-            vidFilter.startStep = i+1; //e.g. if we finished 0, pick up at 1
-            if(vidFilter.blocked.length >= blockThreshold) {
+            vidFilter.processorState.startStep = i+1; //e.g. if we finished 0, pick up at 1
+            if(vidFilter.processorState.blocked.length >= blockThreshold) {
                 break;
             }
         }
-        vidFilter.status = vidFilter.blocked.length >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_request' : 'pass');
-        console.log('MLV: SCAN video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+vidFilter.status+' blocks '+vidFilter.blocked+'/'+stepCount+' for video group '+vidFilter.videoChainId+' at start step '+vidFilter.startStep+' blocked times '+vidFilter.blocked);
+        vidFilter.status = vidFilter.processorState.blocked.length >= blockThreshold ? 'block' : (isUnableToScanWholeRange ? 'pass_request' : 'pass');
+        console.log('MLV: SCAN video summary '+vidFilter.requestId+':'+vidFilter.requestType+' status '+vidFilter.status+' blocks '+vidFilter.processorState.blocked+'/'+stepCount+' for video group '+vidFilter.videoChainId+' at start step '+vidFilter.processorState.startStep+' blocked times '+vidFilter.processorState.blocked);
     } catch(e) {
         console.log('MLV: SCAN Error scanning video group '+vidFilter.videoChainId+':'+e);
-        if(vidFilter.blocked.length >= errorBlockThreshold) { //Well, should we make a call?
-            console.log('MLV: SCAN Error video group '+vidFilter.videoChainId+', blocking based on limited blocked times '+vidFilter.blocked);
+        if(vidFilter.processorState.blocked.length >= errorBlockThreshold) { //Well, should we make a call?
+            console.log('MLV: SCAN Error video group '+vidFilter.videoChainId+', blocking based on limited blocked times '+vidFilter.processorState.blocked);
             vidFilter.status = 'block';
         } else {
             vidFilter.status = (vidFilter.status == 'block') ? 'block' : 'error';
@@ -655,8 +661,7 @@ async function onPortMessage(m) {
                 mimeType: m.mimeType,
                 buffers: m.existingBuffers,
                 hasScanningBegun: false,
-                startStep: m.processorState == null ? 0 : m.processorState.startStep,
-                blocked: m.processorState == null ? [] : m.processorState.blocked,
+                processorState: m.processorState,
                 totalSize: m.existingBuffers.reduce((acc,v)=>acc+v.byteLength,0) //sum
             };
             console.log()
@@ -682,10 +687,7 @@ async function onPortMessage(m) {
                         videoChainId: vidFilter.videoChainId,
                         requestId: vidFilter.requestId,
                         status: vidFilter.status,
-                        processorState: {
-                            startStep: vidFilter.startStep,
-                            blocked: vidFilter.blocked
-                        }
+                        processorState: vidFilter.processorState
                     });
                     delete PROC_openVidRequests[m.requestId];
                 } else {
@@ -718,10 +720,7 @@ async function onPortMessage(m) {
                 videoChainId: m.videoChainId,
                 requestId: vidFilter.requestId,
                 status: effectiveStatus,
-                processorState: {
-                    startStep: vidFilter.startStep,
-                    blocked: vidFilter.blocked
-                }
+                processorState: vidFilter.processorState
             });
             delete PROC_openVidRequests[m.requestId];
         }
