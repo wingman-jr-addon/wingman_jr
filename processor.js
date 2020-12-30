@@ -539,7 +539,7 @@ async function getVideoScanStatus(
     videoCanvas.height = PROC_IMAGE_SIZE;
     let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
     videoCtx.imageSmoothingEnabled = true;
-    let inferenceVideo, url, sqrxrScore;
+    let inferenceVideo, videoUrl, sqrxrScore;
 
     let scanResults = {
         type: 'vid_scan',
@@ -551,18 +551,18 @@ async function getVideoScanStatus(
         frames: []
     };
     try {
-        console.log('MLV: SCAN video '+requestId+' size '+totalSize+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        console.log('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
             console.log('MLV: encrypted: '+requestId); //This will fail :(
         };
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
-        url = getVideoUrl(requestId, mimeType, buffers);
+        videoUrl = getVideoUrl(requestId, mimeType, buffers);
 
         for(var i=0; i<scanMaxSteps; i++) {
             let seekTime = scanStart+scanStep*i;
-            await videoLoadedData(inferenceVideo, url, seekTime);
+            await videoLoadedData(inferenceVideo, videoUrl, seekTime);
             let maxTime = getMaxVideoTime(inferenceVideo);
             console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' for '+videoChainId+' at request '+requestId);
             if(maxTime < seekTime) {
@@ -597,12 +597,13 @@ async function getVideoScanStatus(
         console.log('MLV: SCAN Error scanning video group '+videoChainId+':'+e);
         scanResults.error = e;
     } finally {
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(videoUrl);
     }
     return scanResults;
 }
 
 async function onPortMessage(m) {
+    console.debug(`PROCV: Received message of type ${m.type}`);
     switch(m.type) {
         case 'start': {
             PROC_openRequests[m.requestId] = {
@@ -649,7 +650,7 @@ async function onPortMessage(m) {
         }
         break;
         case 'vid_chunk': {
-            console.log('DATAV: vid_start '+m.requestId+' with existing buffers length '+m.existingBuffers.length+' for video group '+m.videoChainId);
+            console.log('DATAV: vid_start '+m.requestId+' with buffers length '+m.buffers.length+' for video chain '+m.videoChainId);
             let scanResults = await getVideoScanStatus(
                 m.videoChainId,
                 m.requestId,
