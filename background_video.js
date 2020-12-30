@@ -3,285 +3,343 @@ let VID_videoPlaceholderArrayBuffer = null;
 fetch('wingman_placeholder.mp4')
 .then(async r => VID_videoPlaceholderArrayBuffer = await r.arrayBuffer());
 
-let VID_chainsByRequestId = { };
-let VID_youtubeGroupsByCpn = { };
 
-function getExistingChain(requestId) {
-    return VID_chainsByRequestId[requestId];
-}
-
-function findCreateYoutubeGroup(cpn) {
-    let existing = VID_youtubeGroupsByCpn[cpn];
-    if(existing === undefined) {
-        existing = {
-            cpn: cpn,
-            chains: [],
-            orphans: []
-        };
-        VID_youtubeGroupsByCpn[cpn] = existing;
+function concatBuffersToUint8Array(buffers) {
+    let fullLength = buffers.reduce((acc,buf)=>acc+buf.byteLength, 0);
+    let result = new Uint8Array(fullLength);
+    console.log('DEBUGV: Full length '+fullLength);
+    let offset = 0;
+    for(let buffer of buffers) {
+        result.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
     }
-    return existing;
+    return result;
 }
 
-function createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive) {
-    return {
-        requestId: requestId,
-        processorState: null,
-        rangeStartInclusive: rangeStartInclusive,
-        rangeEndInclusive: rangeEndInclusive,
-        filterStream: null,
-        buffers: [],
-        flushingBuffers: []
-    };
+function toArrayBuffer(u8Array) {
+    return u8Array.buffer.slice(
+        u8Array.byteOffset,
+        u8Array.byteOffset+u8Array.byteLength
+    );
 }
 
-//Status and state are used a bit loosely here in that they refer to both
-//a status marking by the processor, but ALSO the state of the internal state
-//machine. A bit weak sauce.
-function createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclusive) {
-    return {
-        id: 'youtube-'+group.cpn+'-'+requestId,
-        cpn: group.cpn,
-        type: 'youtube',
-        status: 'unknown',
-        endInclusive: -1,
-        processorState: null,
-        links: [ ],
-        shadowLinks: [ ],
-        setFilterStream: function(requestId, filterStream) {
-            let link = this.links.find(l=>l.requestId == requestId);
-            link.filterStream = filterStream;
-        },
-        getIsSingleStream: function() {
+function readUint64(buffer, offset) {
+    return (
+        buffer[offset]   << 56 |
+        buffer[offset+1] << 48 |
+        buffer[offset+2] << 40 |
+        buffer[offset+3] << 32 |
+        buffer[offset+4] << 24 |
+        buffer[offset+5] << 16 |
+        buffer[offset+6] << 8  |
+        buffer[offset+7]
+        ) >>> 0; //to uint
+}
+
+function readUint32(buffer, offset) {
+    return (
+        buffer[offset]   << 24 |
+        buffer[offset+1] << 16 |
+        buffer[offset+2] << 8  |
+        buffer[offset+3]
+        ) >>> 0; //to uint
+}
+
+function readUint24(buffer, offset) {
+    return (
+        buffer[offset] << 16 |
+        buffer[offset+1] << 8  |
+        buffer[offset+2]
+        ) >>> 0; //to uint
+}
+
+function readUint16(buffer, offset) {
+    return (
+        buffer[offset] << 8  |
+        buffer[offset+1]
+        ) >>> 0; //to uint
+}
+
+function readType(buffer, offset) {
+    let result = '';
+    for(let i=0; i<4; i++) {
+        result += String.fromCharCode(buffer[offset+i]);
+    }
+    return result;
+}
+
+let __aCode = 'a'.charCodeAt(0);
+let __zCode = 'z'.charCodeAt(0);
+function isProbableAtom(buffer, offset) {
+    if(offset >= buffer.byteLength-8) {
+        return false;
+    }
+    let length = readUint32(buffer, offset);
+    if(offset+length >= buffer.byteLength) {
+        return false;
+    }
+    //The type should basically be [a-z]
+    let lengthSize = 4;
+    for(let i=0; i<4; i++) {
+        if(buffer[offset+lengthSize+i]<__aCode || buffer[offset+lengthSize+i] > __zCode) {
             return false;
-        },
-        _isStatusFinal: function() {
-            return ['pass','block','error'].indexOf(status) >= 0;
-        },
-        appendLink: function(requestId, rangeStartInclusive, rangeEndInclusive) {
-            let newLink = createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive);
-            this.links.push(newLink);
-            this.endInclusive = rangeEndInclusive;
-        },
-        appendBuffer: function(requestId, buffer) {
-            if(this._isStatusFinal()) {
-                return;
-            }
-            let link = this.links.find(l=>l.requestId == requestId);
-            link.buffers.push(buffer);
-            link.flushingBuffers.push(buffer);
-        },
-        getBuffers: function(requestId) { //not valid after status is final
-            if(this._isStatusFinal()) {
-                return null;
-            }
-            let allBuffers = [];
-            for(let link of this.links) {
-                if(link.requestId == requestId) break;
-                link.buffers.forEach(b=>allBuffers.push(b));
-            }
-            return allBuffers;
-        },
-        getProcessorState: function(requestId) {
-            return this.processorState;
-        },
-        updateStatus: function(requestId, status, processorState) {
-            console.log('WEBREQV: Youtube update '+this.cpn+' '+this.status+'->'+status+' '+JSON.stringify(processorState));
-            if(this._isStatusFinal()) { //once a final status has been achieved, everything is disconnected.
-                //TODO log warning
-                return;
-            }
-            if(['pass','block','error','pass_request'].indexOf(status) == -1) {
-                //TODO log error
-                return;
-            }
-            let link = this.links.find(l=>l.requestId == requestId);
-            this.processorState = processorState;
-            link.status = status;
-            this.status = status;
-            console.log('WEBREQV: Youtube chain status '+link.status+' for request '+requestId+' '+this.cpn+', '+this.links.length+' '+link.flushingBuffers.length);
-            switch(link.status) {
-                case 'pass_request':
-                case 'error': { //enough data of the request has been guesstimated to be analyzed to pass it
-                    link.flushingBuffers.forEach(fb=>link.filterStream.write(fb));
-                    link.flushingBuffers = [];
-                    link.filterStream.disconnect();
-                    link.filterStream = null;
-                } break;
-                case 'pass': {
-                    for(let aLink of this.links) {
-                        if(aLink.filterStream !== null) {
-                            aLink.flushingBuffers.forEach(fb=>aLlink.filterStream.write(fb));
-                            aLink.filterStream.disconnect();
-                            aLink.filterStream = null;
-                            aLink.flushingBuffers = null;
-                            aLink.buffers = null;
-                        }
-                    }
-                } break;
-                case 'block': {
-                    for(let aLink of this.links) {
-                        if(aLink.filterStream !== null) {
-                            aLink.filterStream.close();
-                            aLink.filterStream = null;
-                            aLink.flushingBuffers = null;
-                            aLink.buffers = null;
-                        }
-                    }
-                } break;
-            }
         }
-    };
+    }
+    return true;
 }
 
-function findCreateYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclusive) {
-    console.log('WEBREQV: findCreateYoutubeChain '+group+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-    if(rangeStartInclusive == 0) { //start new group
-        let newChain = createYoutubeChain(group, requestId, rangeStartInclusive, rangeEndInclusive);
-        console.log('WEBREQV: findCreateYoutubeChain new '+group+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        group.chains.push(newChain);
-        newChain.appendLink(requestId, rangeStartInclusive, rangeEndInclusive);
-        return newChain;
-    }
-    
-    let existingChain = group.chains.find(c => c.endInclusive+1 == rangeStartInclusive);
-    if(existingChain !== undefined) {
-        existingChain.appendLink(requestId, rangeStartInclusive, rangeEndInclusive);
-        console.log('WEBREQV: findCreateYoutubeChain existing '+existingChain.id+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        return existingChain;
-    }
-    //Youtube will try to pick up where it started failing - as in the case of a block.
-    //So, we will try to check the last link of any failed chains and see if it matches.
-    let blockedChain = group.chains.find(c=>
-        c.status=='block' &&
-        c.links.length >= 1 &&
-        c.links[c.links.length-1].rangeStartInclusive == rangeStartInclusive);
-    if(blockedChain !== undefined) {
-        console.log('WEBREQV: findCreateYoutubeChain blocked shadow link '+blockedChain.id+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        let shadowLink = createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive);
-        blockedChain.shadowLinks.push(shadowLink);
-        return blockedChain;
-    }
-    //Ok, one last ditch effort - if it's a true orphan AND one of the video chains
-    //for this group is already blocked, then we should block too by returning
-    //a dummy chain with a block status
-    let anyBlockedChain = group.chains.find(c=>c.status=='block');
-    if(anyBlockedChain !== undefined) {
-        console.log('WEBREQV: findCreateYoutubeChain orphan but others blocked '+group.cpn+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-        return { status: 'block' };
-    }
+function dumpSIDX(buffer, atomOffset) {
+    let b = buffer;
+    let i = atomOffset+8;
 
-    console.log('WEBREQV: findCreateYoutubeChain orphan '+group.cpn+', '+requestId+', '+rangeStartInclusive+'->'+rangeEndInclusive);
-
-    let orphan = createYoutubeChainLink(requestId, rangeStartInclusive, rangeEndInclusive);
-    group.orphans.push(orphan);
-    throw `Orphan link ${group.cpn} ${requestId} ${rangeStartInclusive} ${rangeEndInclusive}`;
-}
-
-function createDefaultVideoChain(requestId) {
-    let newChain = {
-        id: 'default-'+requestId,
-        type: 'default',
-        status: 'unknown',
-        processorState: null,
-        filterStream: null,
-        buffers: [],
-        flushingBuffers: [],
-        setFilterStream: function(requestId, filterStream) {
-            this.filterStream = filterStream;
-        },
-        getIsSingleStream: function() {
-            return true;
-        },
-        _isStatusFinal: function() {
-            return ['pass','block','error'].indexOf(status) >= 0;
-        },
-        appendBuffer: function(requestId, buffer) {
-            if(this._isStatusFinal()) {
-                return;
-            }
-            this.buffers.push(buffer);
-            this.flushingBuffers.push(buffer);
-        },
-        getBuffers: function(requestId) { //not valid after status is final
-            if(this._isStatusFinal()) {
-                return null;
-            }
-            return this.buffers;
-        },
-        getProcessorState: function(requestId) {
-            return this.processorState;
-        },
-        updateStatus: function(requestId, status, processorState) {
-            if(this._isStatusFinal()) { //once a final status has been achieved, everything is disconnected.
-                //TODO log warning
-                return;
-            }
-            if(['pass','block','error','pass_request'].indexOf(status) == -1) {
-                //TODO log error
-                return;
-            }
-            this.processorState = processorState;
-            this.status = status;
-
-            switch(this.status) {
-                case 'pass_request':
-                case 'pass': { //enough data of the request has been guesstimated to be analyzed to pass it
-                    this.flushingBuffers.forEach(fb=>this.filterStream.write(fb));
-                    this.flushingBuffers = null;
-                    this.filterStream.disconnect();
-                    this.filterStream = null;
-                    this.buffers = null;
-                } break;
-                case 'error': { //at this point, essentially a pass
-                    this.flushingBuffers.forEach(fb=>this.filterStream.write(fb));
-                    this.flushingBuffers = null;
-                    this.filterStream.disconnect();
-                    this.filterStream = null;
-                    this.buffers = null;
-                } break;
-                case 'block': {
-                    this.filterStream.write(VID_videoPlaceholderArrayBuffer);
-                    this.filterStream.close();
-                    this.filterStream = null;
-                    this.flushingBuffers = null;
-                    this.buffers = null;
-                } break;
-            }
-        }
-    };
-    return newChain;
-}
-
-function findCreateChain(details) {
-    console.log('WEBREQV: findCreateChain for '+details.requestId);
-    let parsedUrl = new URL(details.url);
-    let newChain;
-    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
-        let cpn = parsedUrl.searchParams.get('cpn');
-        let youtubeGroup = findCreateYoutubeGroup(cpn);
-        let rangeRaw = parsedUrl.searchParams.get('range');
-        console.log('WEBREQV: Youtube chain for request '+details.requestId+' '+cpn+', '+rangeRaw);
-        let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
-        let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
-        let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
-        newChain = findCreateYoutubeChain(youtubeGroup, details.requestId, rangeStart, rangeEnd);
+    let version = buffer[i]; i++;
+    let flags = readUint24(b,i); i+=3;
+    let referenceId = readUint32(b,i); i+=4;
+    let timescale = readUint32(b,i); i+=4;
+    let earliestPTS;
+    if(version == 0) {
+        earliestPTS = readUint32(b,i); i+=4;
     } else {
-        newChain = createDefaultVideoChain(details.requestId);
+        earliestPTS = readUint64(b,i); i+=8;
     }
-    VID_chainsByRequestId[details.requestId] = newChain;
-    return newChain;
+    let firstOffset = readUint32(b,i); i+=4;
+    let __reserved = readUint16(b,i); i+=2;
+    let entryCount = readUint16(b,i); i+=2;
+
+    console.log('DEBUGV:           SIDX Entry Count '+entryCount);
+
+    //Note here that fileOffset seems to refer to the offset relative to the end of the SIDX atom
+    let fileOffset = firstOffset;
+    for(let ei=0; ei<entryCount; ei++) {
+        let referencedSize = readUint32(b,i); i+=4;
+        let subSegmentDuration = readUint32(b,i); i+=4;
+        i+=4; //unused
+        console.log(`DEBUGV:          SIDX Current offset ${fileOffset}, size ${referencedSize}, duration ${subSegmentDuration}`);
+        fileOffset += referencedSize;
+    }
+}
+
+function dumpAtoms(buffers) {
+    let fullBuffer = concatBuffersToUint8Array(buffers);
+
+    //An atom consists of a 4-byte length followed by a 4 byte ASCII indicator.
+    let offset = 0;
+    while(offset < fullBuffer.byteLength-7) {
+        if(isProbableAtom(fullBuffer, offset)) {
+            console.log('DEBUGV: Probable Atom start: '+offset);
+            break;
+        }
+        offset++;
+    }
+    while(offset < fullBuffer.byteLength-7) {
+        let length = readUint32(fullBuffer, offset);
+        let type = readType(fullBuffer, offset+4);
+        let isComplete = offset + length <= fullBuffer.byteLength;
+        console.log(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete}`);
+        if(type == 'sidx') {
+            dumpSIDX(fullBuffer, offset);
+        }
+        offset += length;
+    }
+}
+
+function isProbableAtomOfType(buffer, offset, type) {
+    if(offset >= buffer.byteLength-8) {
+        return false;
+    }
+    let length = readUint32(buffer, offset);
+    if(offset+length >= buffer.byteLength) {
+        return false;
+    }
+    //The type should basically be [a-z]
+    let lengthSize = 4;
+    for(let i=0; i<4; i++) {
+        if(String.fromCharCode(buffer[offset+lengthSize+i]) != type[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function extractFragments(fullBuffer, fileStartOffset) {
+    let offset = 0;
+    while(offset < fullBuffer.byteLength-7) {
+        if(isProbableAtomOfType(fullBuffer, offset, 'moof')) {
+            console.log('DEBUGV: Probable fMP4 fragment start: '+offset);
+            break;
+        }
+        offset++;
+    }
+    //Extract all fragments where at least the moof is complete
+    //and the mdat is detectable, marking where incomplete
+    let fragments = [];
+    while(offset < fullBuffer.byteLength-7) {
+        let moofLength = readUint32(fullBuffer, offset);
+        let moofType = readType(fullBuffer, offset+4);
+        if(moofType != 'moof') {
+            //TODO log
+            break;
+        }
+        let isMoofCompleteAndMdatDetectable = offset + moofLength +8 <= fullBuffer.byteLength;
+        if(!isMoofCompleteAndMdatDetectable) {
+            break;
+        }
+        let mdatLength = readUint32(fullBuffer, offset + moofLength);
+        let mdatType = readType(fullBuffer, offset + moofLength + 4);
+        if(mdatType != 'mdat') {
+            //TODO log
+            break;
+        }
+        let isMdatComplete = offset + moofLength + mdatLength <= fullBuffer.byteLength;
+        if(isMdatComplete) {
+            endDataOffset = offset + moofLength + mdatLength;
+        } else {
+            endDataOffset = fullBuffer.byteLength-1;
+        }
+        fragments.push({
+            fileOffsetMoof: fileStartOffset+offset, //start of moof
+            fileOffsetMdat: fileStartOffset+offset+moofLength,
+            moofMdatData: fullBuffer.slice(offset, offset+moofLength+mdatLength),
+            isMdatComplete: isMdatComplete
+        });
+        offset += moofLength + mdatLength;
+    }
+    return fragments;
 }
 
 
+function parseSIDX(buffer, atomOffset) {
+    let b = buffer;
+    let i = atomOffset+8;
+
+    let version = buffer[i]; i++;
+    let flags = readUint24(b,i); i+=3;
+    let referenceId = readUint32(b,i); i+=4;
+    let timescale = readUint32(b,i); i+=4;
+    let earliestPTS;
+    if(version == 0) {
+        earliestPTS = readUint32(b,i); i+=4;
+    } else {
+        earliestPTS = readUint64(b,i); i+=8;
+    }
+    let firstOffset = readUint32(b,i); i+=4;
+    let __reserved = readUint16(b,i); i+=2;
+    let entryCount = readUint16(b,i); i+=2;
+
+    //Note here that fileOffset seems to refer to the offset relative to the end of the SIDX atom
+    let entries = { };
+    let fileOffset = firstOffset + atomOffset;
+    for(let ei=0; ei<entryCount; ei++) {
+        let referencedSize = readUint32(b,i); i+=4;
+        let subSegmentDuration = readUint32(b,i); i+=4;
+        i+=4; //unused
+        //offset being the global file offset here
+        entries[fileOffset] = { offset: fileOffset, size: referencedSize, duration: subSegmentDuration, status: 'unknown' };
+        fileOffset += referencedSize;
+    }
+
+    return {
+        referenceId: referenceId,
+        earliestPTS: earliestPTS,
+        timescale: timescale,
+        firstOffset: firstOffset,
+        entries: entries
+    };
+}
+
+function createFragmentedMp4(initBuffer) {
+    //This expects the init buffers to have at least (ftyp moov sidx)
+    //and then initial calls to have (moof mdat)+ fragments
+    //This allows (ftyp moov) to be saved as the init segment
+    //and (moof mdat)+ to be appended to create valid fMP4's.
+    let offset = 0;
+    let ftypLength = readUint32(initBuffer, offset);
+    let ftypType = readType(initBuffer, offset+4);
+    if(ftypType != 'ftyp') {
+        throw `Fragmented MP4 expected to start with ftyp, found ${ftypType}`;
+    }
+    offset = ftypLength;
+    let moovLength = readUint32(initBuffer, offset);
+    let moovType = readType(initBuffer, offset+4);
+    if(moovType != 'moov') {
+        throw `Fragmented MP4 expected moov after ftyp, found ${moovType}`;
+    }
+    //Now we have ftyp+moov so we can build the init segment
+    let initSegment = initBuffer.slice(0, ftypLength + moovLength);
+    //Parse SIDX and build up the expected locations for (moof mdat) fragments
+    offset = ftypLength + moovLength;
+    let sidxLength = readUint32(initBuffer, offset);
+    let sidxType = readType(initBuffer, offset+4);
+    if(sidxType != 'sidx') {
+        throw `Fragmented MP4 expected sidx after moov, found ${sidxType}`;
+    }
+    let dataStartIndex = offset + sidxLength;
+    let sidx = parseSIDX(initBuffer, offset);
+
+    let fmp4 = {
+        initSegment: initSegment,
+        dataStartIndex: dataStartIndex,
+        sidx: sidx,
+        doFragmentsMatch: function(fragments) { //as produced by extractFragments
+            return fragments.every(f=>this.sidx.entries[f.fileOffsetMoof]!==undefined);
+        },
+        markFragmentStatus: function(fragments, status) {
+            for(let fragment of fragments) {
+                this.sidx.entries[fragment.fileOffsetMoof].status = status;
+            }
+        }
+    };
+    
+    return fmp4;
+}
+
+
+let VID_openRequests = { };
 async function VID_onVidScan(m) {
-    let videoChain = getExistingChain(m.requestId);
-    console.log('WEBREQV: video result '+m.requestId+' was '+m.status+' chain '+videoChain.id);
-    videoChain.updateStatus(m.requestId, m.status, m.processorState);
+    let openRequest = VID_openRequests(m.requestId);
+    if(openRequest !== undefined) {
+        delete VID_openRequests[m.requestId];
+        openRequest.resolve(m);
+    } //TODO reject based on error handling
 }
 
-// The video listener behaves a bit differently in that it both queues up the data locally as well
-// as passes it to the processor until it hears back a response.
+//Request ID should be unique
+async function performVideoScan(
+    processor,
+    videoChainId,
+    requestId,
+    requestType,
+    url,
+    mimeType,
+    buffers,
+    scanStart,
+    scanStep,
+    scanMaxSteps,
+    scanBlockBailCount
+) {
+    let p = new Promise(function(resolve, reject) {
+        VID_openRequests[requestId] = {
+            requestId: requestId, 
+            resolve: resolve,
+            reject: reject
+        };
+    });
+    processor.port.postMessage({
+        videoChainId: videoChainId,
+        requestId: requestId,
+        requestType: requestType,
+        url: url,
+        mimeType: mimeType,
+        buffers: buffers,
+        scanStart: scanStart,
+        scanStep: scanStep,
+        scanMaxSteps: scanMaxSteps,
+        scanBlockBailCount: scanBlockBailCount
+    })
+    return p;
+}
+
+
 async function VID_video_listener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
@@ -327,86 +385,260 @@ async function VID_video_listener(details) {
         }
     }
 
-    let videoChain;
-    try {
-        videoChain = findCreateChain(details);
-    } catch(e) {
-        console.log('WEBREQV: Video group error for '+details.requestId+': '+e);
-        console.dir(e);
-        return; //Don't filter
-    }
-    console.log('WEBREQV: Video group exists with type '+videoChain.type+' status '+videoChain.status+' for '+videoChain.id+' at request '+details.requestId);
-    if(videoChain.status == 'pass') {
-        return;
-    } else if (videoChain.status == 'block') {
-        //Note I tried doing { cancel:true } here but cannot because we are too
-        //late by onHeadersReceived.
-        let blockFilter = browser.webRequest.filterResponseData(details.requestId);
-        blockFilter.ondata = _ => {
-            blockFilter.write(VID_videoPlaceholderArrayBuffer);
-            blockFilter.close();
-        };
-        return details;
-    } else if (videoChain.status == 'pass_request') {
-        //continue scanning
-    } else if(videoChain.status == 'unknown') {
-        //continue scanning
+
+    //Start splitting based on different types
+    let parsedUrl = new URL(details.url);
+    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
+        if(mimeType.startsWith('video/mp4')) {
+            return VID_yt_mp4(details, mimeType, parsedUrl);
+        } else {
+            let cpn = parsedUrl.searchParams.get('cpn');
+            let range = parsedUrl.searchParams.get('range');
+            let itag = parsedUrl.searchParams.get('itag');
+            console.log(`DEBUGV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
+            return;
+        }
     } else {
-        return; //Generally this is error and we want to pass it through
+        return VID_default(details, mimeType, parsedUrl);
     }
+}
 
-    console.log('WEBREQV: video start headers '+details.requestId);
+async function VID_default(details, mimeType, parsedUrl) {
     let filter = browser.webRequest.filterResponseData(details.requestId);
-    videoChain.setFilterStream(details.requestId, filter);
 
-    let processor = getNextProcessor().port;
-    processor.postMessage({
-        type: 'vid_start',
-        videoChainId: videoChain.id,
-        requestId : details.requestId,
-        requestType: details.type,
-        url: details.url,
-        mimeType: mimeType,
-        existingBuffers: videoChain.getBuffers(details.requestId),
-        processorState: videoChain.getProcessorState(details.requestId),
-    });
+    let videoChainId = 'default-'+details.requestId;
+    //requestId
+    //url,
+    //mimeType,
+    let buffers = [];
+    let scanStart = 0.5; //seconds
+    let scanStep = 1.0;
+    let scanMaxSteps = 30.0;
+    let scanBlockBailCount = 4.0;
+    let totalSize = 0;
+    
+    let status = 'unknown'; //pass, block
   
     filter.ondata = event => {
-        videoChain.appendBuffer(details.requestId, event.data);        
-        processor.postMessage({ 
-            type: 'vid_ondata',
-            videoChainId: videoChain.id,
-            requestId: details.requestId,
-            data: event.data
-        });
+        buffers.push(event.data);
+        totalSize += event.data.byteLength;
+
+        if(totalSize >= 500*1024 && status == 'unknown') {
+            let processor = getNextProcessor();
+            let scanResults = await performVideoScan(
+                processor,
+                videoChainId,
+                details.requestId,
+                mimeType,
+                details.url,
+                details.type,
+                buffers,
+                scanStart,
+                scanStep,
+                scanMaxSteps,
+                scanBlockBailCount
+            );
+            if(scanResults.blockCount >= scanBlockBailCount) {
+                status = 'block';
+                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.close();
+            } else {
+                status = 'pass';
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+            }
+        }
     }
 
     filter.onerror = e => {
-        try
-        {
-            videoChain.updateStatus(details.requestId, 'error', null);
-            processor.postMessage({
-                type: 'vid_onerror',
-                videoChainId: videoChain.id,
-                requestId: details.requestId,
-            })
+        try {
+            filter.disconnect();
+        } catch(ex) {
+            console.log('WEBREQ: Filter video error: '+ex);
         }
-        catch(ex)
-        {
+    }
+  
+    filter.onstop = async _ => {
+        if(status != 'unknown') {
+            return;
+        }
+        let processor = getNextProcessor();
+        let scanResults = await performVideoScan(
+            processor,
+            videoChainId,
+            details.requestId,
+            mimeType,
+            details.url,
+            details.type,
+            buffers,
+            scanStart,
+            scanStep,
+            scanMaxSteps,
+            scanBlockBailCount
+        );
+        if(scanResults.blockCount >= scanBlockBailCount) {
+            status = 'block';
+            filter.write(VID_videoPlaceholderArrayBuffer);
+            filter.close();
+        } else {
+            status = 'pass';
+            buffers.forEach(b=>filter.write(b));
+            filter.disconnect();
+        }
+    }
+    return details;
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+let VID_youtubeMp4Groups = { };
+
+//Youtube MP4 stream listener.
+//Note this expects that each fragment is relatively small, so it does nothing
+//as part of the 
+async function VID_yt_mp4(details, mimeType, parsedUrl) {
+
+    let cpn = parsedUrl.searchParams.get('cpn');
+    let videoChainId = 'yt-mp4-'+cpn+'-'+details.requestId;
+    let rangeRaw = parsedUrl.searchParams.get('range');
+    console.log('WEBREQV: Youtube chain for request '+details.requestId+' '+cpn+', '+rangeRaw);
+    let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
+    let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
+    let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
+    
+
+
+    console.log('WEBREQV: video start headers '+details.requestId);
+    let filter = browser.webRequest.filterResponseData(details.requestId);
+
+    let buffers = [];
+  
+    //TODO Move this logic to pre-request
+    filter.onstart = _ => {
+        let youtubeMp4GroupPrecheck = youtubeMp4Group[cpn];
+        if (youtubeMp4GroupPrecheck !== undefined) {
+            if(youtubeMp4GroupPrecheck.status == 'block') {
+                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.close();
+            }
+        }
+    }
+
+    filter.ondata = event => {
+        buffers.push(event.data);
+    }
+
+    filter.onerror = e => {
+        try {
+            filter.disconnect();
+        } catch(ex) {
             console.log('WEBREQ: Filter video error: '+e+', '+ex);
         }
     }
   
-    filter.onstop = async event => {
-        let dataStopTime = performance.now();
-        console.log('WEBREQV: Video request '+details.requestId+' took ms, it had MIME type '+mimeType+' and came from source '+details.type);
-        
-        processor.postMessage({
-            type: 'vid_onstop',
-            videoChainId: videoChain.id,
-            requestId: details.requestId,
-            isSingleStream: videoChain.getIsSingleStream()
-        });
+    filter.onstop = async _ => {
+        try {
+            // 1. Setup the FMP4 stream - tuck away the init segment and create the index
+            let fmp4;
+            let checkFragmentsBuffer;
+            
+            if(rangeStart == 0) {
+                let youtubeMp4Group = youtubeMp4Group[cpn];
+                if(youtubeMp4Group === undefined) {
+                    youtubeMp4Group = {
+                        status: 'unknown',
+                        cpn: cpn,
+                        streams: [],
+                        scanCount: 0,
+                        blockCount: 0
+                    };
+                    VID_youtubeMp4Groups[cpn] = youtubeMp4Group;
+                }
+
+                let fullBuffer = concatBuffersToUint8Array(buffers);
+                fmp4 = createFragmentedMp4(fullBuffer);
+                fmp4.videoChainId = videoChainId;
+                fmp4.scanCount = 0;
+                fmp4.blockCount = 0;
+                checkFragmentsBuffer = fullBuffer.slice(fmp4.dataStartIndex);
+            } else {
+                checkFragmentsBuffer = concatBuffersToUint8Array(buffers);
+            }
+
+            // 2. Process any data
+            let fragments = extractFragments(checkFragmentsBuffer);
+            if(fragments.length == 0) {
+                //Nothing to see here, move along
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+
+            let youtubeMp4Group = youtubeMp4Group[cpn];
+            if(youtubeMp4Group === undefined) {
+                //TODO log
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+            for(let stream of youtubeMp4Group.streams) {
+                if(stream.doFragmentsMatch(fragments)) {
+                    fmp4 = stream;
+                    break;
+                }
+            }
+            if(fmp4 === undefined) {
+                //TODO log
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+
+            //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
+            let scanBuffers = [ toArrayBuffer(fmp4.initSegment) ];
+            fragments.forEach(f=>scanBuffers.push(toArrayBuffer(f.moofMdatData)));
+            
+            //requestId
+            //url,
+            //mimeType,
+            let scanStart = 0.5; //seconds
+            let scanStep = 1.0;
+            let scanMaxSteps = 10.0;
+            let scanBlockBailCount = 4.0;
+
+            let scanResults = await performVideoScan(
+                processor,
+                videoChainId,
+                details.requestId,
+                mimeType,
+                details.url,
+                details.type,
+                scanBuffers,
+                scanStart,
+                scanStep,
+                scanMaxSteps,
+                scanBlockBailCount
+            );
+            fmp4.scanCount += scanResults.scanCount;
+            fmp4.blockCount += scanResults.blockCount;
+            youtubeMp4Group.scanCount += scanResults.scanCount;
+            youtubeMp4Group.blockCount += scanResults.blockCount;
+            if(scanResults.blockCount >= scanBlockBailCount) {
+                status = 'block';
+                youtubeMp4Group.status = 'block';
+                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.close();
+            } else {
+                status = 'pass';
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+            }
+        } catch(e) {
+            buffers.forEach(b=>filter.write(b));
+            filter.close();
+        }
     }
     return details;
 }
