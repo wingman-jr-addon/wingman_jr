@@ -462,6 +462,9 @@ async function checkProcess() {
 }
 
 function getMaxVideoTime(video) {
+    if(!isNaN(video.duration)) {
+        return video.duration;
+    }
     let maxTime = -1;
     for(let i=0; i<video.buffered.length; i++) {
         if(video.buffered.end(i) > maxTime) {

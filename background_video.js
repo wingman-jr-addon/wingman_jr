@@ -413,40 +413,42 @@ async function VID_video_listener(details) {
 }
 
 async function VID_default(details, mimeType, parsedUrl) {
+    console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let videoChainId = 'default-'+details.requestId;
-    //requestId
-    //url,
-    //mimeType,
     let buffers = [];
     let scanStart = 0.5; //seconds
     let scanStep = 1.0;
-    let scanMaxSteps = 30.0;
+    let scanMaxSteps = 20.0;
     let scanBlockBailCount = 3.0;
     let totalSize = 0;
     
     let status = 'unknown'; //pass, block
   
     filter.ondata = async event => {
+        console.debug(`DEFV: Data for ${details.requestId} of size ${event.data.byteLength}`);
         buffers.push(event.data);
         totalSize += event.data.byteLength;
 
         if(totalSize >= 500*1024 && status == 'unknown') {
+            status = 'scanning';
+            console.log(`DEFV: Triggering scan ${details.requestId} because total size ${totalSize}`);
             let processor = getNextProcessor();
             let scanResults = await performVideoScan(
                 processor,
                 videoChainId,
                 details.requestId,
-                mimeType,
-                details.url,
                 details.type,
+                details.url,
+                mimeType,
                 buffers,
                 scanStart,
                 scanStep,
                 scanMaxSteps,
                 scanBlockBailCount
             );
+            console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
             if(scanResults.blockCount >= scanBlockBailCount) {
                 status = 'block';
                 filter.write(VID_videoPlaceholderArrayBuffer);
@@ -471,6 +473,7 @@ async function VID_default(details, mimeType, parsedUrl) {
         if(status != 'unknown') {
             return;
         }
+        console.log(`DEFV: Triggering scan ${details.requestId} onstop because status is unknown`);
         let processor = getNextProcessor();
         let scanResults = await performVideoScan(
             processor,
@@ -485,6 +488,7 @@ async function VID_default(details, mimeType, parsedUrl) {
             scanMaxSteps,
             scanBlockBailCount
         );
+        console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
         if(scanResults.blockCount >= scanBlockBailCount) {
             status = 'block';
             filter.write(VID_videoPlaceholderArrayBuffer);
