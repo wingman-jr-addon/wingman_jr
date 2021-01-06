@@ -398,7 +398,7 @@ async function VID_video_listener(details) {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
             let itag = parsedUrl.searchParams.get('itag');
-            console.log(`YTV: Mostly unsupported webm Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
+            console.log(`YTV: Mostly unsupported webm Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag}) ${details.url}`);
             return await VID_yt_webm_tagalong(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
@@ -698,6 +698,8 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
 
     console.log('YTVMP4: video start headers '+details.requestId);
     let filter = browser.webRequest.filterResponseData(details.requestId);
+
+    let debugBuffers = [];
   
     //TODO Move this logic to pre-request
     filter.onstart = _ => {
@@ -714,6 +716,7 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
     filter.ondata = event => {
         console.debug('YTVWEBM: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
         filter.write(event.data);
+        debugBuffers.push(event.data);
     }
 
     filter.onerror = e => {
@@ -726,6 +729,12 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
   
     filter.onstop = async _ => {
         filter.close();
+        if(rangeStart == 0) {
+            let u8Array = concatBuffersToUint8Array(debugBuffers);
+            let structure = ebmlStruct(u8Array);
+            let dump = ebmlDump(structure);
+            console.log('YTV-WEBM-DUMP: \r\n'+dump);
+        }
     }
     return details;
 }
