@@ -686,7 +686,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
 async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
-    let videoChainId = 'yt-mp4-'+cpn+'-'+details.requestId;
+    let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
     let rangeRaw = parsedUrl.searchParams.get('range');
     console.log('YTVWEBM: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
     let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
@@ -723,7 +723,7 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
         try {
             filter.disconnect();
         } catch(ex) {
-            console.log('YTVMP4: Filter video error: '+e+', '+ex);
+            console.log('YTVWEBM: Filter video error: '+e+', '+ex);
         }
     }
   
@@ -734,6 +734,8 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
             let structure = ebmlStruct(u8Array);
             let dump = ebmlDump(structure);
             console.log('YTV-WEBM-DUMP: \r\n'+dump);
+            let indices = ebmlGenerateCuesIndex(u8Array);
+            console.dir(indices);
         }
     }
     return details;
