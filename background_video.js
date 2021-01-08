@@ -397,8 +397,6 @@ async function VID_video_listener(details) {
         } else if(mimeType.startsWith('video/webm')) {
             console.log(`YTVWEBM: Starting for request ${details.requestId}`);
             return await VID_yt_webm(details, mimeType, parsedUrl);
-            //console.log(`YTV: Mostly unsupported webm Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag}) ${details.url}`);
-            //return await VID_yt_webm_tagalong(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
@@ -684,64 +682,6 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
     return details;
 }
 
-async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
-
-    let cpn = parsedUrl.searchParams.get('cpn');
-    let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
-    let rangeRaw = parsedUrl.searchParams.get('range');
-    console.log('YTVWEBM: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
-    let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
-    let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
-    let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
-    let itag = parsedUrl.searchParams.get('itag');
-    
-
-
-    console.log('YTVMP4: video start headers '+details.requestId);
-    let filter = browser.webRequest.filterResponseData(details.requestId);
-
-    let debugBuffers = [];
-  
-    //TODO Move this logic to pre-request
-    filter.onstart = _ => {
-        let youtubeGroupPrecheck = VID_youtubeGroups[cpn];
-        if (youtubeGroupPrecheck !== undefined) {
-            if(youtubeGroupPrecheck.status == 'block') {
-                console.log(`YTVWEBM: Pre-blocking CPN ${cpn} for ${details.requestId}`);
-                filter.write(VID_videoPlaceholderArrayBuffer);
-                filter.close();
-            }
-        }
-    }
-
-    filter.ondata = event => {
-        console.debug('YTVWEBM: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
-        filter.write(event.data);
-        debugBuffers.push(event.data);
-    }
-
-    filter.onerror = e => {
-        try {
-            filter.disconnect();
-        } catch(ex) {
-            console.log('YTVWEBM: Filter video error: '+e+', '+ex);
-        }
-    }
-  
-    filter.onstop = async _ => {
-        filter.close();
-        if(rangeStart == 0) {
-            let u8Array = concatBuffersToUint8Array(debugBuffers);
-            let structure = ebmlStruct(u8Array);
-            let dump = ebmlDump(structure);
-            console.log('YTV-WEBM-DUMP: \r\n'+dump);
-            let indices = ebmlGenerateCuesIndex(u8Array);
-            console.dir(indices);
-        }
-    }
-    return details;
-}
-
 //Youtube WebM stream listener.
 //Note this expects that each fragment is relatively small
 async function VID_yt_webm(details, mimeType, parsedUrl) {
@@ -797,7 +737,6 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
 
                 let fullBuffer = concatBuffersToUint8Array(buffers);
                 webm = ebmlCreateFragmentedWebM(fullBuffer);
-                console.dir(webm); //TODO remove
                 webm.videoChainId = videoChainId;
                 webm.scanCount = 0;
                 webm.blockCount = 0;
