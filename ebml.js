@@ -30,6 +30,7 @@ function ebmlDecodeVarint(u8Array, index) {
         index: index,
         byteLength: byteLength,
         value: value,
+        mask: mask,
         unmaskedValue: unmaskedValue
     };
 }
@@ -45,14 +46,19 @@ function ebmlDecodeU(u8Array, struct) {
 
 //It should be noted that ID's are actually the *unmasked* values when read, unlike length.
 const EBML_DEFS = [
-    { id: 0x1A45DFA3, name: "EBML"},
-    { id: 0x18538067, name: "Segment" },
-    { id: 0x114D9B74, name: "Seekhead" },
-    { id: 0x1C53BB6B, name: "Cues" },
-    { id: 0xBB,       name: "CuePoint" },
-    { id: 0xB7,       name: "CueTrackPositions" },
-    { id: 0xF1,       name: "CueClusterPosition" },
-    { id: 0xF0,       name: "CueRelativePosition" }
+    { id: 0x1A45DFA3, name: 'EBML'},
+    { id: 0x18538067, name: 'Segment' },
+    { id: 0x1549A966, name: 'SegmentInformation' },
+    { id: 0x114D9B74, name: 'Seekhead' },
+    { id: 0x1654AE6B, name: 'Tracks' },
+    { id: 0x1C53BB6B, name: 'Cues' },
+    { id: 0xBB,       name: 'CuePoint' },
+    { id: 0xB7,       name: 'CueTrackPositions' },
+    { id: 0xF1,       name: 'CueClusterPosition' },
+    { id: 0xF0,       name: 'CueRelativePosition' },
+    { id: 0x1F43B675, name: 'Cluster'},
+    { id: 0xA3,       name: 'SimpleBlock' },
+    { id: 0xA0,       name: 'BlockGroup' }
 ];
 
 let EBML_DEFS_BY_ID = { };
@@ -67,6 +73,8 @@ function ebmlShouldRecurse(id) {
     return EBML_DEFS_BY_ID[id] !== undefined;
 }
 
+//Parse the EBML stream into an array of structures, with substructures as requested
+//Note that this does NOT detect/handle the unknown length indicator
 function ebmlStruct(u8Array, startIndex, length, shouldRecursePredicate) {
     if(startIndex === undefined) {
         startIndex = 0;
@@ -80,7 +88,7 @@ function ebmlStruct(u8Array, startIndex, length, shouldRecursePredicate) {
     let elements = [];
     let i = startIndex;
     try {
-        while(i < startIndex+length) {
+        while(i < startIndex+length && i<u8Array.length) {
             let elementStartIndex = i;
             let idV = ebmlDecodeVarint(u8Array, i);
             i += idV.byteLength;
@@ -121,30 +129,116 @@ function ebmlDump(structArray, level) {
     return result;
 }
 
-//Generate the global file position indices of the Cues
-function ebmlGenerateCuesIndex(u8Array) {
+//Generate the WebM initialization segment and Cues index
+function ebmlCreateFragmentedWebM(u8Array) {
     //General strategy:
     //1) Find the Segment and mark so we know the relative position
-    //2) Find the Segment->Cues->CuePoint->CueTrackPositions, CueClusterPosition
+    //2) Find the end of the Segment->SegmentInformation section so we can build a generic initialization segment
+    //3) Find the Segment->Cues->CuePoint->CueTrackPositions, CueClusterPosition
+    //4) If available, find the first Cluster and indicate that as the data start
 
     let idCache = ['Segment','Cues','CuePoint','CueTrackPositions'].map(name=>EBML_DEFS_BY_NAME[name].id);
     let structs = ebmlStruct(u8Array, 0, u8Array.length, id=>idCache.indexOf(id)>=0);
 
+    //1) Find the Segment
     let segmentStruct = structs.find(s=>s.id == EBML_DEFS_BY_NAME['Segment'].id);
     let segmentStartIndex = segmentStruct.dataStartIndex;
 
+    //2) Build the generic initialization segment
+    let infoStruct = segmentStruct.children.find(s=>s.id == EBML_DEFS_BY_NAME['SegmentInformation'].id);
+    let endOfInfoIndex = infoStruct.dataStartIndex + infoStruct.length;
+    let tracksStruct = segmentStruct.children.find(s=>s.id == EBML_DEFS_BY_NAME['Tracks'].id);
+    let endOfTracksIndex = tracksStruct.dataStartIndex + tracksStruct.length;
+    let endOfInitIndex = Math.max(endOfInfoIndex, endOfTracksIndex);
+    let initBuffer = u8Array.slice(0, endOfInitIndex);
+    
+    //Now futz with it to make the segment length unknown instead of whatever we had.
+    //First re-read the id and length manually so we can tweak on length
+    let segmentId = ebmlDecodeVarint(initBuffer, segmentStruct.startIndex);
+    let segmentLengthIndex = segmentStruct.startIndex + segmentId.byteLength;
+    let segmentLength = ebmlDecodeVarint(initBuffer, segmentLengthIndex);
+    //The trick here is to set the length to unknown. Since this is all 1's (regardless of size), we
+    //can coincidentally reuse the mask (with an extra 1) in the decode routine as the value here.
+    let unknownValue = segmentLength.mask << 1 | 0x01;
+    for(let i=segmentLength.byteLength-1; i>=0; i--, unknownValue>>=8) {
+        initBuffer[segmentLengthIndex+i] = unknownValue & 0xFF;
+    }
+
+    //3) Build index from Cues
     let cues = segmentStruct.children.filter(s=>s.id == EBML_DEFS_BY_NAME['Cues'].id);
     let cuePoints = cues.flatMap(s=>s.children).filter(s=>s.id == EBML_DEFS_BY_NAME['CuePoint'].id);
     let cueTrackPositions = cuePoints.flatMap(s=>s.children).filter(s=>s.id == EBML_DEFS_BY_NAME['CueTrackPositions'].id);
 
-    let indices = [];
+    let indices = { };
     for(let ctp of cueTrackPositions) {
         //At present we don't actually care which track it belongs to although this is ordinarily
         //important.
         let ccp = ctp.children.find(s=>s.id == EBML_DEFS_BY_NAME['CueClusterPosition'].id);
         let ccpOffset = ebmlDecodeU(u8Array, ccp);
         let globalIndex = segmentStartIndex + ccpOffset;
-        indices.push(globalIndex);
+        indices[globalIndex] = { offset: globalIndex, status: 'unknown' };
     }
-    return indices;
+
+    let firstCluster = segmentStruct.children.find(s=>s.id == EBML_DEFS_BY_NAME['Cluster'].id);
+    let clusterStartIndex = undefined;
+    if(firstCluster) {
+        clusterStartIndex = firstCluster.startIndex;
+    }
+
+    return {
+        initSegment: initBuffer,
+        clusterStartIndex: clusterStartIndex,
+        segmentStartIndex: segmentStartIndex,
+        indices: indices,
+        doFragmentsMatch: function(fragments) { //as produced by ebmlExtractFragments
+            //NOTE: Just starting with this logic. By spec, I don't think all Clusters
+            //Need to be here, only key frames, so this could change up in the future.
+            //This should also influence markFragments
+            return fragments.every(f=>this.indices[f.fileOffsetCluster]!==undefined);
+        },
+        markFragments: function(fragments, status) {
+            for(let fragment of fragments) {
+                this.indices[fragment.fileOffsetCluster].status = status;
+            }
+        }
+    };
+}
+
+//This is a specialized method to simply probe if the location is likely the start of a Cluster
+const EBML_CLUSTER_ID_ARRAY = [0x1F, 0x43, 0xB6, 0x75];
+function ebmlIsLikelyCluster(u8Array, index) {
+    for(let i=index; i<index+4 && i<u8Array.length; i++) {
+        if(u8Array[i] != EBML_CLUSTER_ID_ARRAY[i]) {
+            return false;
+        }
+    }
+    //One last thing we can do is to make sure - if we have more data - is to guarantee the
+    //next byte is not 0 because that would lead to an invalid length
+    return index+4 >= u8Array.length || u8Array[index+4] != 0;
+}
+
+function ebmlExtractFragments(u8Array, fileStartOffset) {
+    //Basic strategy: find the start of the first Cluster, then gather all
+    //Clusters / partial Clusters after that
+    let offset = 0;
+    while(offset < u8Array.byteLength-1) {
+        if(ebmlIsLikelyCluster(u8Array, offset)) {
+            console.log('DEBUGV: Probable fWebM Cluster start: '+offset);
+            break;
+        }
+        offset++;
+    }
+    let structs = ebmlStruct(u8Array, offset, u8Array.length-offset, id=>false /* No subelements */);
+    let clusterStructs = structs.filter(s=>s.id == EBML_DEFS_BY_NAME['Cluster'].id);
+    let fragments = [];
+    for(let clusterStruct of clusterStructs) {
+        let endOfClusterIndex = clusterStruct.dataStartIndex + clusterStruct.length;
+        let isClusterComplete = endOfClusterIndex >= u8Array.length;
+        fragments.push({
+            fileOffsetCluster: fileStartOffset + clusterStruct.startIndex,
+            clusterData: u8Array.slice(clusterStruct.startIndex, isClusterComplete ? endOfClusterIndex : u8Array.length - 1),
+            isClusterComplete: isClusterComplete
+        });
+    }
+    return fragments;
 }

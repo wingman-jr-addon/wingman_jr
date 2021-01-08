@@ -395,11 +395,10 @@ async function VID_video_listener(details) {
             console.log(`YTVMP4: Starting for request ${details.requestId}`);
             return await VID_yt_mp4(details, mimeType, parsedUrl);
         } else if(mimeType.startsWith('video/webm')) {
-            let cpn = parsedUrl.searchParams.get('cpn');
-            let range = parsedUrl.searchParams.get('range');
-            let itag = parsedUrl.searchParams.get('itag');
-            console.log(`YTV: Mostly unsupported webm Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag}) ${details.url}`);
-            return await VID_yt_webm_tagalong(details, mimeType, parsedUrl);
+            console.log(`YTVWEBM: Starting for request ${details.requestId}`);
+            return await VID_yt_webm(details, mimeType, parsedUrl);
+            //console.log(`YTV: Mostly unsupported webm Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag}) ${details.url}`);
+            //return await VID_yt_webm_tagalong(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
@@ -525,8 +524,7 @@ function checkCreateYoutubeGroup(cpn) {
 let VID_youtubeGroups = { };
 
 //Youtube MP4 stream listener.
-//Note this expects that each fragment is relatively small, so it does nothing
-//as part of the 
+//Note this expects that each fragment is relatively small
 async function VID_yt_mp4(details, mimeType, parsedUrl) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
@@ -545,9 +543,9 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
   
     //TODO Move this logic to pre-request
     filter.onstart = _ => {
-        let youtubeMp4GroupPrecheck = VID_youtubeGroups[cpn];
-        if (youtubeMp4GroupPrecheck !== undefined) {
-            if(youtubeMp4GroupPrecheck.status == 'block') {
+        let youtubeGroupPrecheck = VID_youtubeGroups[cpn];
+        if (youtubeGroupPrecheck !== undefined) {
+            if(youtubeGroupPrecheck.status == 'block') {
                 filter.write(VID_videoPlaceholderArrayBuffer);
                 filter.close();
             }
@@ -572,6 +570,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
             // 1. Setup the FMP4 stream - tuck away the init segment and create the index
             let fmp4;
             let checkFragmentsBuffer;
+            let fragmentFileOffset = rangeStart;
             
             if(rangeStart == 0) {
                 console.log(`YTVMP4: New FMP4 ${cpn} for ${details.requestId} at quality ${itag}`);
@@ -584,6 +583,8 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
                 fmp4.blockCount = 0;
                 youtubeGroup.fmp4s.push(fmp4);
                 checkFragmentsBuffer = fullBuffer.slice(fmp4.dataStartIndex);
+                //TODO Found this issue in WebM, need for MP4?
+                //fragmentFileOffset += fmp4.dataStartIndex;
                 console.log(`YTVMP4: Completed creating new FMP4 ${cpn} for ${details.requestId} at quality ${itag}, index count ${fmp4.sidx.entries.length}`);
             } else {
                 console.log(`YTVMP4: Will look for existing FMP4 ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
@@ -592,7 +593,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
 
             // 2. Append any (moof mdat)+
             console.log(`YTVMP4: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
-            let fragments = extractFragments(checkFragmentsBuffer, rangeStart);
+            let fragments = extractFragments(checkFragmentsBuffer, fragmentFileOffset);
             if(fragments.length == 0) {
                 console.log(`YTVMP4: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
@@ -736,6 +737,167 @@ async function VID_yt_webm_tagalong(details, mimeType, parsedUrl) {
             console.log('YTV-WEBM-DUMP: \r\n'+dump);
             let indices = ebmlGenerateCuesIndex(u8Array);
             console.dir(indices);
+        }
+    }
+    return details;
+}
+
+//Youtube WebM stream listener.
+//Note this expects that each fragment is relatively small
+async function VID_yt_webm(details, mimeType, parsedUrl) {
+
+    let cpn = parsedUrl.searchParams.get('cpn');
+    let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
+    let rangeRaw = parsedUrl.searchParams.get('range');
+    console.log('YTVWEBM: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
+    let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
+    let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
+    let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
+    let itag = parsedUrl.searchParams.get('itag');
+
+    console.log('YTVWEBM: video start headers '+details.requestId);
+    let filter = browser.webRequest.filterResponseData(details.requestId);
+
+    let buffers = [];
+  
+    //TODO Move this logic to pre-request
+    filter.onstart = _ => {
+        let youtubeGroupPrecheck = VID_youtubeGroups[cpn];
+        if (youtubeGroupPrecheck !== undefined) {
+            if(youtubeGroupPrecheck.status == 'block') {
+                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.close();
+            }
+        }
+    }
+
+    filter.ondata = event => {
+        console.debug('YTVWEBM: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
+        buffers.push(event.data);
+    }
+
+    filter.onerror = e => {
+        try {
+            filter.disconnect();
+        } catch(ex) {
+            console.log('YTVWEBM: Filter video error: '+e+', '+ex);
+        }
+    }
+  
+    filter.onstop = async _ => {
+        try {
+            // 1. Setup the WebM stream - tuck away the init segment and create the index
+            let webm;
+            let checkFragmentsBuffer;
+            let fragmentFileOffset = rangeStart;
+            
+            if(rangeStart == 0) {
+                console.log(`YTVWEBM: New WebM ${cpn} for ${details.requestId} at quality ${itag}`);
+                let youtubeGroup = checkCreateYoutubeGroup(cpn);
+
+                let fullBuffer = concatBuffersToUint8Array(buffers);
+                webm = ebmlCreateFragmentedWebM(fullBuffer);
+                console.dir(webm); //TODO remove
+                webm.videoChainId = videoChainId;
+                webm.scanCount = 0;
+                webm.blockCount = 0;
+                youtubeGroup.webms.push(webm);
+                checkFragmentsBuffer = fullBuffer.slice(webm.clusterStartIndex);
+                fragmentFileOffset += webm.clusterStartIndex;
+                console.log(`YTVWEBM: Completed creating new WebM ${cpn} for ${details.requestId} at quality ${itag}`);
+            } else {
+                console.log(`YTVWEBM: Will look for existing WebM ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
+                checkFragmentsBuffer = concatBuffersToUint8Array(buffers);
+            }
+
+            // 2. Append any Cluster
+            console.log(`YTVWEBM: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            let fragments = ebmlExtractFragments(checkFragmentsBuffer, fragmentFileOffset);
+            if(fragments.length == 0) {
+                console.log(`YTVWEBM: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+            console.log(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+
+            let youtubeGroup = VID_youtubeGroups[cpn];
+            if(youtubeGroup === undefined) {
+                console.log(`YTVWEBM: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+            console.log(`YTVWEBM: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            for(let stream of youtubeGroup.webms) {
+                if(stream.doFragmentsMatch(fragments)) {
+                    console.log(`YTVWEBM: Found existing WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+                    webm = stream;
+                    break;
+                }
+            }
+            if(webm === undefined) {
+                console.log(`YTVWEBM: No WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                return;
+            }
+
+            // 3. Setup scanning
+            console.debug(`YTVWEBM: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
+            let scanBuffers = [ toArrayBuffer(webm.initSegment) ];
+            fragments.forEach(f=>scanBuffers.push(toArrayBuffer(f.clusterData)));
+
+            let scanStart = 0.5; //seconds
+            let scanStep = 1.0;
+            let scanMaxSteps = 10.0;
+            let scanBlockBailCount = 4.0;
+
+            console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            let processor = getNextProcessor();
+            let scanResults = await performVideoScan(
+                processor,
+                videoChainId,
+                details.requestId,
+                mimeType,
+                details.url,
+                details.type,
+                scanBuffers,
+                scanStart,
+                scanStep,
+                scanMaxSteps,
+                scanBlockBailCount
+            );
+            /*let scanResults = {
+                scanCount: 0,
+                blockCount: 0
+            };*/
+            console.log(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            webm.scanCount += scanResults.scanCount;
+            webm.blockCount += scanResults.blockCount;
+            youtubeGroup.scanCount += scanResults.scanCount;
+            youtubeGroup.blockCount += scanResults.blockCount;
+            let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
+                                    || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
+            let isThisStreamBlock = (webm.scanCount >= 20 && webm.blockCount / webm.scanCount >= 0.15);
+            let isThisGroupBlock = (youtubeGroup.scanCount >= 20 && youtubeGroup.blockCount / youtubeGroup.scanCount >= 0.15);
+            console.log(`YTVWEBM/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${webm.blockCount}/${webm.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
+            if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                status = 'block';
+                youtubeGroup.status = 'block';
+                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.close();
+            } else {
+                status = 'pass';
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+            }
+            webm.markFragments(fragments, status);
+        } catch(e) {
+            console.log(`YTVWEBM: Error for ${details.requestId} ${e}`);
+            buffers.forEach(b=>filter.write(b));
+            filter.close();
         }
     }
     return details;

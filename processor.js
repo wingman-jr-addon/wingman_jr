@@ -475,7 +475,7 @@ function getMaxVideoTime(video) {
 }
 
 const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
-    video.addEventListener('error', e=>reject(e), {once: true});
+    video.addEventListener('error', ()=>reject(video.error), {once: true});
     video.addEventListener('seeked',  () => {
         video.width = video.videoWidth;
         video.height = video.videoHeight;
@@ -597,7 +597,7 @@ async function getVideoScanStatus(
             }
         }
     } catch(e) {
-        console.log('MLV: SCAN Error scanning video group '+videoChainId+':'+e);
+        console.log('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
         scanResults.error = e;
     } finally {
         URL.revokeObjectURL(videoUrl);
