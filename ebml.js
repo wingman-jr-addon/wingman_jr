@@ -191,14 +191,19 @@ function ebmlCreateFragmentedWebM(u8Array) {
         segmentStartIndex: segmentStartIndex,
         indices: indices,
         doFragmentsMatch: function(fragments) { //as produced by ebmlExtractFragments
-            //NOTE: Just starting with this logic. By spec, I don't think all Clusters
-            //Need to be here, only key frames, so this could change up in the future.
-            //This should also influence markFragments
-            return fragments.every(f=>this.indices[f.fileOffsetCluster]!==undefined);
+            //NOTE: Just starting with this logic. By spec, not all Clusters are
+            //in here, so we do a reduced check.
+            let matches = fragments.filter(f=>this.indices[f.fileOffsetCluster]!==undefined);
+            let shouldQualify = matches.length >= 2 || matches.length >= fragments.length
+                || (matches.length >= 1 && fragments.length <= 3);
+            console.log(`YTVWEBM: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
+            return shouldQualify
         },
         markFragments: function(fragments, status) {
             for(let fragment of fragments) {
-                this.indices[fragment.fileOffsetCluster].status = status;
+                if(this.indices[fragment.fileOffsetCluster] !== undefined) {
+                    this.indices[fragment.fileOffsetCluster].status = status;
+                }
             }
         }
     };
