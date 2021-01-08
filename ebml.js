@@ -197,7 +197,7 @@ function ebmlCreateFragmentedWebM(u8Array) {
             let shouldQualify = matches.length >= 2 || matches.length >= fragments.length
                 || (matches.length >= 1 && fragments.length <= 3);
             console.log(`YTVWEBM: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
-            return shouldQualify
+            return shouldQualify;
         },
         markFragments: function(fragments, status) {
             for(let fragment of fragments) {

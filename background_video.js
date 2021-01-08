@@ -282,7 +282,10 @@ function createFragmentedMp4(initBuffer) {
         dataStartIndex: dataStartIndex,
         sidx: sidx,
         doFragmentsMatch: function(fragments) { //as produced by extractFragments
-            return fragments.every(f=>this.sidx.entries[f.fileOffsetMoof]!==undefined);
+            let matches = fragments.filter(f=>this.sidx.entries[f.fileOffsetMoof]!==undefined);
+            let shouldQualify = matches.length == fragments.length;
+            console.log(`YTVMP4: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
+            return shouldQualify;
         },
         markFragments: function(fragments, status) {
             for(let fragment of fragments) {
@@ -581,8 +584,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
                 fmp4.blockCount = 0;
                 youtubeGroup.fmp4s.push(fmp4);
                 checkFragmentsBuffer = fullBuffer.slice(fmp4.dataStartIndex);
-                //TODO Found this issue in WebM, need for MP4?
-                //fragmentFileOffset += fmp4.dataStartIndex;
+                fragmentFileOffset += fmp4.dataStartIndex;
                 console.log(`YTVMP4: Completed creating new FMP4 ${cpn} for ${details.requestId} at quality ${itag}, index count ${fmp4.sidx.entries.length}`);
             } else {
                 console.log(`YTVMP4: Will look for existing FMP4 ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
