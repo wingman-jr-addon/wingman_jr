@@ -71,24 +71,6 @@ function getNextProcessor() {
     return preferredProcessor;
 }
 
-function getAcceleratedProcessor() {
-    if(BK_connectedClientList.length == 0) {
-        return null;
-    }
-    BK_currentProcessorIndex = (BK_currentProcessorIndex+1) % BK_connectedClientList.length;
-    //Are any WebGL? If so, return next one.
-    for(let i=1; i<BK_connectedClientList.length; i++) {
-        let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
-        let processor = BK_connectedClientList[pIndex];
-        if(processor.backend == 'webgl') {
-            console.info('PERF: Accelerated choosing webgl processor '+processor.processorId);
-            return processor;
-        }
-    }
-    //fallback
-    return getNextProcessor();
-}
-
 function broadcastMessage(m) {
     BK_connectedClientList.forEach(c=>{
         c.port.postMessage(m);
@@ -101,7 +83,6 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 //browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
-
 
 
 function onProcessorMessage(m) {
@@ -470,7 +451,7 @@ async function base64_listener(details) {
     BK_openB64Filters[details.requestId] = b64Filter;
 
     //Choose highest power here because we have many images possibly
-    let processor = getAcceleratedProcessor().port; 
+    let processor = getNextProcessor().port; 
     processor.postMessage({
         type: 'b64_start',
         requestId : details.requestId
