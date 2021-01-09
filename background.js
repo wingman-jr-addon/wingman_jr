@@ -608,6 +608,8 @@ function detectCharset(contentType) {
 
 ////////////////////////Actual Startup//////////////////////////////
 
+let BK_isVideoEnabled = true;
+
 function registerAllCallbacks() {
 
     browser.webRequest.onHeadersReceived.addListener(
@@ -622,18 +624,6 @@ function registerAllCallbacks() {
         ["blocking","responseHeaders"]
     );
 
-    browser.webRequest.onBeforeRequest.addListener(
-        vidPrerequestListener,
-        {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
-        ["blocking"]
-    );
-
-    browser.webRequest.onHeadersReceived.addListener(
-        vidRootListener,
-        {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
-        ["blocking","responseHeaders"]
-    );
-
     browser.webRequest.onHeadersReceived.addListener(
         base64_listener,
         {
@@ -644,14 +634,31 @@ function registerAllCallbacks() {
         },
         ["blocking","responseHeaders"]
     );
+
+    if(BK_isVideoEnabled) {
+        browser.webRequest.onBeforeRequest.addListener(
+            vidPrerequestListener,
+            {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+            ["blocking"]
+        );
+    
+        browser.webRequest.onHeadersReceived.addListener(
+            vidRootListener,
+            {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+            ["blocking","responseHeaders"]
+        );
+    }
 }
 
 function unregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(listener);
     browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
-    browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
-    browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
     browser.webRequest.onHeadersReceived.removeListener(base64_listener);
+
+    if(BK_isVideoEnabled) {
+        browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
+        browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+    }
 }
 
 let BK_isEnabled = false;
