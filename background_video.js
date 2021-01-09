@@ -258,12 +258,11 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
 
     let buffers = [];
   
-    //TODO Move this logic to pre-request
+    //This is a safety net, already happens in a pre-check mostly
     filter.onstart = _ => {
         let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
         if (youtubeGroupPrecheck !== undefined) {
             if(youtubeGroupPrecheck.status == 'block') {
-                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             }
         }
@@ -417,12 +416,11 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
 
     let buffers = [];
   
-    //TODO Move this logic to pre-request
+    //This is a safety net, already happens in a pre-check mostly
     filter.onstart = _ => {
         let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
         if (youtubeGroupPrecheck !== undefined) {
             if(youtubeGroupPrecheck.status == 'block') {
-                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             }
         }
@@ -557,4 +555,22 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
         }
     }
     return details;
+}
+
+async function vidPrerequestListener(details) {
+    if (isWhitelisted(details.url)) {
+        return;
+    }
+    let parsedUrl = new URL(details.url);
+    //Youtube check
+    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
+        let cpn = parsedUrl.searchParams.get('cpn');
+        let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
+        if (youtubeGroupPrecheck !== undefined) {
+            if(youtubeGroupPrecheck.status == 'block') {
+                console.log(`YTV: Pre-block known CPN ${cpn}`)
+                return { cancel: true };
+            }
+        }
+    }
 }

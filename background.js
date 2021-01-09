@@ -633,21 +633,27 @@ function registerAllCallbacks() {
         listener,
         {urls:["<all_urls>"], types:["image","imageset"]},
         ["blocking","responseHeaders"]
-      );
+    );
 
-      browser.webRequest.onHeadersReceived.addListener(
+    browser.webRequest.onHeadersReceived.addListener(
         direct_typed_url_listener,
         {urls:["<all_urls>"], types:["main_frame"]},
         ["blocking","responseHeaders"]
-      );
+    );
+
+    browser.webRequest.onBeforeRequest.addListener(
+        vidPrerequestListener,
+        {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+        ["blocking"]
+    );
 
     browser.webRequest.onHeadersReceived.addListener(
         vidRootListener,
         {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
         ["blocking","responseHeaders"]
-      );
+    );
 
-      browser.webRequest.onHeadersReceived.addListener(
+    browser.webRequest.onHeadersReceived.addListener(
         base64_listener,
         {
             urls:[
@@ -656,13 +662,14 @@ function registerAllCallbacks() {
             types:["main_frame"]
         },
         ["blocking","responseHeaders"]
-      );
+    );
 }
 
 function unregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(listener);
     browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
-    browser.webRequest.onHeadersReceived.removeListener(video_listener);
+    browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
+    browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
     browser.webRequest.onHeadersReceived.removeListener(base64_listener);
 }
 
