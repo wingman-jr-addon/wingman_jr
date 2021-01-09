@@ -1,4 +1,3 @@
-
 function mp4ReadUint64(buffer, offset) {
     return (
         buffer[offset]   << 56 |
@@ -82,7 +81,7 @@ function mp4DumpSIDX(buffer, atomOffset) {
     let __reserved = mp4ReadUint16(b,i); i+=2;
     let entryCount = mp4ReadUint16(b,i); i+=2;
 
-    console.log('DEBUGV:           SIDX Entry Count '+entryCount);
+    console.debug('DEBUGV:           SIDX Entry Count '+entryCount);
 
     //Note here that fileOffset seems to refer to the offset relative to the end of the SIDX atom
     let fileOffset = firstOffset;
@@ -90,19 +89,19 @@ function mp4DumpSIDX(buffer, atomOffset) {
         let referencedSize = mp4ReadUint32(b,i); i+=4;
         let subSegmentDuration = mp4ReadUint32(b,i); i+=4;
         i+=4; //unused
-        console.log(`DEBUGV:          SIDX Current offset ${fileOffset}, size ${referencedSize}, duration ${subSegmentDuration}`);
+        console.debug(`DEBUGV:          SIDX Current offset ${fileOffset}, size ${referencedSize}, duration ${subSegmentDuration}`);
         fileOffset += referencedSize;
     }
 }
 
 function mp4DumpAtoms(buffers) {
-    let fullBuffer = concatBuffersToUint8Array(buffers);
+    let fullBuffer = vidConcatBuffersToUint8Array(buffers);
 
     //An atom consists of a 4-byte length followed by a 4 byte ASCII indicator.
     let offset = 0;
     while(offset < fullBuffer.byteLength-7) {
         if(mp4IsProbableAtom(fullBuffer, offset)) {
-            console.log('DEBUGV: Probable Atom start: '+offset);
+            console.debug('DEBUGV: Probable Atom start: '+offset);
             break;
         }
         offset++;
@@ -111,7 +110,7 @@ function mp4DumpAtoms(buffers) {
         let length = mp4ReadUint32(fullBuffer, offset);
         let type = mp4ReadType(fullBuffer, offset+4);
         let isComplete = offset + length <= fullBuffer.byteLength;
-        console.log(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete}`);
+        console.debug(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete}`);
         if(type == 'sidx') {
             mp4DumpSIDX(fullBuffer, offset);
         }
@@ -141,7 +140,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset) {
     let offset = 0;
     while(offset < fullBuffer.byteLength-7) {
         if(mp4IsProbableAtomOfType(fullBuffer, offset, 'moof')) {
-            console.log('DEBUGV: Probable fMP4 fragment start: '+offset);
+            console.debug('DEBUGV: Probable fMP4 fragment start: '+offset);
             break;
         }
         offset++;
@@ -153,7 +152,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset) {
         let moofLength = mp4ReadUint32(fullBuffer, offset);
         let moofType = mp4ReadType(fullBuffer, offset+4);
         if(moofType != 'moof') {
-            //TODO log
+            console.warn(`Expected moof, got ${moofType}`);
             break;
         }
         let isMoofCompleteAndMdatDetectable = offset + moofLength +8 <= fullBuffer.byteLength;
@@ -163,7 +162,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset) {
         let mdatLength = mp4ReadUint32(fullBuffer, offset + moofLength);
         let mdatType = mp4ReadType(fullBuffer, offset + moofLength + 4);
         if(mdatType != 'mdat') {
-            //TODO log
+            console.warn(`Expected mdat, got ${mdatType}`);
             break;
         }
         let isMdatComplete = offset + moofLength + mdatLength <= fullBuffer.byteLength;
@@ -260,7 +259,7 @@ function mp4CreateFragmentedMp4(initBuffer) {
         doFragmentsMatch: function(fragments) { //as produced by extractFragments
             let matches = fragments.filter(f=>this.sidx.entries[f.fileOffsetMoof]!==undefined);
             let shouldQualify = matches.length == fragments.length;
-            console.log(`YTVMP4: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
+            console.info(`YTVMP4: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
             return shouldQualify;
         },
         markFragments: function(fragments, status) {

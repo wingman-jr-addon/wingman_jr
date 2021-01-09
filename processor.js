@@ -69,7 +69,7 @@ async function predict(imgElement, ctx) {
   ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
   const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
   const totalDrawTime = performance.now() - drawStartTime;
-  console.log(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
+  console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
   const startTime = performance.now();
   const logits = tf.tidy(() => {
@@ -93,9 +93,9 @@ async function predict(imgElement, ctx) {
   PROC_inferenceTimeTotal += totalTime;
   PROC_inferenceCountTotal++;
   const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
-  console.log(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
+  console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
 
-  console.log('ML: Prediction: '+syncedResult[0]);
+  console.debug('ML: Prediction: '+syncedResult[0]);
   return syncedResult;
 }
 
@@ -177,8 +177,6 @@ function isSafe(sqrxrScore) {
     return sqrxrScore[0] < PROC_checkThreshold;
 }
 
-
-
 const loadImagePromise = url => new Promise( (resolve, reject) => {
     const img = new Image()
     img.onerror = e => reject(e)
@@ -191,7 +189,7 @@ let PROC_timingInfoDumpCount = 0;
 
 async function performFiltering(entry) {
     let dataEndTime = performance.now();
-    console.log('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
+    console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
     let result = {
         type: 'scan',
         requestId: entry.requestId,
@@ -209,15 +207,15 @@ async function performFiltering(entry) {
         if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
             url = URL.createObjectURL(blob);
             let img = await loadImagePromise(url);
-            console.log('img loaded '+entry.requestId)
+            console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                console.log('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = [0];
                 if(PROC_timingInfoDumpCount<10) {
                     PROC_timingInfoDumpCount++;
                     let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
-                    console.log('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
+                    console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
                 } else {
                     sqrxrScore = await predict(img);
                 }
@@ -242,14 +240,14 @@ async function performFiltering(entry) {
                 PROC_processingSinceDataEndTimeTotal += totalSinceDataEndTime;
                 PROC_processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
                 PROC_processingCountTotal++;
-                console.log('PERF: Processed in '+totalTime
+                console.debug('PERF: Processed in '+totalTime
                     +' (' +totalSinceDataEndTime+' data end, '
                     +totalSinceImageLoadTime+' img load) with an avg of '
                     +Math.round(PROC_processingTimeTotal/PROC_processingCountTotal)
                     +' ('+Math.round(PROC_processingSinceDataEndTimeTotal/PROC_processingCountTotal)
                     +' data end, ' + Math.round(PROC_processingSinceImageLoadTimeTotal/PROC_processingCountTotal)
                     +' img load) at a count of '+PROC_processingCountTotal);
-                console.log('WEBREQ: Finishing '+entry.requestId);
+                console.debug('WEBREQ: Finishing '+entry.requestId);
             } else {
                 result.result = 'tiny';
                 result.imageBytes = await blob.arrayBuffer();
@@ -259,11 +257,11 @@ async function performFiltering(entry) {
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
-        console.log('WEBREQP: Error for '+entry.url+': '+e);
+        console.error('WEBREQP: Error for '+entry.url+': '+e);
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
-        console.log('WEBREQP: Finishing '+entry.requestId);
+        console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
             URL.revokeObjectURL(url);
         }
@@ -278,7 +276,7 @@ async function advanceB64Filtering(dataStr, b64Filter, outputPort) {
 async function completeB64Filtering(b64Filter, outputPort) {
     let startTime = performance.now();
     let fullStr = b64Filter.fullStr;
-    console.log('WEBREQ: base64 stop '+fullStr.length);
+    console.info('WEBREQ: base64 stop '+fullStr.length);
 
     //Unfortunately, str.replace cannot accept a promise as a function,
     //so we simply set 'em up and knock 'em down.
@@ -309,9 +307,9 @@ async function completeB64Filtering(b64Filter, outputPort) {
         if(wasJSEncoded) {
             imageDataURI = imageDataURI.replace(/\\/g,''); //Unencoded, \ -> ''
             let newPrefixId = imageDataURI.slice(0,20);
-            console.log('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
+            console.debug('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
         } else {
-            console.log('WEBREQ: base64 image no extra encoding detected: '+prefixId);
+            console.debug('WEBREQ: base64 image no extra encoding detected: '+prefixId);
         }
         imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
         let imageToOutput = imageDataURI;
@@ -320,14 +318,14 @@ async function completeB64Filtering(b64Filter, outputPort) {
         let byteCount = imageDataURI.length*3/4;
 
         if(byteCount >= PROC_MIN_IMAGE_BYTES) {
-            console.log('WEBREQ: base64 image loaded: '+imageId);
+            console.info('WEBREQ: base64 image loaded: '+imageId);
             try
             {
                 let img = await loadImagePromise(imageDataURI);
                 if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                    console.log('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                    console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await predict(img);
-                    console.log('ML: base64 score: '+sqrxrScore);
+                    console.debug('ML: base64 score: '+sqrxrScore);
                     let unsafeScore = sqrxrScore[0];
                     let replacement = null; //safe
                     if(isSafe(sqrxrScore)) {
@@ -345,6 +343,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
                         });
                         let svgText = await common_create_svg(img,unsafeScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
+                        console.log('ML: base64 filter Blocked: '+sqrxrScore[0]+' '+b64Filter.requestId);
                         common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
                         replacement = svgURI;
                     }
@@ -405,7 +404,7 @@ let PROC_openVidRequests = {};
 let PROC_processingQueue = [];
 let PROC_inFlight = 0;
 async function checkProcess() {
-    console.log('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
+    console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
         PROC_port.postMessage({
             type: 'qos',
@@ -434,15 +433,15 @@ async function checkProcess() {
                 processorId: PROC_processorId,
                 isBusy: true
             })
-            console.log('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
+            console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
             result = await performFiltering(toProcess);
             
         } catch(ex) {
-            console.log('ML: Error scanning image '+ex);
+            console.error('ML: Error scanning image '+ex);
         }
         PROC_inFlight--;
         if(PROC_inFlight < 0) {
-            console.log('QUEUE: Recovering from pressure release, upping to PROC_inFlight=0');
+            console.warn('QUEUE: Recovering from pressure release, upping to PROC_inFlight=0');
             PROC_inFlight = 0;
         }
         try {
@@ -453,7 +452,7 @@ async function checkProcess() {
                 requestId: toProcess.requestId
             });
         } catch(e) {
-            console.log('ERROR: Processor failed to communicate to background: '+e);
+            console.error('ERROR: Processor failed to communicate to background: '+e);
         }
     } else {
         console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
@@ -499,7 +498,7 @@ function getMp4Parsed(buffers) {
 
 function getVideoUrl(requestId, mimeType, buffers) {
     if(mimeType.toLowerCase().startsWith('video/mp2t')) {
-        console.log('MLV: URL MP2T detected for '+requestId+', mime '+mimeType);
+        console.info('MLV: URL MP2T detected for '+requestId+', mime '+mimeType);
         //remux that sucker to MP4 quick
         let transmuxer = new muxjs.mp4.Transmuxer();
         let tBuffers = [];
@@ -514,12 +513,8 @@ function getVideoUrl(requestId, mimeType, buffers) {
         let blob = new Blob(tBuffers, {type: 'video/mp4'});
         return URL.createObjectURL(blob);
     } else {
-        console.log('MLV: URL default detected for '+requestId+', mime '+mimeType);
+        console.debug('MLV: URL default detected for '+requestId+', mime '+mimeType);
         let blob = new Blob(buffers, {type: mimeType});
-
-        //let parsedMp4 = getMp4Parsed(buffers);
-        //console.log('MLV: SCAN DEBUG '+requestId+' '+videoChainId);
-        //console.dir(parsedMp4);
         return URL.createObjectURL(blob);
     }
 }
@@ -554,7 +549,7 @@ async function getVideoScanStatus(
         frames: []
     };
     try {
-        console.log('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        console.info('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
             console.log('MLV: encrypted: '+requestId); //This will fail :(
@@ -567,12 +562,12 @@ async function getVideoScanStatus(
             let seekTime = scanStart+scanStep*i;
             await videoLoadedData(inferenceVideo, videoUrl, seekTime);
             let maxTime = getMaxVideoTime(inferenceVideo);
-            console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' for '+videoChainId+' at request '+requestId);
+            console.debug('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' for '+videoChainId+' at request '+requestId);
             if(maxTime < seekTime) {
                 break; //invalid even though it tried to seek!
             }
 
-            console.log('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
+            console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
             
             sqrxrScore = await predict(inferenceVideo, videoCtx);
             scanResults.scanCount++;
@@ -592,12 +587,12 @@ async function getVideoScanStatus(
             }
             scanResults.frames.push({ 'time': seekTime, 'status': frameStatus});
             if(scanResults.blockCount >= scanBlockBailCount) {
-                console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId);
+                console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId+' because of block count '+scanResults.blockCount);
                 break;
             }
         }
     } catch(e) {
-        console.log('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
+        console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
         scanResults.error = e;
     } finally {
         URL.revokeObjectURL(videoUrl);
@@ -616,11 +611,11 @@ async function onPortMessage(m) {
                 startTime: performance.now(),
                 buffers: []
             };
-            console.log('PERF: '+PROC_processorId+' has open requests queue size '+Object.keys(PROC_openRequests).length);
+            console.debug('PERF: '+PROC_processorId+' has open requests queue size '+Object.keys(PROC_openRequests).length);
         }
         break;
         case 'ondata': {
-            console.log('DATA: '+m.requestId);
+            console.debug('DATA: '+m.requestId);
             PROC_openRequests[m.requestId].buffers.push(m.data);
         }
         break;

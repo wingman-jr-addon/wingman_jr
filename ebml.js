@@ -106,7 +106,7 @@ function ebmlStruct(u8Array, startIndex, length, shouldRecursePredicate) {
             elements.push(element);
         }
     } catch(e) {
-        console.error(`Error parsing EBML somewhere around ${i}`);
+        console.warn(`Error parsing EBML somewhere around ${i}`);
     }
     return elements;
 }
@@ -196,7 +196,7 @@ function ebmlCreateFragmentedWebM(u8Array) {
             let matches = fragments.filter(f=>this.indices[f.fileOffsetCluster]!==undefined);
             let shouldQualify = matches.length >= 2 || matches.length >= fragments.length
                 || (matches.length >= 1 && fragments.length <= 3);
-            console.log(`YTVWEBM: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
+            console.info(`YTVWEBM: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
             return shouldQualify;
         },
         markFragments: function(fragments, status) {
@@ -228,7 +228,7 @@ function ebmlExtractFragments(u8Array, fileStartOffset) {
     let offset = 0;
     while(offset < u8Array.byteLength-1) {
         if(ebmlIsLikelyCluster(u8Array, offset)) {
-            console.log('DEBUGV: Probable fWebM Cluster start: '+offset);
+            console.debug('DEBUGV: Probable fWebM Cluster start: '+offset);
             break;
         }
         offset++;

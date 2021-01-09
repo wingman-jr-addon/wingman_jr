@@ -53,7 +53,7 @@ function getNextProcessor() {
             let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
             let processor = BK_connectedClientList[pIndex];
             if(!processor.isBusy) {
-                console.log('PERF: Choosing free processor '+processor.processorId);
+                console.debug('PERF: Choosing free processor '+processor.processorId);
                 return processor;
             }
         }
@@ -62,12 +62,12 @@ function getNextProcessor() {
             let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
             let processor = BK_connectedClientList[pIndex];
             if(processor.backend == 'webgl') {
-                console.log('PERF: Choosing webgl processor '+processor.processorId);
+                console.info('PERF: Choosing webgl processor '+processor.processorId);
                 return processor;
             }
         }
     }
-    console.log('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
+    console.info('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
     return preferredProcessor;
 }
 
@@ -81,7 +81,7 @@ function getAcceleratedProcessor() {
         let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
         let processor = BK_connectedClientList[pIndex];
         if(processor.backend == 'webgl') {
-            console.log('PERF: Accelerated choosing webgl processor '+processor.processorId);
+            console.info('PERF: Accelerated choosing webgl processor '+processor.processorId);
             return processor;
         }
     }
@@ -107,13 +107,12 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 function onProcessorMessage(m) {
     switch(m.type) {
         case 'scan': {
-            console.log('PROC: '+m);
-            console.dir(m);
+            console.debug('PROC: '+m);
             let filter = BK_openFilters[m.requestId];
             filter.write(m.imageBytes);
             filter.close();
             delete BK_openFilters[m.requestId];
-            console.log('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
+            console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
         }
         break;
         case 'b64_data': {
@@ -133,7 +132,7 @@ function onProcessorMessage(m) {
         }
         break;
         case 'stat': {
-            console.log('STAT: '+m.requestId+' '+m.result);
+            console.debug('STAT: '+m.requestId+' '+m.result);
             incrementCheckCount();
             switch(m.result) {
                 case 'pass': {
@@ -150,12 +149,11 @@ function onProcessorMessage(m) {
         case 'registration': {
             console.dir(BK_connectedClients);
             console.log('LIFECYLE: Registration '+m.processorId);
-            console.dir(m);
             BK_connectedClients[m.processorId].backend = m.backend;
         }
         break;
         case 'qos': {
-            console.log('QOS: '+m.processorId+' isBusy: '+m.isBusy);
+            console.debug('QOS: '+m.processorId+' isBusy: '+m.isBusy);
             BK_connectedClients[m.processorId].isBusy = m.isBusy;
         }
         break;
@@ -323,7 +321,7 @@ async function listener(details, shouldBlockSilently=false) {
             break;
         }
     }
-    console.log('WEBREQ: start headers '+details.requestId);
+    console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -339,7 +337,7 @@ async function listener(details, shouldBlockSilently=false) {
         if (dataStartTime == null) {
             dataStartTime = performance.now();
         }
-        console.log('WEBREQ: data '+details.requestId);
+        console.debug('WEBREQ: data '+details.requestId);
         processor.postMessage({ 
             type: 'ondata',
             requestId: details.requestId,
@@ -358,11 +356,12 @@ async function listener(details, shouldBlockSilently=false) {
         }
         catch(ex)
         {
-            console.log('WEBREQ: Filter error: '+e+', '+ex);
+            console.error('WEBREQ: Filter error: '+e+', '+ex);
         }
     }
   
     filter.onstop = async event => {
+        console.debug('WEBREQ: onstop '+details.requestId);
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
@@ -449,7 +448,7 @@ async function base64_listener(details) {
         console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
-    console.log('WEBREQ: base64 headers '+details.requestId+' '+details.url);
+    console.debug('WEBREQ: base64 headers '+details.requestId+' '+details.url);
     // The received data is a stream of bytes. In order to do text-based
     // modifications, it is necessary to decode the bytes into a string
     // using the proper character encoding, do any modifications, then
@@ -509,7 +508,7 @@ async function base64_listener(details) {
         }
         catch(e)
         {
-            console.log('WEBREQ: Filter error: '+e);
+            console.error('WEBREQ: Filter error: '+e);
         }
     }
   
@@ -533,7 +532,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
         }
     }
     if (headerIndex == -1) {
-      console.log('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
+      console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
       headerIndex = details.responseHeaders.length;
       contentType = 'text/html';
       details.responseHeaders.push(
@@ -547,16 +546,16 @@ function detectCharsetAndSetupDecoderEncoder(details) {
     let baseType;
     if(contentType.trim().startsWith('text/html')) {
       baseType = 'text/html';
-      console.log('CHARSET: Detected base type was '+baseType);
+      console.debug('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
-      console.log('CHARSET: Detected base type was '+baseType);
+      console.debug('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('image/')) {
-      console.log('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
       return;
     } else {
       baseType = 'text/html';
-      console.log('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
+      console.debug('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
       return;
     }
   
@@ -573,7 +572,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
   
     if(detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
-        console.log('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+        console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
     }
     details.responseHeaders[headerIndex].value = baseType+';charset=utf-8';
   
