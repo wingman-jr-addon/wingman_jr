@@ -99,7 +99,7 @@ async function vidRootListener(details) {
         console.warn('WEBREQV: Weird error parsing content-length '+e);
     }
 
-    console.debug('DATAV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
+    console.debug('WEBREQV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
         let isImage = mimeType.startsWith('image/');
@@ -110,7 +110,6 @@ async function vidRootListener(details) {
             return;
         }
     }
-
 
     //Start splitting based on different types
     let parsedUrl = new URL(details.url);
@@ -365,10 +364,6 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 scanMaxSteps,
                 scanBlockBailCount
             );
-            /*let scanResults = {
-                scanCount: 0,
-                blockCount: 0
-            };*/
             console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             fmp4.scanCount += scanResults.scanCount;
             fmp4.blockCount += scanResults.blockCount;
@@ -523,10 +518,6 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 scanMaxSteps,
                 scanBlockBailCount
             );
-            /*let scanResults = {
-                scanCount: 0,
-                blockCount: 0
-            };*/
             console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             webm.scanCount += scanResults.scanCount;
             webm.blockCount += scanResults.blockCount;
