@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_107_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_108_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -122,7 +122,18 @@ PROC_logCanvas.width = LOG_IMG_SIZE;
 PROC_logCanvas.height = LOG_IMG_SIZE;
 let PROC_logCtx = PROC_logCanvas.getContext('2d', { alpha: false});
 PROC_logCanvas.imageSmoothingEnabled = true;
+
 async function common_log_img(img, message)
+{
+    return await common_log_img_generic(img, message, console.log);
+}
+
+async function common_warn_img(img, message)
+{
+    return await common_log_img_generic(img, message, console.warn);
+}
+
+async function common_log_img_generic(img, message, logger)
 {
     let maxSide = Math.max(img.width, img.height);
     let ratio = LOG_IMG_SIZE/maxSide;
@@ -132,7 +143,7 @@ async function common_log_img(img, message)
     PROC_logCtx.drawImage(img, 0, 0, newWidth, newHeight);
     let logDataUrl = PROC_logCanvas.toDataURL('image/jpeg', 0.7);
     let blockedCSS = 'color: #00FF00; padding: 75px; line-height: 150px; background-image: url('+logDataUrl+'); background-size: contain; background-repeat: no-repeat;';
-    console.log('%c '+message, blockedCSS);
+    logger('%c '+message, blockedCSS);
 }
 
 async function common_create_svg_from_blob(img, threshold, blob)
@@ -226,7 +237,7 @@ async function performFiltering(entry) {
                 } else {
                     console.log('ML: Blocked: '+sqrxrScore[0]+' '+entry.requestId);
                     let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
-                    common_log_img(img, 'BLOCKED IMG '+sqrxrScore);
+                    common_warn_img(img, 'BLOCKED IMG '+sqrxrScore);
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
@@ -344,7 +355,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
                         let svgText = await common_create_svg(img,unsafeScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
                         console.log('ML: base64 filter Blocked: '+sqrxrScore[0]+' '+b64Filter.requestId);
-                        common_log_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
+                        common_warn_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
                         replacement = svgURI;
                     }
 
@@ -581,7 +592,7 @@ async function getVideoScanStatus(
             else
             {
                 console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+sqrxrScore+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await common_log_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+sqrxrScore);
+                await common_warn_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+sqrxrScore);
                 frameStatus = 'block';
                 scanResults.blockCount++;
             }

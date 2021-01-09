@@ -559,7 +559,7 @@ async function vidPrerequestListener(details) {
         let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
         if (youtubeGroupPrecheck !== undefined) {
             if(youtubeGroupPrecheck.status == 'block') {
-                console.log(`YTV: Pre-block known CPN ${cpn}`)
+                console.warn(`YTV: Pre-block known CPN ${cpn}`)
                 return { cancel: true };
             }
         }
