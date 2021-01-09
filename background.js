@@ -129,7 +129,7 @@ function onProcessorMessage(m) {
         }
         break;
         case 'vid_scan': {
-            VID_onVidScan(m);
+            vidOnVidScan(m);
         }
         break;
         case 'stat': {
@@ -643,7 +643,7 @@ function registerAllCallbacks() {
       );
 
     browser.webRequest.onHeadersReceived.addListener(
-        VID_video_listener,
+        vidRootListener,
         {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
         ["blocking","responseHeaders"]
       );
@@ -734,4 +734,3 @@ function handleMessage(request, sender, sendResponse) {
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
-

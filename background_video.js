@@ -1,10 +1,9 @@
-
-let VID_videoPlaceholderArrayBuffer = null;
+let VID_PLACEHOLDER_MP4 = null;
 fetch('wingman_placeholder.mp4')
-.then(async r => VID_videoPlaceholderArrayBuffer = await r.arrayBuffer());
+.then(async r => VID_PLACEHOLDER_MP4 = await r.arrayBuffer());
 
 
-function concatBuffersToUint8Array(buffers) {
+function vidConcatBuffersToUint8Array(buffers) {
     let fullLength = buffers.reduce((acc,buf)=>acc+buf.byteLength, 0);
     let result = new Uint8Array(fullLength);
     console.log('DEBUGV: Full length '+fullLength);
@@ -16,24 +15,24 @@ function concatBuffersToUint8Array(buffers) {
     return result;
 }
 
-function toArrayBuffer(u8Array) {
+function vidToArrayBuffer(u8Array) {
     return u8Array.buffer.slice(
         u8Array.byteOffset,
         u8Array.byteOffset+u8Array.byteLength
     );
 }
 
-let VID_openRequests = { };
-async function VID_onVidScan(m) {
-    let openRequest = VID_openRequests[m.requestId];
+let VID_OPEN_REQUESTS = { };
+async function vidOnVidScan(m) {
+    let openRequest = VID_OPEN_REQUESTS[m.requestId];
     if(openRequest !== undefined) {
-        delete VID_openRequests[m.requestId];
+        delete VID_OPEN_REQUESTS[m.requestId];
         openRequest.resolve(m);
     } //TODO reject based on error handling
 }
 
 //Request ID should be unique
-async function performVideoScan(
+async function vidPerformVideoScan(
     processor,
     videoChainId,
     requestId,
@@ -47,7 +46,7 @@ async function performVideoScan(
     scanBlockBailCount
 ) {
     let p = new Promise(function(resolve, reject) {
-        VID_openRequests[requestId] = {
+        VID_OPEN_REQUESTS[requestId] = {
             requestId: requestId, 
             resolve: resolve,
             reject: reject
@@ -69,8 +68,7 @@ async function performVideoScan(
     return p;
 }
 
-
-async function VID_video_listener(details) {
+async function vidRootListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
@@ -121,10 +119,10 @@ async function VID_video_listener(details) {
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         if(mimeType.startsWith('video/mp4')) {
             console.log(`YTVMP4: Starting for request ${details.requestId}`);
-            return await VID_yt_mp4(details, mimeType, parsedUrl);
+            return await vidYtMp4Listener(details, mimeType, parsedUrl);
         } else if(mimeType.startsWith('video/webm')) {
             console.log(`YTVWEBM: Starting for request ${details.requestId}`);
-            return await VID_yt_webm(details, mimeType, parsedUrl);
+            return await vidYtWebmListener(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
@@ -133,11 +131,11 @@ async function VID_video_listener(details) {
             return;
         }
     } else {
-        return await VID_default(details, mimeType, parsedUrl);
+        return await vidDefaultListener(details, mimeType, parsedUrl);
     }
 }
 
-async function VID_default(details, mimeType, parsedUrl) {
+async function vidDefaultListener(details, mimeType, parsedUrl) {
     console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -160,7 +158,7 @@ async function VID_default(details, mimeType, parsedUrl) {
             status = 'scanning';
             console.log(`DEFV: Triggering scan ${details.requestId} because total size ${totalSize}`);
             let processor = getNextProcessor();
-            let scanResults = await performVideoScan(
+            let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
                 details.requestId,
@@ -176,7 +174,7 @@ async function VID_default(details, mimeType, parsedUrl) {
             console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
             if(scanResults.blockCount >= scanBlockBailCount) {
                 status = 'block';
-                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             } else {
                 status = 'pass';
@@ -200,7 +198,7 @@ async function VID_default(details, mimeType, parsedUrl) {
         }
         console.log(`DEFV: Triggering scan ${details.requestId} onstop because status is unknown`);
         let processor = getNextProcessor();
-        let scanResults = await performVideoScan(
+        let scanResults = await vidPerformVideoScan(
             processor,
             videoChainId,
             details.requestId,
@@ -216,7 +214,7 @@ async function VID_default(details, mimeType, parsedUrl) {
         console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
         if(scanResults.blockCount >= scanBlockBailCount) {
             status = 'block';
-            filter.write(VID_videoPlaceholderArrayBuffer);
+            filter.write(VID_PLACEHOLDER_MP4);
             filter.close();
         } else {
             status = 'pass';
@@ -227,12 +225,8 @@ async function VID_default(details, mimeType, parsedUrl) {
     return details;
 }
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function checkCreateYoutubeGroup(cpn) {
-    let youtubeGroup = VID_youtubeGroups[cpn];
+function vidCheckCreateYtGroup(cpn) {
+    let youtubeGroup = VID_YT_GROUPS[cpn];
     if(youtubeGroup === undefined) {
         youtubeGroup = {
             status: 'unknown',
@@ -242,16 +236,16 @@ function checkCreateYoutubeGroup(cpn) {
             scanCount: 0,
             blockCount: 0
         };
-        VID_youtubeGroups[cpn] = youtubeGroup;
+        VID_YT_GROUPS[cpn] = youtubeGroup;
     }
     return youtubeGroup;
 }
 
-let VID_youtubeGroups = { };
+let VID_YT_GROUPS = { };
 
 //Youtube MP4 stream listener.
 //Note this expects that each fragment is relatively small
-async function VID_yt_mp4(details, mimeType, parsedUrl) {
+async function vidYtMp4Listener(details, mimeType, parsedUrl) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-mp4-'+cpn+'-'+details.requestId;
@@ -269,10 +263,10 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
   
     //TODO Move this logic to pre-request
     filter.onstart = _ => {
-        let youtubeGroupPrecheck = VID_youtubeGroups[cpn];
+        let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
         if (youtubeGroupPrecheck !== undefined) {
             if(youtubeGroupPrecheck.status == 'block') {
-                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             }
         }
@@ -300,9 +294,9 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
             
             if(rangeStart == 0) {
                 console.log(`YTVMP4: New FMP4 ${cpn} for ${details.requestId} at quality ${itag}`);
-                let youtubeGroup = checkCreateYoutubeGroup(cpn);
+                let youtubeGroup = vidCheckCreateYtGroup(cpn);
 
-                let fullBuffer = concatBuffersToUint8Array(buffers);
+                let fullBuffer = vidConcatBuffersToUint8Array(buffers);
                 fmp4 = mp4CreateFragmentedMp4(fullBuffer);
                 fmp4.videoChainId = videoChainId;
                 fmp4.scanCount = 0;
@@ -313,7 +307,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
                 console.log(`YTVMP4: Completed creating new FMP4 ${cpn} for ${details.requestId} at quality ${itag}, index count ${fmp4.sidx.entries.length}`);
             } else {
                 console.log(`YTVMP4: Will look for existing FMP4 ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
-                checkFragmentsBuffer = concatBuffersToUint8Array(buffers);
+                checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
 
             // 2. Append any (moof mdat)+
@@ -327,7 +321,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
             }
             console.log(`YTVMP4: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
 
-            let youtubeGroup = VID_youtubeGroups[cpn];
+            let youtubeGroup = VID_YT_GROUPS[cpn];
             if(youtubeGroup === undefined) {
                 console.log(`YTVMP4: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
@@ -352,8 +346,8 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
             // 3. Setup scanning
             console.debug(`YTVMP4: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
-            let scanBuffers = [ toArrayBuffer(fmp4.initSegment) ];
-            fragments.forEach(f=>scanBuffers.push(toArrayBuffer(f.moofMdatData)));
+            let scanBuffers = [ vidToArrayBuffer(fmp4.initSegment) ];
+            fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.moofMdatData)));
 
             let scanStart = 0.5; //seconds
             let scanStep = 1.0;
@@ -362,7 +356,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
 
             console.debug(`YTVMP4: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let processor = getNextProcessor();
-            let scanResults = await performVideoScan(
+            let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
                 details.requestId,
@@ -392,7 +386,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 status = 'block';
                 youtubeGroup.status = 'block';
-                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             } else {
                 status = 'pass';
@@ -411,7 +405,7 @@ async function VID_yt_mp4(details, mimeType, parsedUrl) {
 
 //Youtube WebM stream listener.
 //Note this expects that each fragment is relatively small
-async function VID_yt_webm(details, mimeType, parsedUrl) {
+async function vidYtWebmListener(details, mimeType, parsedUrl) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
@@ -429,10 +423,10 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
   
     //TODO Move this logic to pre-request
     filter.onstart = _ => {
-        let youtubeGroupPrecheck = VID_youtubeGroups[cpn];
+        let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
         if (youtubeGroupPrecheck !== undefined) {
             if(youtubeGroupPrecheck.status == 'block') {
-                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             }
         }
@@ -460,9 +454,9 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
             
             if(rangeStart == 0) {
                 console.log(`YTVWEBM: New WebM ${cpn} for ${details.requestId} at quality ${itag}`);
-                let youtubeGroup = checkCreateYoutubeGroup(cpn);
+                let youtubeGroup = vidCheckCreateYtGroup(cpn);
 
-                let fullBuffer = concatBuffersToUint8Array(buffers);
+                let fullBuffer = vidConcatBuffersToUint8Array(buffers);
                 webm = ebmlCreateFragmentedWebM(fullBuffer);
                 webm.videoChainId = videoChainId;
                 webm.scanCount = 0;
@@ -473,7 +467,7 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
                 console.log(`YTVWEBM: Completed creating new WebM ${cpn} for ${details.requestId} at quality ${itag}`);
             } else {
                 console.log(`YTVWEBM: Will look for existing WebM ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
-                checkFragmentsBuffer = concatBuffersToUint8Array(buffers);
+                checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
 
             // 2. Append any Cluster
@@ -487,7 +481,7 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
             }
             console.log(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
 
-            let youtubeGroup = VID_youtubeGroups[cpn];
+            let youtubeGroup = VID_YT_GROUPS[cpn];
             if(youtubeGroup === undefined) {
                 console.log(`YTVWEBM: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
@@ -512,8 +506,8 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
             // 3. Setup scanning
             console.debug(`YTVWEBM: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
-            let scanBuffers = [ toArrayBuffer(webm.initSegment) ];
-            fragments.forEach(f=>scanBuffers.push(toArrayBuffer(f.clusterData)));
+            let scanBuffers = [ vidToArrayBuffer(webm.initSegment) ];
+            fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.clusterData)));
 
             let scanStart = 0.5; //seconds
             let scanStep = 1.0;
@@ -522,7 +516,7 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
 
             console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let processor = getNextProcessor();
-            let scanResults = await performVideoScan(
+            let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
                 details.requestId,
@@ -552,7 +546,7 @@ async function VID_yt_webm(details, mimeType, parsedUrl) {
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 status = 'block';
                 youtubeGroup.status = 'block';
-                filter.write(VID_videoPlaceholderArrayBuffer);
+                filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             } else {
                 status = 'pass';
