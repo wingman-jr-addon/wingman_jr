@@ -246,7 +246,7 @@ async function performFiltering(entry) {
                 } else {
                     console.log('ML: Blocked: '+scoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await common_create_svg_from_blob(img, sqrxrScore, blob);
-                    common_warn_img(img, 'BLOCKED IMG '+sqrxrScore);
+                    common_warn_img(img, 'BLOCKED IMG '+scoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
