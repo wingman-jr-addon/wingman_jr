@@ -38,8 +38,8 @@ const wingman_startup = async () => {
     let timingInfo = await tf.time(()=>warmup_result = PROC_wingman.predict(dummy_data));
     console.log(warmup_result);
     console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
-    warmup_result.print();
-    warmup_result.dispose();
+    warmup_result[0].dispose();
+    warmup_result[1].dispose();
     console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
 };
 
@@ -88,7 +88,7 @@ async function predict(imgElement, ctx) {
     return result;
   });
 
-  let syncedResult = logits.dataSync();
+  let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
   const totalTime = performance.now() - startTime;
   PROC_inferenceTimeTotal += totalTime;
   PROC_inferenceCountTotal++;
@@ -146,17 +146,18 @@ async function common_log_img_generic(img, message, logger)
     logger('%c '+message, blockedCSS);
 }
 
-async function common_create_svg_from_blob(img, threshold, blob)
+async function common_create_svg_from_blob(img, sqrxrScore, blob)
 {
     let dataURL = PROC_isInReviewMode ? await readFileAsDataURL(blob) : null;
-    return common_create_svg(img, threshold, dataURL);
+    return common_create_svg(img, sqrxrScore, dataURL);
 }
 
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 
-async function common_create_svg(img, threshold, dataURL)
+async function common_create_svg(img, sqrxrScore, dataURL)
 {
+    let threshold = sqrxrScore[1][0];
     let confidence = findConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
@@ -184,8 +185,16 @@ function setThreshold(threshold) {
     PROC_checkThreshold = threshold;
 }
 
+function scoreToStr(sqrxrScore) {
+    return sqrxrScore[1][0].toFixed(5) + ' ('+
+        sqrxrScore[0][0].toFixed(2)+', '+
+        sqrxrScore[0][1].toFixed(2)+', '+
+        sqrxrScore[0][2].toFixed(2)+', '+
+        sqrxrScore[0][3].toFixed(2)+')';
+}
+
 function isSafe(sqrxrScore) {
-    return sqrxrScore[0] < PROC_checkThreshold;
+    return sqrxrScore[1][0] < PROC_checkThreshold;
 }
 
 const loadImagePromise = url => new Promise( (resolve, reject) => {
@@ -222,7 +231,7 @@ async function performFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                let sqrxrScore = [0];
+                let sqrxrScore;
                 if(PROC_timingInfoDumpCount<10) {
                     PROC_timingInfoDumpCount++;
                     let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
@@ -231,12 +240,12 @@ async function performFiltering(entry) {
                     sqrxrScore = await predict(img);
                 }
                 if(isSafe(sqrxrScore)) {
-                    console.log('ML: Passed: '+sqrxrScore[0]+' '+entry.requestId);
+                    console.log('ML: Passed: '+scoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
                 } else {
-                    console.log('ML: Blocked: '+sqrxrScore[0]+' '+entry.requestId);
-                    let svgText = await common_create_svg_from_blob(img, sqrxrScore[0], blob);
+                    console.log('ML: Blocked: '+scoreToStr(sqrxrScore)+' '+entry.requestId);
+                    let svgText = await common_create_svg_from_blob(img, sqrxrScore, blob);
                     common_warn_img(img, 'BLOCKED IMG '+sqrxrScore);
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
@@ -336,8 +345,7 @@ async function completeB64Filtering(b64Filter, outputPort) {
                 if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                     console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await predict(img);
-                    console.debug('ML: base64 score: '+sqrxrScore);
-                    let unsafeScore = sqrxrScore[0];
+                    console.debug('ML: base64 score: '+scoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(isSafe(sqrxrScore)) {
                         outputPort.postMessage({
@@ -345,17 +353,17 @@ async function completeB64Filtering(b64Filter, outputPort) {
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        console.log('ML: base64 filter Passed: '+sqrxrScore[0]+' '+b64Filter.requestId);
+                        console.log('ML: base64 filter Passed: '+scoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
                         outputPort.postMessage({
                             type:'stat',
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        let svgText = await common_create_svg(img,unsafeScore,img.src);
+                        let svgText = await common_create_svg(img,sqrxrScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
-                        console.log('ML: base64 filter Blocked: '+sqrxrScore[0]+' '+b64Filter.requestId);
-                        common_warn_img(img, 'BLOCKED IMG BASE64 '+sqrxrScore[0]);
+                        console.log('ML: base64 filter Blocked: '+scoreToStr(sqrxrScore)+' '+b64Filter.requestId);
+                        common_warn_img(img, 'BLOCKED IMG BASE64 '+scoreToStr(sqrxrScore));
                         replacement = svgURI;
                     }
 
@@ -585,14 +593,14 @@ async function getVideoScanStatus(
             let frameStatus;
             if(isSafe(sqrxrScore))
             {
-                console.log('MLV: SCAN PASS video score @'+seekTime+': '+sqrxrScore+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await common_log_img(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+sqrxrScore);
+                console.log('MLV: SCAN PASS video score @'+seekTime+': '+scoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await common_log_img(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+scoreToStr(sqrxrScore));
                 frameStatus = 'pass';
             }
             else
             {
-                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+sqrxrScore+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await common_warn_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+sqrxrScore);
+                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+scoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await common_warn_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+scoreToStr(sqrxrScore));
                 frameStatus = 'block';
                 scanResults.blockCount++;
             }
