@@ -247,3 +247,17 @@ function ebmlExtractFragments(u8Array, fileStartOffset) {
     }
     return fragments;
 }
+
+//This is a specialized method to simply probe if the location is likely the start of a Cluster
+const EBML_EBML_ID_ARRAY = [0x1A, 0x45, 0xDF, 0xA3];
+function ebmlIsLikelyProbe(u8Array) {
+    if(u8Array.byteLength < 4) {
+        return false;
+    }
+    for(let i=0; i<4; i++) {
+        if(u8Array[i] != EBML_CLUSTER_ID_ARRAY[i]) {
+            return false;
+        }
+    }
+    return true;
+}

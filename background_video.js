@@ -21,6 +21,16 @@ function vidToArrayBuffer(u8Array) {
     );
 }
 
+function vidDetectType(u8Array) {
+    if(mp4IsLikelyProbe(u8Array)) {
+        return 'video/mp4';
+    } else if(ebmlIsLikelyProbe(u8Array)) {
+        return 'video/webm';
+    } else {
+        return 'video/*';
+    }
+}
+
 let VID_OPEN_REQUESTS = { };
 async function vidOnVidScan(m) {
     let openRequest = VID_OPEN_REQUESTS[m.requestId];
@@ -35,9 +45,9 @@ async function vidPerformVideoScan(
     processor,
     videoChainId,
     requestId,
-    requestType,
-    url,
     mimeType,
+    url,
+    requestType,
     buffers,
     scanStart,
     scanStep,
@@ -107,6 +117,7 @@ async function vidRootListener(details) {
             console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
             return listener(details);
         } else {
+            console.debug('WEBREQV: VIDEO rejected '+details.requestId+' because MIME type was '+mimeType);
             return;
         }
     }
@@ -144,12 +155,19 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
     let scanBlockBailCount = 3.0;
     let totalSize = 0;
     
+    let detectedType = mimeType;
     let status = 'unknown'; //pass, block
   
     filter.ondata = async event => {
         console.debug(`DEFV: Data for ${details.requestId} of size ${event.data.byteLength}`);
         buffers.push(event.data);
         totalSize += event.data.byteLength;
+
+        if(buffers.length <= 2 && detectedType.startsWith('application/octet-stream')) {
+            let detectionArray = vidConcatBuffersToUint8Array(buffers);
+            detectedType = vidDetectType(detectionArray);
+            console.warn(`DEFV: MIME type was default ${mimeType} so tried to detect type and found ${detectedType}`);
+        }
 
         if(totalSize >= 500*1024 && status == 'unknown') {
             status = 'scanning';
@@ -159,9 +177,9 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
                 processor,
                 videoChainId,
                 details.requestId,
-                details.type,
+                detectedType,
                 details.url,
-                mimeType,
+                details.type,
                 buffers,
                 scanStart,
                 scanStep,
@@ -199,7 +217,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
             processor,
             videoChainId,
             details.requestId,
-            mimeType,
+            detectedType,
             details.url,
             details.type,
             buffers,

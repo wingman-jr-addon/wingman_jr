@@ -680,7 +680,18 @@ async function onPortMessage(m) {
                 m.scanMaxSteps,
                 m.scanBlockBailCount
             );
-            PROC_port.postMessage(scanResults);
+            try {
+                PROC_port.postMessage(scanResults);
+            } catch(e) {
+                //Sometimes we can get a DataCloneError, presumably if the native exception can't be cloned
+                if(scanResults.error) {
+                    console.warn(`DATAV: Failed to post video result for ${m.requestId} because ${e}, try to avoid DataCloneError`);
+                    scanResults.error = scanResults.error.message;
+                    PROC_port.postMessage(scanResults);
+                } else {
+                    console.error(`DATAV: Failed to post video result for ${m.requestId} because ${e}, unsure how to proceed.`);
+                }
+            }
         }
         break;
         case 'thresholdChange': {
