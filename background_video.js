@@ -169,7 +169,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
             console.warn(`DEFV: MIME type was default ${mimeType} so tried to detect type and found ${detectedType}`);
         }
 
-        if(totalSize >= 500*1024 && status == 'unknown') {
+        if(totalSize >= 1024*1024 && status == 'unknown') {
             status = 'scanning';
             console.info(`DEFV: Triggering scan ${details.requestId} because total size ${totalSize}`);
             let processor = getNextProcessor();
