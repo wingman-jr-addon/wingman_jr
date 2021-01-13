@@ -148,55 +148,133 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let videoChainId = 'default-'+details.requestId;
-    let buffers = [];
+    let allBuffers = [];
+    
     let scanStart = 0.5; //seconds
     let scanStep = 1.0;
     let scanMaxSteps = 20.0;
     let scanBlockBailCount = 3.0;
     let totalSize = 0;
+    const fullPassScanBytes = 100*1024*1024;
+    const fullPassScanDuration = 10*60;
+
+    let totalScanCount = 0;
+    let totalBlockCount = 0;
+    let totalErrorCount = 0;
     
     let detectedType = mimeType;
-    let status = 'unknown'; //pass, block
-  
-    filter.ondata = async event => {
-        console.debug(`DEFV: Data for ${details.requestId} of size ${event.data.byteLength}`);
-        buffers.push(event.data);
-        totalSize += event.data.byteLength;
+    let status = 'pass_so_far'; //pass_so_far, scanning, pass, block, error
+    let flushIndexStart, flushIndexEnd = 0; //end exclusive
+    let flushScanStartTime = scanStep;
+    let flushScanStartSize = 0;
+    let scanAndTransitionPromise;
 
-        if(buffers.length <= 2 && detectedType.startsWith('application/octet-stream')) {
-            let detectionArray = vidConcatBuffersToUint8Array(buffers);
-            detectedType = vidDetectType(detectionArray);
-            console.warn(`DEFV: MIME type was default ${mimeType} so tried to detect type and found ${detectedType}`);
-        }
+    let pump = function(newData, isComplete) {
+        try
+        {
+            //Ensure this top section remains synchronous
+            console.debug(`DEFV: Data for ${details.requestId} of size ${newData.byteLength}`);
+            allBuffers.push(newData);
+            totalSize += newData.byteLength;
 
-        if(totalSize >= 3*1024*1024 && status == 'unknown') {
-            status = 'scanning';
-            console.info(`DEFV: Triggering scan ${details.requestId} because total size ${totalSize}`);
-            let processor = getNextProcessor();
-            let scanResults = await vidPerformVideoScan(
-                processor,
-                videoChainId,
-                details.requestId,
-                detectedType,
-                details.url,
-                details.type,
-                buffers,
-                scanStart,
-                scanStep,
-                scanMaxSteps,
-                scanBlockBailCount
-            );
-            console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
-            if(scanResults.blockCount >= scanBlockBailCount) {
-                status = 'block';
-                filter.write(VID_PLACEHOLDER_MP4);
+            let shouldScan = isComplete || (totalSize - flushScanStartSize >= 500*1024);
+
+            //Now transition to scanning and create a promise for next chunk of work
+            if (status == 'pass' || status == 'error') {
+                //This is really a warning condition because it shouldn't happen
+                filter.write(newData);
+            } else if(status == 'pass_so_far' && shouldScan)
+            {
+                //Begin synchronous only setup
+                status = 'scanning';
+                if(detectedType.startsWith('application/octet-stream')) {
+                    let detectionArray = vidConcatBuffersToUint8Array(allBuffers);
+                    detectedType = vidDetectType(detectionArray);
+                    console.warn(`DEFV: MIME type was default ${mimeType} so tried to detect type and found ${detectedType}`);
+                }
+                flushIndexStart = flushIndexEnd;
+                flushIndexEnd = allBuffers.length;
+                flushScanStartSize = totalSize;
+                let scanBuffers = allBuffers.slice(0, flushIndexEnd); //to load for scanning
+                let flushBuffers = allBuffers.slice(flushIndexStart, flushIndexEnd); //to flush if pass
+
+                console.info(`DEFV: Triggering scan ${details.requestId}`);
+                let processor = getNextProcessor();
+                //End synchronous only setup
+
+                //Setup async work as promise
+                scanAndTransitionPromise = async ()=>{
+                    let scanResults = await vidPerformVideoScan(
+                        processor,
+                        videoChainId,
+                        details.requestId,
+                        detectedType,
+                        details.url,
+                        details.type,
+                        scanBuffers,
+                        flushScanStartTime,
+                        scanStep,
+                        scanMaxSteps,
+                        scanBlockBailCount
+                    );
+                    console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
+                    totalScanCount += scanResults.scanCount;
+                    totalBlockCount += scanResults.blockCount;
+                    let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
+                        || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
+                    let isTotalScanBlock = (totalScanCount >= 20 && totalBlockCount / totalScanCount >= 0.15);
+                    let shouldBlock = isThisScanBlock || isTotalScanBlock;
+                    if(scanResults.error) {
+                        totalErrorCount++;
+                    }
+                    let shouldError = totalErrorCount >= 3;
+
+                    // Note that due the wonders of async, buffers may have data beyond
+                    // what is in flushBuffers, so we need to flush everything so that
+                    // for any condition where we disconnect we don't have any stragglers
+                    // causing "holes"
+                    if(shouldBlock) {
+                        status = 'block';
+                        if(flushIndexStart == 0) {
+                            filter.write(VID_PLACEHOLDER_MP4);
+                        }
+                        filter.close();
+                    } else if(shouldError) {
+                        status = 'error';
+                        let disconnectBuffers = allBuffers.slice(flushIndexStart);
+                        disconnectBuffers.forEach(b=>filter.write(b));
+                        filter.disconnect();
+                    } else {
+                        if(scanResults.frames.length > 0) {
+                            let lastFrame = scanResults.frames[scanResults.frames.length-1];
+                            flushScanStartTime = lastFrame.time + scanStep;
+                        }
+                        if(flushScanStartTime >= fullPassScanDuration || flushScanStartSize >= fullPassScanBytes) {
+                            status = 'pass';
+                            let disconnectBuffers = allBuffers.slice(flushIndexStart);
+                            disconnectBuffers.forEach(b=>filter.write(b));
+                            filter.disconnect();
+                        } else {
+                            status = 'pass_so_far';
+                            flushBuffers.forEach(b=>filter.write(b));
+                        }
+                    }
+                }
+            }
+        } catch(e) {
+
+        } finally {
+            if(isComplete) {
                 filter.close();
-            } else {
-                status = 'pass';
-                buffers.forEach(b=>filter.write(b));
-                filter.disconnect();
             }
         }
+    }
+  
+    filter.ondata = async event => {
+        if(status == 'block') {
+            return;
+        }
+        await pump(event.data, false);
     }
 
     filter.onerror = e => {
@@ -208,33 +286,11 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
     }
   
     filter.onstop = async _ => {
-        if(status != 'unknown') {
-            return;
+        if(status == 'scanning') {
+            await scanAndTransitionPromise;
         }
-        console.info(`DEFV: Triggering scan ${details.requestId} onstop because status is unknown`);
-        let processor = getNextProcessor();
-        let scanResults = await vidPerformVideoScan(
-            processor,
-            videoChainId,
-            details.requestId,
-            detectedType,
-            details.url,
-            details.type,
-            buffers,
-            scanStart,
-            scanStep,
-            scanMaxSteps,
-            scanBlockBailCount
-        );
-        console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
-        if(scanResults.blockCount >= scanBlockBailCount) {
-            status = 'block';
-            filter.write(VID_PLACEHOLDER_MP4);
-            filter.close();
-        } else {
-            status = 'pass';
-            buffers.forEach(b=>filter.write(b));
-            filter.disconnect();
+        if(status == 'block') {
+            return;
         }
     }
     return details;
