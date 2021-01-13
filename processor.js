@@ -480,9 +480,11 @@ async function checkProcess() {
 }
 
 function getMaxVideoTime(video) {
+    /* 
     if(!isNaN(video.duration)) {
         return video.duration;
     }
+    */
     let maxTime = -1;
     for(let i=0; i<video.buffered.length; i++) {
         if(video.buffered.end(i) > maxTime) {
@@ -588,8 +590,8 @@ async function getVideoScanStatus(
         for(var i=0; i<scanMaxSteps; i++) {
             let seekTime = scanStart+scanStep*i;
             await videoLoadedData(inferenceVideo, videoUrl, seekTime);
-            let maxTime = getMaxVideoTime(inferenceVideo);
-            console.info('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+getBufferedRangesString(inferenceVideo)+' for '+videoChainId+' at request '+requestId);
+            let maxTime = getMaxVideoTime(inferenceVideo); //important to do this AFTER loading
+            console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+getBufferedRangesString(inferenceVideo)+' vs readyState '+inferenceVideo.readyState+' vs seeking='+inferenceVideo.seeking+' for '+videoChainId+' at request '+requestId);
             if(maxTime < seekTime) {
                 break; //invalid even though it tried to seek!
             }
