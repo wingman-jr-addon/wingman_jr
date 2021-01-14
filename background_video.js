@@ -222,7 +222,8 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     totalBlockCount += scanResults.blockCount;
                     let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
                         || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
-                    let isTotalScanBlock = (totalScanCount >= 20 && totalBlockCount / totalScanCount >= 0.15);
+                    let isTotalScanBlock = (totalScanCount >= 8 && totalBlockCount / totalScanCount >= 0.5)
+                             || (totalScanCount >= 20 && totalBlockCount / totalScanCount >= 0.15);
                     let shouldBlock = isThisScanBlock || isTotalScanBlock;
                     if(scanResults.error) {
                         console.warn(`DEFV: Scan error ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}): ${scanResults.error}`);
