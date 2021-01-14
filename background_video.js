@@ -139,11 +139,11 @@ async function vidRootListener(details) {
             return;
         }
     } else {
-        return await vidDefaultListener(details, mimeType, parsedUrl);
+        return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
     }
 }
 
-async function vidDefaultListener(details, mimeType, parsedUrl) {
+async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength) {
     console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -165,11 +165,11 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
     let detectedType = mimeType;
     let status = 'pass_so_far'; //pass_so_far, scanning, pass, block, error
     let flushIndexStart, flushIndexEnd = 0; //end exclusive
-    let flushScanStartTime = scanStep;
+    let flushScanStartTime = scanStart;
     let flushScanStartSize = 0;
     let scanAndTransitionPromise;
 
-    let pump = function(newData, isComplete) {
+    let pump = async function(newData, isComplete) {
         try
         {
             //Ensure this top section remains synchronous
@@ -183,8 +183,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
             if (status == 'pass' || status == 'error') {
                 //This is really a warning condition because it shouldn't happen
                 filter.write(newData);
-            } else if(status == 'pass_so_far' && shouldScan)
-            {
+            } else if(status == 'pass_so_far' && shouldScan) {
                 //Begin synchronous only setup
                 status = 'scanning';
                 if(detectedType.startsWith('application/octet-stream')) {
@@ -198,12 +197,13 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
                 let scanBuffers = allBuffers.slice(0, flushIndexEnd); //to load for scanning
                 let flushBuffers = allBuffers.slice(flushIndexStart, flushIndexEnd); //to flush if pass
 
-                console.info(`DEFV: Triggering scan ${details.requestId}`);
+                console.info(`DEFV: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}`);
                 let processor = getNextProcessor();
                 //End synchronous only setup
 
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
+                    console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                     let scanResults = await vidPerformVideoScan(
                         processor,
                         videoChainId,
@@ -217,7 +217,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
                         scanMaxSteps,
                         scanBlockBailCount
                     );
-                    console.log(`DEFV: Scan results ${details.requestId} were ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
+                    console.log(`DEFV: Scan results ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
                     totalScanCount += scanResults.scanCount;
                     totalBlockCount += scanResults.blockCount;
                     let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
@@ -225,21 +225,38 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
                     let isTotalScanBlock = (totalScanCount >= 20 && totalBlockCount / totalScanCount >= 0.15);
                     let shouldBlock = isThisScanBlock || isTotalScanBlock;
                     if(scanResults.error) {
+                        console.warn(`DEFV: Scan error ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}): ${scanResults.error}`);
                         totalErrorCount++;
                     }
-                    let shouldError = totalErrorCount >= 3;
+                    let shouldError = totalErrorCount >= 5;
 
                     // Note that due the wonders of async, buffers may have data beyond
                     // what is in flushBuffers, so we need to flush everything so that
                     // for any condition where we disconnect we don't have any stragglers
                     // causing "holes"
                     if(shouldBlock) {
+                        console.warn(`DEFV: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
                         if(flushIndexStart == 0) {
                             filter.write(VID_PLACEHOLDER_MP4);
                         }
+                        //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
+                        //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
+                        //with random data.
+                        if(expectedContentLength > 0) {
+                            let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
+                            console.log(`DEFV: BLOCK ${details.requestId} stuffing ${remainingLength}`);
+                            let stuffer = new Uint8Array(1024).fill(0);
+                            while(remainingLength > stuffer.length) {
+                                filter.write(stuffer);
+                                remainingLength -= stuffer.length;
+                            }
+                            stuffer = new Uint8Array(remainingLength).fill(0);
+                            filter.write(stuffer);
+                        }
                         filter.close();
                     } else if(shouldError) {
+                        console.warn(`DEFV: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'error';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
@@ -250,21 +267,27 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
                             flushScanStartTime = lastFrame.time + scanStep;
                         }
                         if(flushScanStartTime >= fullPassScanDuration || flushScanStartSize >= fullPassScanBytes) {
+                            console.log(`DEFV: Full PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass';
                             let disconnectBuffers = allBuffers.slice(flushIndexStart);
                             disconnectBuffers.forEach(b=>filter.write(b));
                             filter.disconnect();
                         } else {
+                            console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
                             flushBuffers.forEach(b=>filter.write(b));
                         }
                     }
                 }
+                await scanAndTransitionPromise();
+            } else {
+                console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
             }
         } catch(e) {
-
+            console.error(`DEFV: Error scanning for ${details.requestId} status ${status} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}: ${e}`);
         } finally {
             if(isComplete) {
+                console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
                 filter.close();
             }
         }
@@ -287,11 +310,12 @@ async function vidDefaultListener(details, mimeType, parsedUrl) {
   
     filter.onstop = async _ => {
         if(status == 'scanning') {
-            await scanAndTransitionPromise;
+            await scanAndTransitionPromise();
         }
         if(status == 'block') {
             return;
         }
+        await pump(new Uint8Array(), true);
     }
     return details;
 }
