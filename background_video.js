@@ -151,7 +151,12 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     let allBuffers = [];
     
     let scanStart = 0.5; //seconds
-    let scanStep = 1.0;
+    let scanStepIncreaseThreshold = 0.70; //If perf is worse than this, ratchet up the scanStep size
+    let scanStepDecreaseThreshold = 0.35; //If perf is better than this, ratchet down the scanStep size
+    let scanStepRatchet = 0.5; // ratchet up interval if perf is too low
+    let scanStepMin = 1.0; // the minimum scanSetep, regardless of perf
+    let scanStepMax = 4.0; // the maximum scanStep, regardless of perf
+    let scanStep = scanStepMin; // scan every x seconds
     let scanMaxSteps = 20.0;
     let scanBlockBailCount = 3.0;
     let totalSize = 0;
@@ -279,6 +284,26 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
                             flushBuffers.forEach(b=>filter.write(b));
+
+                            //Check if perf was bad enough that we should ratchet.
+                            if(scanResults.scanCount > 0) {
+                                let timePerFrameSecs = (scanPerfTotalTime / scanResults.scanCount) / 1000.0; //super noisy
+                                if(timePerFrameSecs > scanStepIncreaseThreshold*scanStep) {
+                                    if(scanStep >= scanStepMax) {
+                                        console.warn(`DEFV: RATCHET maxed ${details.requestId}: ${timePerFrameSecs}`);
+                                    } else {
+                                        scanStep += scanStepRatchet;
+                                        console.warn(`DEFV: RATCHET increased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.scanCount} frames`);
+                                    }
+                                } else if(timePerFrameSecs < scanStepDecreaseThreshold*scanStep) {
+                                    if(scanStep <= scanStepMin) {
+                                        console.info(`DEFV: RATCHET minned ${details.requestId}: ${timePerFrameSecs}`);
+                                    } else {
+                                        scanStep -= scanStepRatchet;
+                                        console.warn(`DEFV: RATCHET decreased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.scanCount} frames`);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
