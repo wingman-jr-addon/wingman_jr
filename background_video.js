@@ -204,6 +204,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
                     console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                    let scanPerfStartTime = performance.now();
                     let scanResults = await vidPerformVideoScan(
                         processor,
                         videoChainId,
@@ -217,7 +218,8 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         scanMaxSteps,
                         scanBlockBailCount
                     );
-                    console.log(`DEFV: Scan results ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
+                    let scanPerfTotalTime = performance.now() - scanPerfStartTime;
+                    console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}/${scanResults.scanCount}=${(scanPerfTotalTime/scanResults.scanCount).toFixed(1)} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
                     totalScanCount += scanResults.scanCount;
                     totalBlockCount += scanResults.blockCount;
                     let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
