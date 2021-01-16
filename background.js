@@ -12,12 +12,13 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 
-let connectedClients = {};
-let connectedClientList = [];
-let openFilters = {};
-let openB64Filters = {};
+let BK_connectedClients = {};
+let BK_connectedClientList = [];
+let BK_openFilters = {};
+let BK_openB64Filters = {};
+let BK_openVidFilters = {};
 
-let isInitialized = false;
+let BK_isInitialized = false;
 function initialize() {
     browser.browserAction.setTitle({title: "Wingman Jr."});
     browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
@@ -28,68 +29,50 @@ function initialize() {
 function onClientConnected(port) {
     console.log('LIFECYCLE: Processor '+port.name+' connected.');
     let registration = { port: port, processorId: port.name, isBusy: false, backend: 'unknown' };
-    connectedClients[port.name] = registration;
-    connectedClientList.push(registration);
-    console.log('LIFECYCLE: There are now '+connectedClientList.length+' processors');
+    BK_connectedClients[registration.processorId] = registration;
+    BK_connectedClientList.push(registration);
+    console.log('LIFECYCLE: There are now '+BK_connectedClientList.length+' processors');
     port.onMessage.addListener(onProcessorMessage);
     notifyThreshold();
-    if(!isInitialized) {
-        isInitialized = true;
+    if(!BK_isInitialized) {
+        BK_isInitialized = true;
         initialize();
     }
 }
 
-let currentProcessorIndex = 0;
+let BK_currentProcessorIndex = 0;
 function getNextProcessor() {
-    if(connectedClientList.length == 0) {
+    if(BK_connectedClientList.length == 0) {
         return null;
     }
-    currentProcessorIndex = (currentProcessorIndex+1) % connectedClientList.length;
-    let preferredProcessor = connectedClientList[currentProcessorIndex];
+    BK_currentProcessorIndex = (BK_currentProcessorIndex+1) % BK_connectedClientList.length;
+    let preferredProcessor = BK_connectedClientList[BK_currentProcessorIndex];
     if (preferredProcessor.isBusy) {
         //Are any free? If so, return next one.
-        for(let i=1; i<connectedClientList.length; i++) {
-            let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
-            let processor = connectedClientList[pIndex];
+        for(let i=1; i<BK_connectedClientList.length; i++) {
+            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
+            let processor = BK_connectedClientList[pIndex];
             if(!processor.isBusy) {
-                console.log('PERF: Choosing free processor '+processor.processorId);
+                console.debug('PERF: Choosing free processor '+processor.processorId);
                 return processor;
             }
         }
         //Are any WebGL? If so, return next one.
-        for(let i=1; i<connectedClientList.length; i++) {
-            let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
-            let processor = connectedClientList[pIndex];
+        for(let i=1; i<BK_connectedClientList.length; i++) {
+            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
+            let processor = BK_connectedClientList[pIndex];
             if(processor.backend == 'webgl') {
-                console.log('PERF: Choosing webgl processor '+processor.processorId);
+                console.info('PERF: Choosing webgl processor '+processor.processorId);
                 return processor;
             }
         }
     }
-    console.log('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
+    console.info('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
     return preferredProcessor;
 }
 
-function getAcceleratedProcessor() {
-    if(connectedClientList.length == 0) {
-        return null;
-    }
-    currentProcessorIndex = (currentProcessorIndex+1) % connectedClientList.length;
-    //Are any WebGL? If so, return next one.
-    for(let i=1; i<connectedClientList.length; i++) {
-        let pIndex = (currentProcessorIndex+i) % connectedClientList.length;
-        let processor = connectedClientList[pIndex];
-        if(processor.backend == 'webgl') {
-            console.log('PERF: Accelerated choosing webgl processor '+processor.processorId);
-            return processor;
-        }
-    }
-    //fallback
-    return getNextProcessor();
-}
-
 function broadcastMessage(m) {
-    connectedClientList.forEach(c=>{
+    BK_connectedClientList.forEach(c=>{
         c.port.postMessage(m);
     });
 }
@@ -105,28 +88,32 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 function onProcessorMessage(m) {
     switch(m.type) {
         case 'scan': {
-            console.log('PROC: '+m);
-            console.dir(m);
-            let filter = openFilters[m.requestId];
+            console.debug('PROC: '+m);
+            let filter = BK_openFilters[m.requestId];
             filter.write(m.imageBytes);
             filter.close();
-            delete openFilters[m.requestId];
-            console.log('OPEN FILTERS: '+Object.keys(openFilters).length);
+            delete BK_openFilters[m.requestId];
+            console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
         }
         break;
         case 'b64_data': {
-            let b64Filter = openB64Filters[m.requestId];
+            let b64Filter = BK_openB64Filters[m.requestId];
             let b64Text = b64Filter.encoder.encode(m.dataStr);
             b64Filter.filter.write(b64Text);
         }
         break;
         case 'b64_close': {
-            let b64Filter = openB64Filters[m.requestId];
+            let b64Filter = BK_openB64Filters[m.requestId];
             b64Filter.filter.close();
+            delete BK_openB64Filters[m.requestId];
+        }
+        break;
+        case 'vid_scan': {
+            vidOnVidScan(m);
         }
         break;
         case 'stat': {
-            console.log('STAT: '+m.requestId+' '+m.result);
+            console.debug('STAT: '+m.requestId+' '+m.result);
             incrementCheckCount();
             switch(m.result) {
                 case 'pass': {
@@ -141,12 +128,14 @@ function onProcessorMessage(m) {
         }
         break;
         case 'registration': {
-            connectedClients[m.processorId].backend = m.backend;
+            console.dir(BK_connectedClients);
+            console.log('LIFECYLE: Registration '+m.processorId);
+            BK_connectedClients[m.processorId].backend = m.backend;
         }
         break;
         case 'qos': {
-            console.log('QOS: '+m.processorId+' isBusy: '+m.isBusy);
-            connectedClients[m.processorId].isBusy = m.isBusy;
+            console.debug('QOS: '+m.processorId+' isBusy: '+m.isBusy);
+            BK_connectedClients[m.processorId].isBusy = m.isBusy;
         }
         break;
     }
@@ -155,100 +144,100 @@ function onProcessorMessage(m) {
 
 //Note: checks can occur that fail and do not result in either a block or a pass.
 //Therefore, use block+pass as the total count in certain cases
-let blockCount = 0;
-let passCount = 0;
-let checkCount = 0;
+let BK_blockCount = 0;
+let BK_passCount = 0;
+let BK_checkCount = 0;
 function updateStatVisuals() {
-    if(blockCount > 0) {
-        let txt = (blockCount < 1000) ? blockCount+'' : '999+';
+    if(BK_blockCount > 0) {
+        let txt = (BK_blockCount < 1000) ? BK_blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
     }
-    let openRequestIds = Object.keys(openFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+blockCount+'/'+checkCount+' total images\r\n'+
-    'Blocked '+Math.round(100*estimatedTruePositivePercentage)+'% of the last '+predictionBuffer.length+' in this zone\r\n'+
+    let openRequestIds = Object.keys(BK_openFilters);
+    browser.browserAction.setTitle({ title: 'Blocked '+BK_blockCount+'/'+BK_checkCount+' total images\r\n'+
+    'Blocked '+Math.round(100*BK_estimatedTruePositivePercentage)+'% of the last '+BK_predictionBuffer.length+' in this zone\r\n'+
     openRequestIds.length +' open requests: '+openRequestIds });
 }
 
-var isZoneAutomatic = true;
-var predictionBufferBlockCount = 0;
-var predictionBuffer = [];
-var estimatedTruePositivePercentage = 0;
-var isEstimateValid = false;
+var BK_isZoneAutomatic = true;
+var BK_predictionBufferBlockCount = 0;
+var BK_predictionBuffer = [];
+var BK_estimatedTruePositivePercentage = 0;
+var BK_isEstimateValid = false;
 
 function addToPredictionBuffer(prediction)
 {
-    predictionBuffer.push(prediction);
+    BK_predictionBuffer.push(prediction);
     if(prediction>0) {
-        predictionBufferBlockCount++;
+        BK_predictionBufferBlockCount++;
     }
-    if(predictionBuffer.length>200) {
-        let oldPrediction = predictionBuffer.shift();
+    if(BK_predictionBuffer.length>200) {
+        let oldPrediction = BK_predictionBuffer.shift();
         if(oldPrediction > 0) {
-            predictionBufferBlockCount--;
+            BK_predictionBufferBlockCount--;
         }
     }
-    if(predictionBuffer.length>50) {
-        let estimatedTruePositiveCount = zonePrecision*predictionBufferBlockCount;
-        estimatedTruePositivePercentage = estimatedTruePositiveCount / predictionBuffer.length;
-        isEstimateValid = true;
+    if(BK_predictionBuffer.length>50) {
+        let estimatedTruePositiveCount = BK_zonePrecision*BK_predictionBufferBlockCount;
+        BK_estimatedTruePositivePercentage = estimatedTruePositiveCount / BK_predictionBuffer.length;
+        BK_isEstimateValid = true;
     } else {
-        estimatedTruePositivePercentage = 0;
-        isEstimateValid = false;
+        BK_estimatedTruePositivePercentage = 0;
+        BK_isEstimateValid = false;
     }
 }
 
 function clearPredictionBuffer() {
-    predictionBufferBlockCount = 0;
-    predictionBuffer = [];
-    estimatedTruePositivePercentage = 0;
+    BK_predictionBufferBlockCount = 0;
+    BK_predictionBuffer = [];
+    BK_estimatedTruePositivePercentage = 0;
 }
 
 function incrementCheckCount() {
-    checkCount++;
+    BK_checkCount++;
     updateStatVisuals();
 }
 
 function incrementBlockCount() {
-    blockCount++;
+    BK_blockCount++;
     addToPredictionBuffer(1);
     checkZone();
     updateStatVisuals();
 }
 
 function incrementPassCount() {
-    passCount++;
+    BK_passCount++;
     addToPredictionBuffer(0);
     checkZone();
     updateStatVisuals();
 }
 
 function setZoneAutomatic(isAutomatic) {
-    isZoneAutomatic = isAutomatic;
+    BK_isZoneAutomatic = isAutomatic;
 }
 
 function checkZone()
 {
-    if(!isEstimateValid) {
+    if(!BK_isEstimateValid) {
         return;
     }
-    if(!isZoneAutomatic) {
+    if(!BK_isZoneAutomatic) {
         return;
     }
     let requestedZone = 'untrusted';
-    if(estimatedTruePositivePercentage < trustedToNeutralPercentage) {
+    if(BK_estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
         requestedZone = 'trusted';
-    } else if(estimatedTruePositivePercentage < neutralToUntrustedPercentage) {
+    } else if(BK_estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
         requestedZone = 'neutral';
     }
-    if(requestedZone != zone) {
+    if(requestedZone != BK_zone) {
         setZone(requestedZone);
     }
 }
 
-var zoneThreshold = neutralRoc.threshold;
-var zonePrecision = calculatePrecision(neutralRoc);
-console.log("Zone precision is: "+zonePrecision);
-var zone = 'neutral';
+var BK_zoneThreshold = ROC_neutralRoc.threshold;
+var BK_zonePrecision = calculatePrecision(ROC_neutralRoc);
+console.log("Zone precision is: "+BK_zonePrecision);
+var BK_zone = 'neutral';
 function setZone(newZone)
 {
     console.log('Zone request to: '+newZone);
@@ -256,32 +245,32 @@ function setZone(newZone)
     switch(newZone)
     {
         case 'trusted':
-            zoneThreshold = trustedRoc.threshold;
-            zonePrecision = calculatePrecision(trustedRoc);
+            BK_zoneThreshold = ROC_trustedRoc.threshold;
+            BK_zonePrecision = calculatePrecision(ROC_trustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
-            zone = newZone;
+            BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now trusted!');
             break;
         case 'neutral':
-            zoneThreshold = neutralRoc.threshold;
-            zonePrecision = calculatePrecision(neutralRoc);
+            BK_zoneThreshold = ROC_neutralRoc.threshold;
+            BK_zonePrecision = calculatePrecision(ROC_neutralRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
-            zone = newZone;
+            BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now neutral!');
             break;
         case 'untrusted':
-            zoneThreshold = untrustedRoc.threshold;
-            zonePrecision = calculatePrecision(untrustedRoc);
+            BK_zoneThreshold = ROC_untrustedRoc.threshold;
+            BK_zonePrecision = calculatePrecision(ROC_untrustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
-            zone = newZone;
+            BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now untrusted!')
             break;
     }
     if(didZoneChange) {
-        console.log("Zone precision is: "+zonePrecision);
+        console.log("Zone precision is: "+BK_zonePrecision);
         clearPredictionBuffer();
         notifyThreshold();
     }
@@ -290,32 +279,9 @@ function setZone(newZone)
 function notifyThreshold() {
     broadcastMessage({
         type:'thresholdChange',
-        threshold: zoneThreshold
+        threshold: BK_zoneThreshold
     });
 }
-
-function isSafe(sqrxrScore)
-{
-    return sqrxrScore[0] < zoneThreshold;
-}
-
-/**
- * Given an image element, makes a prediction through wingman
- */
-let inferenceTimeTotal = 0;
-let inferenceCountTotal = 0;
-
-let processingTimeTotal = 0;
-let processingSinceDataStartTimeTotal = 0;
-let processingSinceDataEndTimeTotal = 0;
-let processingSinceImageLoadTimeTotal = 0;
-let processingCountTotal = 0;
-
-
-let iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
-
-
-let timingInfoDumpCount = 0;
 
 async function listener(details, shouldBlockSilently=false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
@@ -336,7 +302,7 @@ async function listener(details, shouldBlockSilently=false) {
             break;
         }
     }
-    console.log('WEBREQ: start headers '+details.requestId);
+    console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -352,7 +318,7 @@ async function listener(details, shouldBlockSilently=false) {
         if (dataStartTime == null) {
             dataStartTime = performance.now();
         }
-        console.log('WEBREQ: data '+details.requestId);
+        console.debug('WEBREQ: data '+details.requestId);
         processor.postMessage({ 
             type: 'ondata',
             requestId: details.requestId,
@@ -371,12 +337,13 @@ async function listener(details, shouldBlockSilently=false) {
         }
         catch(ex)
         {
-            console.log('WEBREQ: Filter error: '+e+', '+ex);
+            console.error('WEBREQ: Filter error: '+e+', '+ex);
         }
     }
   
     filter.onstop = async event => {
-        openFilters[details.requestId] = filter;
+        console.debug('WEBREQ: onstop '+details.requestId);
+        BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
             requestId: details.requestId
@@ -410,7 +377,7 @@ async function direct_typed_url_listener(details) {
 
 ///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
 
-shouldUseDnsBlocking = false;
+BK_shouldUseDnsBlocking = false;
 
 async function dnsBlockListener(details) {
     let dnsResult = await isDomainOk(details.url);
@@ -422,11 +389,11 @@ async function dnsBlockListener(details) {
 }
 
 function setDnsBlocking(onOrOff) {
-    let effectiveOnOrOff = onOrOff && isEnabled;
+    let effectiveOnOrOff = onOrOff && BK_isEnabled;
     console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
     if(effectiveOnOrOff != isCurrentlyOn) {
-        shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
+        BK_shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
         if(effectiveOnOrOff && !isCurrentlyOn) {
             console.log('CONFIG: DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
@@ -444,9 +411,9 @@ function setDnsBlocking(onOrOff) {
     }
 }
 
-//Use this if you change isEnabled
+//Use this if you change BK_isEnabled
 function refreshDnsBlocking() {
-    setDnsBlocking(shouldUseDnsBlocking);
+    setDnsBlocking(BK_shouldUseDnsBlocking);
 }
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
@@ -462,7 +429,7 @@ async function base64_listener(details) {
         console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
-    console.log('WEBREQ: base64 headers '+details.requestId+' '+details.url);
+    console.debug('WEBREQ: base64 headers '+details.requestId+' '+details.url);
     // The received data is a stream of bytes. In order to do text-based
     // modifications, it is necessary to decode the bytes into a string
     // using the proper character encoding, do any modifications, then
@@ -481,10 +448,10 @@ async function base64_listener(details) {
         encoder: encoder,
         filter: filter
     };
-    openB64Filters[details.requestId] = b64Filter;
+    BK_openB64Filters[details.requestId] = b64Filter;
 
     //Choose highest power here because we have many images possibly
-    let processor = getAcceleratedProcessor().port; 
+    let processor = getNextProcessor().port; 
     processor.postMessage({
         type: 'b64_start',
         requestId : details.requestId
@@ -522,7 +489,7 @@ async function base64_listener(details) {
         }
         catch(e)
         {
-            console.log('WEBREQ: Filter error: '+e);
+            console.error('WEBREQ: Filter error: '+e);
         }
     }
   
@@ -546,7 +513,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
         }
     }
     if (headerIndex == -1) {
-      console.log('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
+      console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
       headerIndex = details.responseHeaders.length;
       contentType = 'text/html';
       details.responseHeaders.push(
@@ -560,16 +527,16 @@ function detectCharsetAndSetupDecoderEncoder(details) {
     let baseType;
     if(contentType.trim().startsWith('text/html')) {
       baseType = 'text/html';
-      console.log('CHARSET: Detected base type was '+baseType);
+      console.debug('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
-      console.log('CHARSET: Detected base type was '+baseType);
+      console.debug('CHARSET: Detected base type was '+baseType);
     } else if(contentType.trim().startsWith('image/')) {
-      console.log('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
       return;
     } else {
       baseType = 'text/html';
-      console.log('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
+      console.debug('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
       return;
     }
   
@@ -586,7 +553,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
   
     if(detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
-        console.log('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+        console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
     }
     details.responseHeaders[headerIndex].value = baseType+';charset=utf-8';
   
@@ -641,21 +608,23 @@ function detectCharset(contentType) {
 
 ////////////////////////Actual Startup//////////////////////////////
 
+let BK_isVideoEnabled = true;
+
 function registerAllCallbacks() {
 
     browser.webRequest.onHeadersReceived.addListener(
         listener,
         {urls:["<all_urls>"], types:["image","imageset"]},
         ["blocking","responseHeaders"]
-      );
+    );
 
-      browser.webRequest.onHeadersReceived.addListener(
+    browser.webRequest.onHeadersReceived.addListener(
         direct_typed_url_listener,
         {urls:["<all_urls>"], types:["main_frame"]},
         ["blocking","responseHeaders"]
-      );
+    );
 
-      browser.webRequest.onHeadersReceived.addListener(
+    browser.webRequest.onHeadersReceived.addListener(
         base64_listener,
         {
             urls:[
@@ -664,19 +633,38 @@ function registerAllCallbacks() {
             types:["main_frame"]
         },
         ["blocking","responseHeaders"]
-      );
+    );
+
+    if(BK_isVideoEnabled) {
+        browser.webRequest.onBeforeRequest.addListener(
+            vidPrerequestListener,
+            {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+            ["blocking"]
+        );
+    
+        browser.webRequest.onHeadersReceived.addListener(
+            vidRootListener,
+            {urls:["<all_urls>"], types:["media","xmlhttprequest"]},
+            ["blocking","responseHeaders"]
+        );
+    }
 }
 
 function unregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(listener);
     browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
     browser.webRequest.onHeadersReceived.removeListener(base64_listener);
+
+    if(BK_isVideoEnabled) {
+        browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
+        browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+    }
 }
 
-let isEnabled = false;
+let BK_isEnabled = false;
 function setEnabled(isOn) {
     console.log('CONFIG: Setting enabled to '+isOn);
-    if(isOn == isEnabled) {
+    if(isOn == BK_isEnabled) {
         return;
     }
     console.log('CONFIG: Handling callback wireup change.');
@@ -685,18 +673,18 @@ function setEnabled(isOn) {
     } else {
         unregisterAllCallbacks();
     }
-    isEnabled = isOn;
+    BK_isEnabled = isOn;
     refreshDnsBlocking();
     console.log('CONFIG: Callback wireups changed!');
 }
 
-let isOnOffSwitchShown = false;
+let BK_isOnOffSwitchShown = false;
 
 function updateFromSettings() {
     browser.storage.local.get("is_dns_blocking").then(dnsResult=>
     setDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get("is_on_off_shown").then(onOffResult=>
-    isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
 }
 
 function handleMessage(request, sender, sendResponse) {
@@ -706,7 +694,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getZone')
     {
-        sendResponse({zone: zone});
+        sendResponse({zone: BK_zone});
     }
     else if(request.type=='setZoneAutomatic')
     {
@@ -714,7 +702,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getZoneAutomatic')
     {
-        sendResponse({isZoneAutomatic:isZoneAutomatic});
+        sendResponse({isZoneAutomatic:BK_isZoneAutomatic});
     }
     else if(request.type=='setDnsBlocking')
     {
@@ -722,7 +710,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getOnOff')
     {
-        sendResponse({onOff:isEnabled ? 'on' : 'off'});
+        sendResponse({onOff:BK_isEnabled ? 'on' : 'off'});
     }
     else if(request.type=='setOnOff')
     {
@@ -730,7 +718,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='getOnOffSwitchShown')
     {
-        sendResponse({isOnOffSwitchShown: isOnOffSwitchShown});
+        sendResponse({isOnOffSwitchShown: BK_isOnOffSwitchShown});
     }
     else if(request.type=='setOnOffSwitchShown')
     {
@@ -740,4 +728,3 @@ function handleMessage(request, sender, sendResponse) {
 browser.runtime.onMessage.addListener(handleMessage);
 setZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
-
