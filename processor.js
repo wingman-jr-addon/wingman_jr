@@ -49,54 +49,90 @@ const procWingmanStartup = async () => {
  */
 let PROC_inferenceTimeTotal = 0;
 let PROC_inferenceCountTotal = 0;
-let PROC_inferenceCanvas = document.createElement('canvas');
-PROC_inferenceCanvas.width = PROC_IMAGE_SIZE;
-PROC_inferenceCanvas.height = PROC_IMAGE_SIZE;
-let PROC_inferenceCtx = PROC_inferenceCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
-console.log('LIFECYCLE: Inference context: '+PROC_inferenceCtx);
-PROC_inferenceCtx.imageSmoothingEnabled = true;
+
+
+function procCreateInferenceContext() {
+    let canvas = document.createElement('canvas');
+    canvas.width = PROC_IMAGE_SIZE;
+    canvas.height = PROC_IMAGE_SIZE;
+    let ctx = canvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
+    console.log('LIFECYCLE: Inference context: '+ctx);
+    ctx.imageSmoothingEnabled = true;
+
+    return { canvas: canvas, ctx: ctx };
+}
+
+let procContextReferences = [];
+let procContextPool = [];
+let PROC_CTX_POOL_DEFAULT_SIZE = 1;
+for(let i=0; i<PROC_CTX_POOL_DEFAULT_SIZE; i++) {
+    let c = procCreateInferenceContext();
+    procContextReferences.push(c);
+    procContextPool.push(c);
+}
+
+function procGetCtx() {
+    if(procContextPool.length == 0) {
+        let c = procCreateInferenceContext();
+        procContextReferences.push(c);
+        procContextPool.push(c);
+        console.warn(`PROC: Had to increase context pool to size ${procContextReferences.length}`);
+    }
+    return procContextPool.pop();
+}
+
+function procReturnCtx(c) {
+    procContextPool.push(c);
+}
+
+function procIsCtxPoolEmpty() {
+    return procContextPool.length == 0;
+}
 
 let PROC_processingTimeTotal = 0;
 let PROC_processingSinceDataEndTimeTotal = 0;
 let PROC_processingSinceImageLoadTimeTotal = 0;
 let PROC_processingCountTotal = 0;
 
-async function procPredict(imgElement, ctx) {
-  if(ctx === undefined) {
-      ctx = PROC_inferenceCtx;
-  }
-  const drawStartTime = performance.now();
-  ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
-  const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
-  const totalDrawTime = performance.now() - drawStartTime;
-  console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
+async function procPredict(imgElement) {
+    let c = procGetCtx();
+    try {
+        let ctx = c.ctx;
+        const drawStartTime = performance.now();
+        ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
+        const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
+        const totalDrawTime = performance.now() - drawStartTime;
+        console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
-  const startTime = performance.now();
-  const logits = tf.tidy(() => {
-    const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
-    const floatImg = rightSizeImageDataTF.toFloat();
-    //EfficientNet
-    //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
-    //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
-    //MobileNet V2
-    const scaled = floatImg.div(tf.scalar(127.5));
-    const normalized = scaled.sub(tf.scalar(1));
-    // Reshape to a single-element batch so we can pass it to predict.
-    const batched = tf.stack([normalized]);
-    const result = PROC_wingman.predict(batched, {batchSize: 1});
+        const startTime = performance.now();
+        const logits = tf.tidy(() => {
+            const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
+            const floatImg = rightSizeImageDataTF.toFloat();
+            //EfficientNet
+            //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
+            //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
+            //MobileNet V2
+            const scaled = floatImg.div(tf.scalar(127.5));
+            const normalized = scaled.sub(tf.scalar(1));
+            // Reshape to a single-element batch so we can pass it to predict.
+            const batched = tf.stack([normalized]);
+            const result = PROC_wingman.predict(batched, {batchSize: 1});
 
-    return result;
-  });
+            return result;
+        });
 
-  let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
-  const totalTime = performance.now() - startTime;
-  PROC_inferenceTimeTotal += totalTime;
-  PROC_inferenceCountTotal++;
-  const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
-  console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
+        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        const totalTime = performance.now() - startTime;
+        PROC_inferenceTimeTotal += totalTime;
+        PROC_inferenceCountTotal++;
+        const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
+        console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
 
-  console.debug('ML: Prediction: '+syncedResult[0]);
-  return syncedResult;
+        console.debug('ML: Prediction: '+syncedResult[0]);
+        return syncedResult;
+    } finally {
+        procReturnCtx(c);
+    }
 }
 
 async function procReadFileAsDataURL (inputFile) {
@@ -432,14 +468,9 @@ async function procCheckProcess() {
         })
         return;
     }
-    if(PROC_inFlight > 0) { //Note, if increasing, consider inference context reuse strategy!
-        if(PROC_processingQueue.length > 30) {
-            console.log('QUEUE: Pressure warning! '+PROC_processingQueue.length+' Setting PROC_inFlight=0');
-            PROC_inFlight = 0;
-        } else {
-            console.log('QUEUE: Throttling ('+PROC_inFlight+')');
-            return;
-        }
+    if(PROC_inFlight > PROC_CTX_POOL_DEFAULT_SIZE) {
+        console.log('QUEUE: Throttling ('+PROC_inFlight+')');
+        return;
     }
     //It is critical that PROC_inFlight always goes up AND DOWN, hence all the try/catch action.
     let toProcess = PROC_processingQueue.shift();
@@ -460,7 +491,7 @@ async function procCheckProcess() {
         }
         PROC_inFlight--;
         if(PROC_inFlight < 0) {
-            console.warn('QUEUE: Recovering from pressure release, upping to PROC_inFlight=0');
+            console.error(`QUEUE: Invalid negative PROC_inFlight ${PROC_inFlight}! Setting to 0.`);
             PROC_inFlight = 0;
         }
         try {
@@ -561,11 +592,6 @@ async function procGetVideoScanStatus(
     scanMaxSteps,
     scanBlockBailCount
 ) {
-    let videoCanvas = document.createElement('canvas');
-    videoCanvas.width = PROC_IMAGE_SIZE;
-    videoCanvas.height = PROC_IMAGE_SIZE;
-    let videoCtx = videoCanvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
-    videoCtx.imageSmoothingEnabled = true;
     let inferenceVideo, videoUrl, sqrxrScore;
 
     let scanResults = {
@@ -598,7 +624,7 @@ async function procGetVideoScanStatus(
 
             console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
             
-            sqrxrScore = await procPredict(inferenceVideo, videoCtx);
+            sqrxrScore = await procPredict(inferenceVideo);
             scanResults.scanCount++;
             let frameStatus;
             if(procIsSafe(sqrxrScore))
