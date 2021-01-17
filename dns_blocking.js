@@ -1,18 +1,18 @@
 let dnsLookupCache = { '': true } //Add blank entry for things without a true hostname.
 let dnsInFlightRequests = { }
 let dnsInFlightRequestsCounter = { }
-let isDnsFailureTripped = false;
+let dnsIsDnsFailureTripped = false;
 let dnsCacheHitCount = 0;
 let dnsCacheMissCount = 0;
 let dnsErrorCount = 0;
-let shouldShowDnsDebugMessages = false;
+let dnsShouldShowDebugMessages = false;
 
-async function isDomainOk(urlString) {
+async function dnsIsDomainOk(urlString) {
     let url = new URL(urlString);
     let cacheResult = dnsLookupCache[url.hostname];
     if (cacheResult !== undefined) {
         dnsCacheHitCount++;
-        if(shouldShowDnsDebugMessages) {
+        if(dnsShouldShowDebugMessages) {
             console.log('DNS cache hit (result: '+cacheResult+') for: '+url.hostname);
         }
         return cacheResult;
@@ -27,22 +27,22 @@ async function isDomainOk(urlString) {
     if (url.hostname in dnsInFlightRequests) {
         p = dnsInFlightRequests[url.hostname];
         dnsInFlightRequestsCounter[url.hostname]++;
-        if(shouldShowDnsDebugMessages) {
+        if(dnsShouldShowDebugMessages) {
             console.log('DNS in flight: multiple lookups ('+dnsInFlightRequestsCounter[url.hostname]+') occurring on '+url.hostname);
         }
     } else {
-        p = makeRequest(url);
+        p = dnsMakeRequest(url);
         dnsInFlightRequests[url.hostname] = p;
         dnsInFlightRequestsCounter[url.hostname] = 1;
         wasTrueMiss = true;
     }
     let result = await p;
     dnsInFlightRequestsCounter[url.hostname]--;
-    if(shouldShowDnsDebugMessages) {
+    if(dnsShouldShowDebugMessages) {
         console.log('DNS in flight: '+dnsInFlightRequestsCounter[url.hostname]+' remaining requests for '+url.hostname);
     }
     if (dnsInFlightRequestsCounter[url.hostname]<=0) {
-        if(shouldShowDnsDebugMessages) {
+        if(dnsShouldShowDebugMessages) {
             console.log('DNS in flight: cleaning up for '+url.hostname);
         }
         delete dnsInFlightRequests[url.hostname];
@@ -52,7 +52,7 @@ async function isDomainOk(urlString) {
     return result;
 }
 
-async function makeRequest(url) {
+async function dnsMakeRequest(url) {
     let reqHeaders = new Headers();
     reqHeaders.append('Accept', 'application/dns-json');
 
@@ -65,11 +65,11 @@ async function makeRequest(url) {
     let req = new Request(`https://family.cloudflare-dns.com/dns-query?name=${url.hostname}&type=AAAA`);
     let response = await fetch(req, reqInit);
     if(!response.ok) {
-        if(!isDnsFailureTripped) {
-            isDnsFailureTripped = true;
+        if(!dnsIsDnsFailureTripped) {
+            dnsIsDnsFailureTripped = true;
             console.warn('DNS resolution lookup failures are occurring.');
         }
-        if(shouldShowDnsDebugMessages) {
+        if(dnsShouldShowDebugMessages) {
             console.log('DNS resolution failure for '+url.hostname);
         }
         dnsErrorCount++;

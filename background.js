@@ -19,29 +19,29 @@ let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
 let BK_isInitialized = false;
-function initialize() {
+function bkInitialize() {
     browser.browserAction.setTitle({title: "Wingman Jr."});
     browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
-    updateFromSettings();
-    setEnabled(true); //always start on
+    bkUpdateFromSettings();
+    bkSetEnabled(true); //always start on
 }
 
-function onClientConnected(port) {
+function bkOnClientConnected(port) {
     console.log('LIFECYCLE: Processor '+port.name+' connected.');
     let registration = { port: port, processorId: port.name, isBusy: false, backend: 'unknown' };
     BK_connectedClients[registration.processorId] = registration;
     BK_connectedClientList.push(registration);
     console.log('LIFECYCLE: There are now '+BK_connectedClientList.length+' processors');
-    port.onMessage.addListener(onProcessorMessage);
-    notifyThreshold();
+    port.onMessage.addListener(bkOnProcessorMessage);
+    bkNotifyThreshold();
     if(!BK_isInitialized) {
         BK_isInitialized = true;
-        initialize();
+        bkInitialize();
     }
 }
 
 let BK_currentProcessorIndex = 0;
-function getNextProcessor() {
+function bkGetNextProcessor() {
     if(BK_connectedClientList.length == 0) {
         return null;
     }
@@ -71,13 +71,13 @@ function getNextProcessor() {
     return preferredProcessor;
 }
 
-function broadcastMessage(m) {
+function bkBroadcastMessageToProcessors(m) {
     BK_connectedClientList.forEach(c=>{
         c.port.postMessage(m);
     });
 }
       
-browser.runtime.onConnect.addListener(onClientConnected);
+browser.runtime.onConnect.addListener(bkOnClientConnected);
 browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: false})
     .then(async tab=>await browser.tabs.hide(tab.id));
 //browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
@@ -85,7 +85,7 @@ browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: f
 //browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
 
 
-function onProcessorMessage(m) {
+function bkOnProcessorMessage(m) {
     switch(m.type) {
         case 'scan': {
             console.debug('PROC: '+m);
@@ -114,14 +114,14 @@ function onProcessorMessage(m) {
         break;
         case 'stat': {
             console.debug('STAT: '+m.requestId+' '+m.result);
-            incrementCheckCount();
+            bkIncrementCheckCount();
             switch(m.result) {
                 case 'pass': {
-                    incrementPassCount();
+                    bkIncrementPassCount();
                 }
                 break;
                 case 'block': {
-                    incrementBlockCount();
+                    bkIncrementBlockCount();
                 }
                 //could also be tiny or error
             }
@@ -147,7 +147,7 @@ function onProcessorMessage(m) {
 let BK_blockCount = 0;
 let BK_passCount = 0;
 let BK_checkCount = 0;
-function updateStatVisuals() {
+function bkUpdateStatVisuals() {
     if(BK_blockCount > 0) {
         let txt = (BK_blockCount < 1000) ? BK_blockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
@@ -164,7 +164,7 @@ var BK_predictionBuffer = [];
 var BK_estimatedTruePositivePercentage = 0;
 var BK_isEstimateValid = false;
 
-function addToPredictionBuffer(prediction)
+function bkAddToPredictionBuffer(prediction)
 {
     BK_predictionBuffer.push(prediction);
     if(prediction>0) {
@@ -186,36 +186,36 @@ function addToPredictionBuffer(prediction)
     }
 }
 
-function clearPredictionBuffer() {
+function bkClearPredictionBuffer() {
     BK_predictionBufferBlockCount = 0;
     BK_predictionBuffer = [];
     BK_estimatedTruePositivePercentage = 0;
 }
 
-function incrementCheckCount() {
+function bkIncrementCheckCount() {
     BK_checkCount++;
-    updateStatVisuals();
+    bkUpdateStatVisuals();
 }
 
-function incrementBlockCount() {
+function bkIncrementBlockCount() {
     BK_blockCount++;
-    addToPredictionBuffer(1);
-    checkZone();
-    updateStatVisuals();
+    bkAddToPredictionBuffer(1);
+    bkCheckZone();
+    bkUpdateStatVisuals();
 }
 
-function incrementPassCount() {
+function bkIncrementPassCount() {
     BK_passCount++;
-    addToPredictionBuffer(0);
-    checkZone();
-    updateStatVisuals();
+    bkAddToPredictionBuffer(0);
+    bkCheckZone();
+    bkUpdateStatVisuals();
 }
 
-function setZoneAutomatic(isAutomatic) {
+function bkSetZoneAutomatic(isAutomatic) {
     BK_isZoneAutomatic = isAutomatic;
 }
 
-function checkZone()
+function bkCheckZone()
 {
     if(!BK_isEstimateValid) {
         return;
@@ -230,15 +230,15 @@ function checkZone()
         requestedZone = 'neutral';
     }
     if(requestedZone != BK_zone) {
-        setZone(requestedZone);
+        bkSetZone(requestedZone);
     }
 }
 
 var BK_zoneThreshold = ROC_neutralRoc.threshold;
-var BK_zonePrecision = calculatePrecision(ROC_neutralRoc);
+var BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
 console.log("Zone precision is: "+BK_zonePrecision);
 var BK_zone = 'neutral';
-function setZone(newZone)
+function bkSetZone(newZone)
 {
     console.log('Zone request to: '+newZone);
     let didZoneChange = false;
@@ -246,7 +246,7 @@ function setZone(newZone)
     {
         case 'trusted':
             BK_zoneThreshold = ROC_trustedRoc.threshold;
-            BK_zonePrecision = calculatePrecision(ROC_trustedRoc);
+            BK_zonePrecision = rocCalculatePrecision(ROC_trustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
             BK_zone = newZone;
             didZoneChange = true;
@@ -254,7 +254,7 @@ function setZone(newZone)
             break;
         case 'neutral':
             BK_zoneThreshold = ROC_neutralRoc.threshold;
-            BK_zonePrecision = calculatePrecision(ROC_neutralRoc);
+            BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
             BK_zone = newZone;
             didZoneChange = true;
@@ -262,7 +262,7 @@ function setZone(newZone)
             break;
         case 'untrusted':
             BK_zoneThreshold = ROC_untrustedRoc.threshold;
-            BK_zonePrecision = calculatePrecision(ROC_untrustedRoc);
+            BK_zonePrecision = rocCalculatePrecision(ROC_untrustedRoc);
             browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
             BK_zone = newZone;
             didZoneChange = true;
@@ -271,23 +271,23 @@ function setZone(newZone)
     }
     if(didZoneChange) {
         console.log("Zone precision is: "+BK_zonePrecision);
-        clearPredictionBuffer();
-        notifyThreshold();
+        bkClearPredictionBuffer();
+        bkNotifyThreshold();
     }
 }
 
-function notifyThreshold() {
-    broadcastMessage({
+function bkNotifyThreshold() {
+    bkBroadcastMessageToProcessors({
         type:'thresholdChange',
         threshold: BK_zoneThreshold
     });
 }
 
-async function listener(details, shouldBlockSilently=false) {
+async function bkImageListener(details, shouldBlockSilently=false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (isWhitelisted(details.url)) {
+    if (whtIsWhitelisted(details.url)) {
         console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
@@ -306,7 +306,7 @@ async function listener(details, shouldBlockSilently=false) {
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
-    let processor = getNextProcessor().port;
+    let processor = bkGetNextProcessor().port;
     processor.postMessage({
         type: 'start',
         requestId : details.requestId,
@@ -352,11 +352,11 @@ async function listener(details, shouldBlockSilently=false) {
     return details;
   }
 
-async function direct_typed_url_listener(details) {
+async function bkDirectTypedUrlListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (isWhitelisted(details.url)) {
+    if (whtIsWhitelisted(details.url)) {
         console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
@@ -367,7 +367,7 @@ async function direct_typed_url_listener(details) {
             let mimeType = header.value;
             if(mimeType.startsWith('image/')) {
                 console.log('WEBREQ: Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
-                return listener(details,true);
+                return bkImageListener(details,true);
             }
         }
     }
@@ -379,8 +379,8 @@ async function direct_typed_url_listener(details) {
 
 BK_shouldUseDnsBlocking = false;
 
-async function dnsBlockListener(details) {
-    let dnsResult = await isDomainOk(details.url);
+async function bkDnsBlockListener(details) {
+    let dnsResult = await dnsIsDomainOk(details.url);
     if(!dnsResult) {
         console.log('DNS: DNS Blocked '+details.url);
         return { cancel: true };
@@ -388,22 +388,22 @@ async function dnsBlockListener(details) {
     return details;
 }
 
-function setDnsBlocking(onOrOff) {
+function bkSetDnsBlocking(onOrOff) {
     let effectiveOnOrOff = onOrOff && BK_isEnabled;
     console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
-    let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(dnsBlockListener);
+    let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(bkDnsBlockListener);
     if(effectiveOnOrOff != isCurrentlyOn) {
         BK_shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
         if(effectiveOnOrOff && !isCurrentlyOn) {
             console.log('CONFIG: DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
-                dnsBlockListener,
+                bkDnsBlockListener,
                 {urls:["<all_urls>"], types:["image","imageset","media"]},
                 ["blocking"]
               );
         } else if (!effectiveOnOrOff && isCurrentlyOn) {
             console.log('CONFIG: DNS Removing DNS block listener')
-            browser.webRequest.onBeforeRequest.removeListener(dnsBlockListener);
+            browser.webRequest.onBeforeRequest.removeListener(bkDnsBlockListener);
         }
         console.log('CONFIG: DNS blocking is now: '+onOrOff);
     } else {
@@ -412,8 +412,8 @@ function setDnsBlocking(onOrOff) {
 }
 
 //Use this if you change BK_isEnabled
-function refreshDnsBlocking() {
-    setDnsBlocking(BK_shouldUseDnsBlocking);
+function bkRefreshDnsBlocking() {
+    bkSetDnsBlocking(BK_shouldUseDnsBlocking);
 }
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
@@ -421,11 +421,11 @@ function refreshDnsBlocking() {
 
 // Listen for any Base 64 encoded images, particularly the first page of
 // "above the fold" image search requests in Google Images
-async function base64_listener(details) {
+async function bkBase64ContentListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (isWhitelisted(details.url)) {
+    if (whtIsWhitelisted(details.url)) {
         console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
@@ -438,7 +438,7 @@ async function base64_listener(details) {
     // taken on by the browser. Here, a simplified approach is taken
     // and the complexity is hidden in a helper method.
     let decoder, encoder;
-    [decoder, encoder] = detectCharsetAndSetupDecoderEncoder(details);
+    [decoder, encoder] = bkDetectCharsetAndSetupDecoderEncoder(details);
     if(!decoder) {
         return;
     }
@@ -451,7 +451,7 @@ async function base64_listener(details) {
     BK_openB64Filters[details.requestId] = b64Filter;
 
     //Choose highest power here because we have many images possibly
-    let processor = getNextProcessor().port; 
+    let processor = bkGetNextProcessor().port; 
     processor.postMessage({
         type: 'b64_start',
         requestId : details.requestId
@@ -501,7 +501,7 @@ async function base64_listener(details) {
 // 1) Detects the charset for the TextDecoder so that bytes are properly turned into strings
 // 2) Ensures the output Content-Type is UTF-8 because that is what TextEncoder supports
 // 3) Returns the decoder/encoder pair
-function detectCharsetAndSetupDecoderEncoder(details) {
+function bkDetectCharsetAndSetupDecoderEncoder(details) {
     let contentType = '';
     let headerIndex = -1;
     for(let i=0; i<details.responseHeaders.length; i++) {
@@ -549,7 +549,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
     // all pass - current implementation only fails on #9 but this detection ensures
     // tests #3,4,5, and 8 pass.
     let decodingCharset = 'utf-8';
-    let detectedCharset = detectCharset(contentType);
+    let detectedCharset = bkDetectCharset(contentType);
   
     if(detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
@@ -565,7 +565,7 @@ function detectCharsetAndSetupDecoderEncoder(details) {
   
   
 // Detect the charset from Content-Type
-function detectCharset(contentType) {
+function bkDetectCharset(contentType) {
     /*
     From https://tools.ietf.org/html/rfc7231#section-3.1.1.5:
   
@@ -610,22 +610,22 @@ function detectCharset(contentType) {
 
 let BK_isVideoEnabled = true;
 
-function registerAllCallbacks() {
+function bkRegisterAllCallbacks() {
 
     browser.webRequest.onHeadersReceived.addListener(
-        listener,
+        bkImageListener,
         {urls:["<all_urls>"], types:["image","imageset"]},
         ["blocking","responseHeaders"]
     );
 
     browser.webRequest.onHeadersReceived.addListener(
-        direct_typed_url_listener,
+        bkDirectTypedUrlListener,
         {urls:["<all_urls>"], types:["main_frame"]},
         ["blocking","responseHeaders"]
     );
 
     browser.webRequest.onHeadersReceived.addListener(
-        base64_listener,
+        bkBase64ContentListener,
         {
             urls:[
                 "<all_urls>"
@@ -650,10 +650,10 @@ function registerAllCallbacks() {
     }
 }
 
-function unregisterAllCallbacks() {
-    browser.webRequest.onHeadersReceived.removeListener(listener);
-    browser.webRequest.onHeadersReceived.removeListener(direct_typed_url_listener);
-    browser.webRequest.onHeadersReceived.removeListener(base64_listener);
+function bkUnregisterAllCallbacks() {
+    browser.webRequest.onHeadersReceived.removeListener(bkImageListener);
+    browser.webRequest.onHeadersReceived.removeListener(bkDirectTypedUrlListener);
+    browser.webRequest.onHeadersReceived.removeListener(bkBase64ContentListener);
 
     if(BK_isVideoEnabled) {
         browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
@@ -662,35 +662,35 @@ function unregisterAllCallbacks() {
 }
 
 let BK_isEnabled = false;
-function setEnabled(isOn) {
+function bkSetEnabled(isOn) {
     console.log('CONFIG: Setting enabled to '+isOn);
     if(isOn == BK_isEnabled) {
         return;
     }
     console.log('CONFIG: Handling callback wireup change.');
     if(isOn) {
-        registerAllCallbacks();
+        bkRegisterAllCallbacks();
     } else {
-        unregisterAllCallbacks();
+        bkUnregisterAllCallbacks();
     }
     BK_isEnabled = isOn;
-    refreshDnsBlocking();
+    bkRefreshDnsBlocking();
     console.log('CONFIG: Callback wireups changed!');
 }
 
 let BK_isOnOffSwitchShown = false;
 
-function updateFromSettings() {
+function bkUpdateFromSettings() {
     browser.storage.local.get("is_dns_blocking").then(dnsResult=>
-    setDnsBlocking(dnsResult.is_dns_blocking == true));
+    bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get("is_on_off_shown").then(onOffResult=>
     BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
 }
 
-function handleMessage(request, sender, sendResponse) {
+function bkHandleMessage(request, sender, sendResponse) {
     if(request.type=='setZone')
     {
-        setZone(request.zone);
+        bkSetZone(request.zone);
     }
     else if(request.type=='getZone')
     {
@@ -698,7 +698,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setZoneAutomatic')
     {
-        setZoneAutomatic(request.isZoneAutomatic);
+        bkSetZoneAutomatic(request.isZoneAutomatic);
     }
     else if(request.type=='getZoneAutomatic')
     {
@@ -706,7 +706,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setDnsBlocking')
     {
-        updateFromSettings();
+        bkUpdateFromSettings();
     }
     else if(request.type=='getOnOff')
     {
@@ -714,7 +714,7 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setOnOff')
     {
-        setEnabled(request.onOff=='on');
+        bkSetEnabled(request.onOff=='on');
     }
     else if(request.type=='getOnOffSwitchShown')
     {
@@ -722,9 +722,9 @@ function handleMessage(request, sender, sendResponse) {
     }
     else if(request.type=='setOnOffSwitchShown')
     {
-        updateFromSettings();
+        bkUpdateFromSettings();
     }
 }
-browser.runtime.onMessage.addListener(handleMessage);
-setZone('neutral');
+browser.runtime.onMessage.addListener(bkHandleMessage);
+bkSetZone('neutral');
 browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});

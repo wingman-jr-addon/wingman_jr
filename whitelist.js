@@ -1,8 +1,8 @@
-function isWhitelisted(url) {
-    return whitelist_stems.some(stem=>url.startsWith(stem));
+function whtIsWhitelisted(url) {
+    return whtWhitelistStems.some(stem=>url.startsWith(stem));
 }
 
-const whitelist_stems = [
+const whtWhitelistStems = [
     'https://www.google.com/recaptcha',
     'https://www.gstatic.com/recaptcha'
 ];

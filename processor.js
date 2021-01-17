@@ -3,14 +3,14 @@ const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
 
-function onModelLoadProgress(percentage) {
+function procOnModelLoadProgress(percentage) {
     console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
 
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
-const wingman_startup = async () => {
+const procWingmanStartup = async () => {
     console.log('LIFECYCLE: Launching TF.js!');
     let params = (new URL(document.location)).searchParams;
     let backendRequested = params.get('backend');
@@ -29,7 +29,7 @@ const wingman_startup = async () => {
         return;
     }
     console.log('LIFECYCLE: Loading model...');
-    PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: onModelLoadProgress });
+    PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
     console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
 
     console.log('LIFECYCLE: Warming up...');
@@ -61,7 +61,7 @@ let PROC_processingSinceDataEndTimeTotal = 0;
 let PROC_processingSinceImageLoadTimeTotal = 0;
 let PROC_processingCountTotal = 0;
 
-async function predict(imgElement, ctx) {
+async function procPredict(imgElement, ctx) {
   if(ctx === undefined) {
       ctx = PROC_inferenceCtx;
   }
@@ -99,7 +99,7 @@ async function predict(imgElement, ctx) {
   return syncedResult;
 }
 
-async function readFileAsDataURL (inputFile) {
+async function procReadFileAsDataURL (inputFile) {
     const temporaryFileReader = new FileReader();
   
     return new Promise((resolve, reject) => {
@@ -116,27 +116,27 @@ async function readFileAsDataURL (inputFile) {
   };
 
 
-let LOG_IMG_SIZE = 150;
+let PROC_LOG_IMG_SIZE = 150;
 let PROC_logCanvas = document.createElement('canvas');
-PROC_logCanvas.width = LOG_IMG_SIZE;
-PROC_logCanvas.height = LOG_IMG_SIZE;
+PROC_logCanvas.width = PROC_LOG_IMG_SIZE;
+PROC_logCanvas.height = PROC_LOG_IMG_SIZE;
 let PROC_logCtx = PROC_logCanvas.getContext('2d', { alpha: false});
 PROC_logCanvas.imageSmoothingEnabled = true;
 
-async function common_log_img(img, message)
+async function procCommonLogImg(img, message)
 {
-    return await common_log_img_generic(img, message, console.log);
+    return await procCommonLogImgGeneric(img, message, console.log);
 }
 
-async function common_warn_img(img, message)
+async function procCommonWarnImg(img, message)
 {
-    return await common_log_img_generic(img, message, console.warn);
+    return await procCommonLogImgGeneric(img, message, console.warn);
 }
 
-async function common_log_img_generic(img, message, logger)
+async function procCommonLogImgGeneric(img, message, logger)
 {
     let maxSide = Math.max(img.width, img.height);
-    let ratio = LOG_IMG_SIZE/maxSide;
+    let ratio = PROC_LOG_IMG_SIZE/maxSide;
     let newWidth = img.width*ratio;
     let newHeight = img.height*ratio;
     PROC_logCtx.clearRect(0,0,PROC_logCanvas.width,PROC_logCanvas.height);
@@ -146,19 +146,19 @@ async function common_log_img_generic(img, message, logger)
     logger('%c '+message, blockedCSS);
 }
 
-async function common_create_svg_from_blob(img, sqrxrScore, blob)
+async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob)
 {
-    let dataURL = PROC_isInReviewMode ? await readFileAsDataURL(blob) : null;
-    return common_create_svg(img, sqrxrScore, dataURL);
+    let dataURL = PROC_isInReviewMode ? await procReadFileAsDataURL(blob) : null;
+    return procCommonCreateSvg(img, sqrxrScore, dataURL);
 }
 
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 
-async function common_create_svg(img, sqrxrScore, dataURL)
+async function procCommonCreateSvg(img, sqrxrScore, dataURL)
 {
     let threshold = sqrxrScore[1][0];
-    let confidence = findConfidence(threshold);
+    let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
     +'<g transform="translate(20 20)">'
@@ -181,11 +181,11 @@ async function common_create_svg(img, sqrxrScore, dataURL)
 
 let PROC_checkThreshold = ROC_neutralRoc;
 
-function setThreshold(threshold) {
+function procSetThreshold(threshold) {
     PROC_checkThreshold = threshold;
 }
 
-function scoreToStr(sqrxrScore) {
+function procScoreToStr(sqrxrScore) {
     return sqrxrScore[1][0].toFixed(5) + ' ('+
         sqrxrScore[0][0].toFixed(2)+', '+
         sqrxrScore[0][1].toFixed(2)+', '+
@@ -193,11 +193,11 @@ function scoreToStr(sqrxrScore) {
         sqrxrScore[0][3].toFixed(2)+')';
 }
 
-function isSafe(sqrxrScore) {
+function procIsSafe(sqrxrScore) {
     return sqrxrScore[1][0] < PROC_checkThreshold;
 }
 
-const loadImagePromise = url => new Promise( (resolve, reject) => {
+const procLoadImagePromise = url => new Promise( (resolve, reject) => {
     const img = new Image()
     img.onerror = e => reject(e)
     img.onload = () => resolve(img)
@@ -207,7 +207,7 @@ const loadImagePromise = url => new Promise( (resolve, reject) => {
 
 let PROC_timingInfoDumpCount = 0;
 
-async function performFiltering(entry) {
+async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
     console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
     let result = {
@@ -226,7 +226,7 @@ async function performFiltering(entry) {
     {
         if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
             url = URL.createObjectURL(blob);
-            let img = await loadImagePromise(url);
+            let img = await procLoadImagePromise(url);
             console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
@@ -234,19 +234,19 @@ async function performFiltering(entry) {
                 let sqrxrScore;
                 if(PROC_timingInfoDumpCount<10) {
                     PROC_timingInfoDumpCount++;
-                    let timingInfo = await tf.time(async ()=>sqrxrScore=await predict(img));
+                    let timingInfo = await tf.time(async ()=>sqrxrScore=await procPredict(img));
                     console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
                 } else {
-                    sqrxrScore = await predict(img);
+                    sqrxrScore = await procPredict(img);
                 }
-                if(isSafe(sqrxrScore)) {
-                    console.log('ML: Passed: '+scoreToStr(sqrxrScore)+' '+entry.requestId);
+                if(procIsSafe(sqrxrScore)) {
+                    console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
                 } else {
-                    console.log('ML: Blocked: '+scoreToStr(sqrxrScore)+' '+entry.requestId);
-                    let svgText = await common_create_svg_from_blob(img, sqrxrScore, blob);
-                    common_warn_img(img, 'BLOCKED IMG '+scoreToStr(sqrxrScore));
+                    console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
+                    procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
@@ -289,11 +289,11 @@ async function performFiltering(entry) {
     return result;
 }
 
-async function advanceB64Filtering(dataStr, b64Filter, outputPort) {
+async function procAdvanceB64Filtering(dataStr, b64Filter, outputPort) {
     b64Filter.fullStr += dataStr;
 }
 
-async function completeB64Filtering(b64Filter, outputPort) {
+async function procCompleteB64Filtering(b64Filter, outputPort) {
     let startTime = performance.now();
     let fullStr = b64Filter.fullStr;
     console.info('WEBREQ: base64 stop '+fullStr.length);
@@ -341,29 +341,29 @@ async function completeB64Filtering(b64Filter, outputPort) {
             console.info('WEBREQ: base64 image loaded: '+imageId);
             try
             {
-                let img = await loadImagePromise(imageDataURI);
+                let img = await procLoadImagePromise(imageDataURI);
                 if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                     console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                    let sqrxrScore = await predict(img);
-                    console.debug('ML: base64 score: '+scoreToStr(sqrxrScore));
+                    let sqrxrScore = await procPredict(img);
+                    console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
-                    if(isSafe(sqrxrScore)) {
+                    if(procIsSafe(sqrxrScore)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        console.log('ML: base64 filter Passed: '+scoreToStr(sqrxrScore)+' '+b64Filter.requestId);
+                        console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
                         outputPort.postMessage({
                             type:'stat',
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        let svgText = await common_create_svg(img,sqrxrScore,img.src);
+                        let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
-                        console.log('ML: base64 filter Blocked: '+scoreToStr(sqrxrScore)+' '+b64Filter.requestId);
-                        common_warn_img(img, 'BLOCKED IMG BASE64 '+scoreToStr(sqrxrScore));
+                        console.log('ML: base64 filter Blocked: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
+                        procCommonWarnImg(img, 'BLOCKED IMG BASE64 '+procScoreToStr(sqrxrScore));
                         replacement = svgURI;
                     }
 
@@ -422,7 +422,7 @@ let PROC_openB64Requests = {};
 let PROC_openVidRequests = {};
 let PROC_processingQueue = [];
 let PROC_inFlight = 0;
-async function checkProcess() {
+async function procCheckProcess() {
     console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
         PROC_port.postMessage({
@@ -453,7 +453,7 @@ async function checkProcess() {
                 isBusy: true
             })
             console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
-            result = await performFiltering(toProcess);
+            result = await procPerformFiltering(toProcess);
             
         } catch(ex) {
             console.error('ML: Error scanning image '+ex);
@@ -476,10 +476,10 @@ async function checkProcess() {
     } else {
         console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
     }
-    await checkProcess();
+    await procCheckProcess();
 }
 
-function getMaxVideoTime(video) {
+function procGetMaxVideoTime(video) {
     /* 
     if(!isNaN(video.duration)) {
         return video.duration;
@@ -494,7 +494,7 @@ function getMaxVideoTime(video) {
     return maxTime;
 }
 
-function getBufferedRangesString(video) {
+function procGetBufferedRangesString(video) {
     let result = '';
     for(let i=0; i<video.buffered.length && (result += ','); i++) {
         result += '['+video.buffered.start(i)+','+video.buffered.end(i)+']';
@@ -502,7 +502,7 @@ function getBufferedRangesString(video) {
     return result;
 }
 
-const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
+const procVideoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
     video.addEventListener('error', ()=>reject(video.error), {once: true});
     video.addEventListener('seeked',  () => {
         video.width = video.videoWidth;
@@ -513,7 +513,7 @@ const videoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) =
     video.currentTime = seekTime;
 });
 
-function getMp4Parsed(buffers) {
+function procGetMp4Parsed(buffers) {
     let size = buffers.reduce((a,b) => a + b.byteLength, 0);
     let bytes = new Uint8Array(size);
     let offset = 0;
@@ -525,7 +525,7 @@ function getMp4Parsed(buffers) {
     return parsed;
 }
 
-function getVideoUrl(requestId, mimeType, buffers) {
+function procGetVideoUrl(requestId, mimeType, buffers) {
     if(mimeType.toLowerCase().startsWith('video/mp2t')) {
         console.info('MLV: URL MP2T detected for '+requestId+', mime '+mimeType);
         //remux that sucker to MP4 quick
@@ -549,7 +549,7 @@ function getVideoUrl(requestId, mimeType, buffers) {
 }
 
 
-async function getVideoScanStatus(
+async function procGetVideoScanStatus(
     videoChainId,
     requestId,
     requestType,
@@ -585,32 +585,32 @@ async function getVideoScanStatus(
         };
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
-        videoUrl = getVideoUrl(requestId, mimeType, buffers);
+        videoUrl = procGetVideoUrl(requestId, mimeType, buffers);
 
         for(var i=0; i<scanMaxSteps; i++) {
             let seekTime = scanStart+scanStep*i;
-            await videoLoadedData(inferenceVideo, videoUrl, seekTime);
-            let maxTime = getMaxVideoTime(inferenceVideo); //important to do this AFTER loading
-            console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+getBufferedRangesString(inferenceVideo)+' vs readyState '+inferenceVideo.readyState+' vs seeking='+inferenceVideo.seeking+' for '+videoChainId+' at request '+requestId);
+            await procVideoLoadedData(inferenceVideo, videoUrl, seekTime);
+            let maxTime = procGetMaxVideoTime(inferenceVideo); //important to do this AFTER loading
+            console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+procGetBufferedRangesString(inferenceVideo)+' vs readyState '+inferenceVideo.readyState+' vs seeking='+inferenceVideo.seeking+' for '+videoChainId+' at request '+requestId);
             if(maxTime < seekTime) {
                 break; //invalid even though it tried to seek!
             }
 
             console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
             
-            sqrxrScore = await predict(inferenceVideo, videoCtx);
+            sqrxrScore = await procPredict(inferenceVideo, videoCtx);
             scanResults.scanCount++;
             let frameStatus;
-            if(isSafe(sqrxrScore))
+            if(procIsSafe(sqrxrScore))
             {
-                console.log('MLV: SCAN PASS video score @'+seekTime+': '+scoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await common_log_img(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+scoreToStr(sqrxrScore));
+                console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await procCommonLogImg(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
                 frameStatus = 'pass';
             }
             else
             {
-                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+scoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await common_warn_img(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+scoreToStr(sqrxrScore));
+                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await procCommonWarnImg(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
                 frameStatus = 'block';
                 scanResults.blockCount++;
             }
@@ -629,7 +629,7 @@ async function getVideoScanStatus(
     return scanResults;
 }
 
-async function onPortMessage(m) {
+async function procOnPortMessage(m) {
     console.debug(`PROCV: Received message of type ${m.type}`);
     switch(m.type) {
         case 'start': {
@@ -655,7 +655,7 @@ async function onPortMessage(m) {
         case 'onstop': {
             PROC_processingQueue.push(PROC_openRequests[m.requestId]);
             delete PROC_openRequests[m.requestId];
-            await checkProcess();
+            await procCheckProcess();
         }
         case 'b64_start': {
             PROC_openB64Requests[m.requestId] = {
@@ -666,19 +666,19 @@ async function onPortMessage(m) {
         }
         break;
         case 'b64_ondata': {
-            await advanceB64Filtering(m.dataStr, PROC_openB64Requests[m.requestId], PROC_port);
+            await procAdvanceB64Filtering(m.dataStr, PROC_openB64Requests[m.requestId], PROC_port);
         }
         break;
         case 'b64_onerror': {
             delete openB64Filters[m.requestId];
         }
         case 'b64_onstop': {
-            await completeB64Filtering(PROC_openB64Requests[m.requestId], PROC_port);
+            await procCompleteB64Filtering(PROC_openB64Requests[m.requestId], PROC_port);
         }
         break;
         case 'vid_chunk': {
             console.log('DATAV: vid_start '+m.requestId+' with buffers length '+m.buffers.length+' for video chain '+m.videoChainId);
-            let scanResults = await getVideoScanStatus(
+            let scanResults = await procGetVideoScanStatus(
                 m.videoChainId,
                 m.requestId,
                 m.requestType,
@@ -706,7 +706,7 @@ async function onPortMessage(m) {
         break;
         case 'thresholdChange': {
             console.log('PROC: Setting threshold '+m.threshold);
-            setThreshold(m.threshold);
+            procSetThreshold(m.threshold);
         }
         break;
         default: {
@@ -718,11 +718,11 @@ async function onPortMessage(m) {
 
 let PROC_port = null;
 let PROC_processorId = (new URL(document.location)).searchParams.get('id');
-wingman_startup()
+procWingmanStartup()
 .then(async ()=>
 {
     PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
-    PROC_port.onMessage.addListener(onPortMessage);
+    PROC_port.onMessage.addListener(procOnPortMessage);
     PROC_port.postMessage({
         type: 'registration',
         processorId: PROC_processorId,

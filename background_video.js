@@ -81,7 +81,7 @@ async function vidRootListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (isWhitelisted(details.url)) {
+    if (whtIsWhitelisted(details.url)) {
         console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
@@ -115,7 +115,7 @@ async function vidRootListener(details) {
         let isImage = mimeType.startsWith('image/');
         if(isImage) {
             console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
-            return listener(details);
+            return bkImageListener(details);
         } else {
             console.debug('WEBREQV: VIDEO rejected '+details.requestId+' because MIME type was '+mimeType);
             return;
@@ -203,7 +203,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 let flushBuffers = allBuffers.slice(flushIndexStart, flushIndexEnd); //to flush if pass
 
                 console.info(`DEFV: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}`);
-                let processor = getNextProcessor();
+                let processor = bkGetNextProcessor();
                 //End synchronous only setup
 
                 //Setup async work as promise
@@ -476,7 +476,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
             let scanBlockBailCount = 4.0;
 
             console.debug(`YTVMP4: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
-            let processor = getNextProcessor();
+            let processor = bkGetNextProcessor();
             let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
@@ -630,7 +630,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             let scanBlockBailCount = 4.0;
 
             console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
-            let processor = getNextProcessor();
+            let processor = bkGetNextProcessor();
             let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
@@ -675,7 +675,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
 }
 
 async function vidPrerequestListener(details) {
-    if (isWhitelisted(details.url)) {
+    if (whtIsWhitelisted(details.url)) {
         return;
     }
     let parsedUrl = new URL(details.url);

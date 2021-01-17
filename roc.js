@@ -1,4 +1,4 @@
-function findConfidence(threshold) {
+function rocFindConfidence(threshold) {
     let bestMatch = ROC_VALUES[ROC_VALUES.length-1];
     for(let i=0; i<ROC_VALUES.length; i++) {
         if(ROC_VALUES[i].threshold < threshold) {
@@ -13,7 +13,7 @@ function findConfidence(threshold) {
     return 1.0-bestMatch.tpr;
 }
 
-function findROCEntryByFPR(desiredFPR) {
+function rocFindRocEntryByFpr(desiredFPR) {
     let bestMatch = ROC_VALUES[0];
     for(let i=ROC_VALUES.length-1; i>=0; i--) {
         if(ROC_VALUES[i].fpr < desiredFPR) {
@@ -24,7 +24,7 @@ function findROCEntryByFPR(desiredFPR) {
     return bestMatch;
 }
 
-function findROCEntryByTPR(desiredTPR) {
+function rocFindRocEntryByTpr(desiredTPR) {
     let bestMatch = ROC_VALUES[0];
     for(let i=ROC_VALUES.length-1; i>=0; i--) {
         if(ROC_VALUES[i].tpr < desiredTPR) {
@@ -35,12 +35,12 @@ function findROCEntryByTPR(desiredTPR) {
     return bestMatch;
 }
 
-function calculatePrecision(rocEntry) {
+function rocCalculatePrecision(rocEntry) {
     var p = rocEntry.tp+rocEntry.fp;
     return rocEntry.tp / p;
 }
 
-function getROCString(rocEntry) {
+function rocGetEntryString(rocEntry) {
     return "FPR="+rocEntry.fpr+",TPR="+rocEntry.tpr+",Thresh="+rocEntry.threshold+",TP="+rocEntry.tp+",FP="+rocEntry.fp+",TN="+rocEntry.tp+",FN="+rocEntry.fn;
 }
 
@@ -8220,11 +8220,11 @@ let ROC_VALUES = [
   ];
 
 
-var ROC_trustedRoc = findROCEntryByFPR(0.005);
-console.log("Trusted ROC: "+getROCString(ROC_trustedRoc));
+var ROC_trustedRoc = rocFindRocEntryByFpr(0.005);
+console.log("Trusted ROC: "+rocGetEntryString(ROC_trustedRoc));
 var ROC_trustedToNeutralPercentage = 0.04;
-var ROC_neutralRoc = findROCEntryByFPR(0.05);
-console.log("Neutral ROC: "+getROCString(ROC_neutralRoc));
+var ROC_neutralRoc = rocFindRocEntryByFpr(0.05);
+console.log("Neutral ROC: "+rocGetEntryString(ROC_neutralRoc));
 var ROC_neutralToUntrustedPercentage = 0.08;
-var ROC_untrustedRoc = findROCEntryByTPR(0.90);
-console.log("Untrusted ROC: "+getROCString(ROC_untrustedRoc));
+var ROC_untrustedRoc = rocFindRocEntryByTpr(0.90);
+console.log("Untrusted ROC: "+rocGetEntryString(ROC_untrustedRoc));

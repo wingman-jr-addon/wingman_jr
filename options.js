@@ -1,4 +1,4 @@
-async function saveOptions() {
+async function optSaveOptions() {
     let isDnsBlocking = document.querySelector('input[name="dns_blocking"]:checked').value == "dns_blocking_yes";
     await browser.storage.local.set({
     is_dns_blocking: isDnsBlocking
@@ -11,7 +11,7 @@ async function saveOptions() {
     browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: isOnOffShown });
 }
 
-function restoreOptions() {
+function optRestoreOptions() {
     console.log('Restoring saved options');
 
     function setCurrentDnsBlockingChoice(rawResult) {
@@ -47,16 +47,16 @@ function restoreOptions() {
     gettingOnOffShown.then(setCurrentShowOnOffSwitchChoice, onError);
 }
 
-document.addEventListener("DOMContentLoaded", restoreOptions);
+document.addEventListener("DOMContentLoaded", optRestoreOptions);
 var radios = document.forms[0].elements["dns_blocking"];
 for(var i = 0, max = radios.length; i < max; i++) {
     radios[i].onclick = function() {
-        saveOptions();
+        optSaveOptions();
     }
 }
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for(var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function() {
-        saveOptions();
+        optSaveOptions();
     }
 }
