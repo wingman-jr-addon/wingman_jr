@@ -458,6 +458,8 @@ let PROC_openB64Requests = {};
 let PROC_openVidRequests = {};
 let PROC_processingQueue = [];
 let PROC_inFlight = 0;
+let PROC_scanStartCount = 0;
+let PROC_throttleRejectionCount = 0;
 async function procCheckProcess() {
     console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
@@ -469,6 +471,7 @@ async function procCheckProcess() {
         return;
     }
     if(PROC_inFlight > PROC_CTX_POOL_DEFAULT_SIZE) {
+        PROC_throttleRejectionCount++;
         console.log('QUEUE: Throttling ('+PROC_inFlight+')');
         return;
     }
@@ -476,6 +479,8 @@ async function procCheckProcess() {
     let toProcess = PROC_processingQueue.shift();
     if(toProcess !== undefined) {
         PROC_inFlight++;
+        PROC_scanStartCount++;
+        PROC_throttleRejectionCount = 0;
         let result;
         try {
             PROC_port.postMessage({
@@ -509,6 +514,31 @@ async function procCheckProcess() {
     }
     await procCheckProcess();
 }
+
+let PROC_watchdogScanStartCount = 0;
+let PROC_watchdogThrottleRejectionCount = 0;
+let PROC_watchdogKickCount = 0;
+async function procWatchdog() {
+    //Has the throttle count increased and scan start count stayed stuck?
+    console.info(`WATCHDOG: Check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+    if(PROC_watchdogThrottleRejectionCount > PROC_throttleRejectionCount
+        && PROC_watchdogScanStartCount == PROC_scanStartCount) {
+        try {
+            PROC_watchdogKickCount++;
+            console.error(`WATCHDOG: Kicked! Resetting in flight count. Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+            PROC_inFlight = 0;
+            await procCheckProcess();
+        } catch(e) {
+            console.error(`WATCHDOG: Error kicking scan ${e}`);
+        }
+    }
+
+    PROC_watchdogScanStartCount = PROC_scanStartCount;
+    PROC_watchdogThrottleRejectionCount = PROC_throttleRejectionCount;
+}
+setInterval(procWatchdog, 3000);
+
+
 
 function procGetMaxVideoTime(video) {
     /* 
