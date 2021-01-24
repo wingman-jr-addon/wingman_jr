@@ -11,6 +11,7 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
+statusInitialize();
 
 let BK_connectedClients = {};
 let BK_connectedClientList = [];
@@ -20,8 +21,7 @@ let BK_openVidFilters = {};
 
 let BK_isInitialized = false;
 function bkInitialize() {
-    browser.browserAction.setTitle({title: "Wingman Jr."});
-    browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+    statusOnLoaded();
     bkUpdateFromSettings();
     bkSetEnabled(true); //always start on
 }
@@ -287,6 +287,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
         mimeType: mimeType,
         url: details.url
     });
+    statusStartImageCheck(details.requestId);
   
     filter.ondata = event => {
         if (dataStartTime == null) {
@@ -303,6 +304,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
     filter.onerror = e => {
         try
         {
+            console.debug('WEBREQ: error '+details.requestId);
             processor.postMessage({
                 type: 'onerror',
                 requestId: details.requestId
@@ -322,7 +324,6 @@ async function bkImageListener(details, shouldBlockSilently=false) {
             type: 'onstop',
             requestId: details.requestId
         });
-        statusStartImageCheck(details.requestId);
     }
     return details;
   }
@@ -702,4 +703,3 @@ function bkHandleMessage(request, sender, sendResponse) {
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
 bkSetZone('neutral');
-browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
