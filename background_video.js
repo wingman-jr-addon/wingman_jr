@@ -174,6 +174,8 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     let flushScanStartSize = 0;
     let scanAndTransitionPromise;
 
+    statusStartVideoCheck(details.requestId);
+
     let pump = async function(newData, isComplete) {
         try
         {
@@ -308,6 +310,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     }
                 }
                 await scanAndTransitionPromise();
+                statusIndicateVideoProgress(details.requestId);
             } else {
                 console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
             }
@@ -317,6 +320,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
             if(isComplete) {
                 console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, status);
             }
         }
     }
@@ -331,6 +335,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.log('WEBREQ: Filter video error: '+ex);
         }
@@ -339,6 +344,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     filter.onstop = async _ => {
         if(status == 'scanning') {
             await scanAndTransitionPromise();
+            statusIndicateVideoProgress(details.requestId);
         }
         if(status == 'block') {
             return;

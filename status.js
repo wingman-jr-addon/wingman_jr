@@ -1,24 +1,35 @@
 //Note: checks can occur that fail and do not result in either a block or a pass.
 //Therefore, use block+pass as the total count in certain cases
 
-let STATUS_counts = {
+let STATUS_imageCounts = {
     'pass' : 0,
     'block' : 0,
     'tiny' : 0,
     'error' : 0
 };
-let STATUS_checkCount = 0;
+let STATUS_imageCheckCount = 0;
 let STATUS_openImageFilters = { };
 let STATUS_openImageHighWaterCount = 0;
+
+let STATUS_videoCounts = {
+    'pass' : 0,
+    'block' : 0,
+    'error' : 0
+};
+let STATUS_openVideoFilters = { };
+let STATUS_videoProgressCounter = 0;
 
 let STATUS_ICON_SIZE = 32;
 let STATUS_iconCanvas = document.createElement('canvas');
 STATUS_iconCanvas.width = STATUS_ICON_SIZE;
 STATUS_iconCanvas.height = STATUS_ICON_SIZE;
 let STATUS_zoneFill = 'white';
+let STATUS_zoneFillOffset = 'white';
 
 let STATUS_lastZoneFill = '';
 let STATUS_lastProgressWidth = 0;
+let STATUS_lastIsVideoInProgress = true;
+let STATUS_lastVideoProgressCounter = -1;
 
 function statusRegenerateIcon() {
     console.log(`STATUS: ${STATUS_lastProgressWidth}, ${STATUS_lastZoneFill}`);
@@ -27,18 +38,25 @@ function statusRegenerateIcon() {
     if(STATUS_openImageHighWaterCount > 0) {
         let currentLength = statusGetOpenImageCount();
         let percentage = currentLength / STATUS_openImageHighWaterCount;
-        currentProgressWidth = Math.round(percentage*28);
+        currentProgressWidth = Math.round(percentage*18);
     }
 
+    let isVideoInProgress = statusGetOpenVideoCount() > 0;
+    
+
+    // TODO reinstate STATUS_videoProgressCounter == STATUS_lastVideoProgressCounter
+    // if video progress is ever used
     if(STATUS_zoneFill == STATUS_lastZoneFill &&
-        currentProgressWidth == STATUS_lastProgressWidth) {
-        console.log(`STATUS:  return match${STATUS_lastProgressWidth}, ${STATUS_lastZoneFill}`);
+        currentProgressWidth == STATUS_lastProgressWidth &&
+        isVideoInProgress == STATUS_lastIsVideoInProgress ) {
         return;
     }
 
     // 2. Save current state to last state
     STATUS_lastZoneFill = STATUS_zoneFill;
     STATUS_lastProgressWidth = currentProgressWidth;
+    STATUS_lastIsVideoInProgress = isVideoInProgress;
+    STATUS_lastVideoProgressCounter = STATUS_videoProgressCounter;
 
     // 3. Actually generate and set new icon
     let ctx = STATUS_iconCanvas.getContext('2d');
@@ -50,20 +68,25 @@ function statusRegenerateIcon() {
 
     // Image progress
     if(currentProgressWidth >= 0) {
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(2, 28, currentProgressWidth, 2);
+        ctx.fillStyle = STATUS_zoneFillOffset;
+        ctx.fillRect(0, 18, currentProgressWidth, 14);
+    }
+
+    if(isVideoInProgress) {
+        ctx.fillStyle = STATUS_zoneFillOffset;
+        ctx.fillRect(18, 18, 14, 14);
+
+        ctx.fillStyle = STATUS_zoneFill;
+        ctx.font = '14px sans-serif';
+        ctx.textBaseline = 'top';
+        ctx.fillText('V', 20, 18);
     }
 
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
-    browser.browserAction.setIcon({ imageData: imageData })
-    .then(()=>
-    console.log(`STATUS: icon set ${STATUS_lastProgressWidth}, ${currentProgressWidth}, ${STATUS_zoneFill}, ${STATUS_lastZoneFill}`)
-    );
+    browser.browserAction.setIcon({ imageData: imageData });
 }
 
-function statusGetOpenImageCount() {
-    return Object.keys(STATUS_openImageFilters).length;
-}
+
 
 function statusInitialize() {
     browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
@@ -76,17 +99,46 @@ function statusOnLoaded() {
 
 function statusSetImageZoneTrusted() {
     STATUS_zoneFill = '#88CC88';
+    STATUS_zoneFillOffset = '#448844';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneNeutral() {
     STATUS_zoneFill = '#CCCCCC';
+    STATUS_zoneFillOffset = '#888888';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneUntrusted() {
-    STATUS_zoneFill = '#CC8888';
+    STATUS_zoneFill = '#DD9999';
+    STATUS_zoneFillOffset = '#995555';
     statusRegenerateIcon();
+}
+
+function statusGetOpenVideoCount() {
+    return Object.keys(STATUS_openVideoFilters).length;
+}
+
+function statusStartVideoCheck(requestId) {
+    STATUS_openVideoFilters[requestId] = requestId;
+    statusUpdateVisuals();
+}
+
+function statusIndicateVideoProgress(requestId) {
+    STATUS_videoProgressCounter++;
+    statusUpdateVisuals();
+}
+
+function statusCompleteVideoCheck(requestId, status) {
+    try {
+        delete STATUS_openVideoFilters[requestId];
+        statusUpdateVisuals();
+    } catch(e) {
+    }
+}
+
+function statusGetOpenImageCount() {
+    return Object.keys(STATUS_openImageFilters).length;
 }
 
 function statusStartImageCheck(requestId) {
@@ -99,8 +151,8 @@ function statusStartImageCheck(requestId) {
 
 function statusCompleteImageCheck(requestId, status) {
     delete STATUS_openImageFilters[requestId];
-    STATUS_counts[status]++;
-    STATUS_checkCount++;
+    STATUS_imageCounts[status]++;
+    STATUS_imageCheckCount++;
     let currentLength = statusGetOpenImageCount();
     if(currentLength == 0) {
         STATUS_openImageHighWaterCount = 0;
@@ -109,14 +161,14 @@ function statusCompleteImageCheck(requestId, status) {
 }
 
 function statusUpdateVisuals() {
-    if(STATUS_counts['block'] > 0) {
+    if(STATUS_imageCounts['block'] > 0) {
         //MDN notes we can only fit "about 4" characters here
-        let txt = (STATUS_counts['block'] < 1000) ? STATUS_counts['block']+'' : '999+';
+        let txt = (STATUS_imageCounts['block'] < 1000) ? STATUS_imageCounts['block']+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_counts['block']+'/'+STATUS_checkCount+' total images\r\n'
+    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' total images\r\n'
         + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });
 
     statusRegenerateIcon();
