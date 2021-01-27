@@ -265,12 +265,14 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             filter.write(stuffer);
                         }
                         filter.close();
+                        statusCompleteVideoCheck(details.requestId, status);
                     } else if(shouldError) {
                         console.warn(`DEFV: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'error';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
                         filter.disconnect();
+                        statusCompleteVideoCheck(details.requestId, status);
                     } else {
                         if(scanResults.frames.length > 0) {
                             let lastFrame = scanResults.frames[scanResults.frames.length-1];
@@ -282,6 +284,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             let disconnectBuffers = allBuffers.slice(flushIndexStart);
                             disconnectBuffers.forEach(b=>filter.write(b));
                             filter.disconnect();
+                            statusCompleteVideoCheck(details.requestId, status);
                         } else {
                             console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
