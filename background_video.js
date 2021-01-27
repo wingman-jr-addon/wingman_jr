@@ -400,6 +400,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 filter.close();
             }
         }
+        statusStartVideoCheck(details.requestId);
     }
 
     filter.ondata = event => {
@@ -410,6 +411,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.error('YTVMP4: Filter video error: '+e+', '+ex);
         }
@@ -447,6 +449,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVMP4: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -456,6 +459,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVMP4: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -470,6 +474,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No fMP4 match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
 
@@ -500,6 +505,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 scanBlockBailCount
             );
             console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            statusIndicateVideoProgress(details.requestId);
             fmp4.scanCount += scanResults.scanCount;
             fmp4.blockCount += scanResults.blockCount;
             youtubeGroup.scanCount += scanResults.scanCount;
@@ -520,10 +526,12 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 filter.disconnect();
             }
             fmp4.markFragments(fragments, status);
+            statusCompleteVideoCheck(details.requestId, status);
         } catch(e) {
             console.error(`YTVMP4: Error for ${details.requestId} ${e}`);
             buffers.forEach(b=>filter.write(b));
             filter.close();
+            statusCompleteVideoCheck(details.requestId, 'error');
         }
     }
     return details;
@@ -554,6 +562,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 filter.close();
             }
         }
+        statusStartVideoCheck(details.requestId);
     }
 
     filter.ondata = event => {
@@ -564,6 +573,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.log('YTVWEBM: Filter video error: '+e+', '+ex);
         }
@@ -601,6 +611,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -610,6 +621,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVWEBM: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -624,6 +636,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
 
@@ -654,6 +667,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 scanBlockBailCount
             );
             console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            statusIndicateVideoProgress(details.requestId);
             webm.scanCount += scanResults.scanCount;
             webm.blockCount += scanResults.blockCount;
             youtubeGroup.scanCount += scanResults.scanCount;
@@ -674,10 +688,12 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 filter.disconnect();
             }
             webm.markFragments(fragments, status);
+            statusCompleteVideoCheck(details.requestId, status);
         } catch(e) {
             console.error(`YTVWEBM: Error for ${details.requestId} ${e}`);
             buffers.forEach(b=>filter.write(b));
             filter.close();
+            statusCompleteVideoCheck(details.requestId, 'error');
         }
     }
     return details;
