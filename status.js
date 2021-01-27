@@ -18,8 +18,9 @@ let STATUS_videoCounts = {
 };
 let STATUS_openVideoFilters = { };
 let STATUS_videoProgressCounter = 0;
+let STATUS_videoLastBlockProgressCounter = -999;
 
-let STATUS_ICON_SIZE = 32;
+const STATUS_ICON_SIZE = 32;
 let STATUS_iconCanvas = document.createElement('canvas');
 STATUS_iconCanvas.width = STATUS_ICON_SIZE;
 STATUS_iconCanvas.height = STATUS_ICON_SIZE;
@@ -29,10 +30,15 @@ let STATUS_zoneFillOffset = 'white';
 let STATUS_lastZoneFill = '';
 let STATUS_lastProgressWidth = 0;
 let STATUS_lastIsVideoInProgress = true;
+let STATUS_lastIsVideoBlockShown = true;
 let STATUS_lastVideoProgressCounter = -1;
 
+const STATUS_blockFadeoutColors = [
+    'rgba(255,0,0,1.0)',
+    'rgba(255,0,0,1.0)'
+];
+
 function statusRegenerateIcon() {
-    console.log(`STATUS: ${STATUS_lastProgressWidth}, ${STATUS_lastZoneFill}`);
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
     if(STATUS_openImageHighWaterCount > 0) {
@@ -42,13 +48,16 @@ function statusRegenerateIcon() {
     }
 
     let isVideoInProgress = statusGetOpenVideoCount() > 0;
+    let stepsSinceLastBlock = STATUS_videoProgressCounter - STATUS_videoLastBlockProgressCounter
+    let isVideoBlockShown =  stepsSinceLastBlock < STATUS_blockFadeoutColors.length;
     
 
     // TODO reinstate STATUS_videoProgressCounter == STATUS_lastVideoProgressCounter
-    // if video progress is ever used
+    // if video progress is ever directly used
     if(STATUS_zoneFill == STATUS_lastZoneFill &&
         currentProgressWidth == STATUS_lastProgressWidth &&
-        isVideoInProgress == STATUS_lastIsVideoInProgress ) {
+        isVideoInProgress == STATUS_lastIsVideoInProgress &&
+        isVideoBlockShown == STATUS_lastIsVideoBlockShown) {
         return;
     }
 
@@ -56,6 +65,7 @@ function statusRegenerateIcon() {
     STATUS_lastZoneFill = STATUS_zoneFill;
     STATUS_lastProgressWidth = currentProgressWidth;
     STATUS_lastIsVideoInProgress = isVideoInProgress;
+    STATUS_lastIsVideoBlockShown = isVideoBlockShown;
     STATUS_lastVideoProgressCounter = STATUS_videoProgressCounter;
 
     // 3. Actually generate and set new icon
@@ -72,11 +82,11 @@ function statusRegenerateIcon() {
         ctx.fillRect(0, 18, currentProgressWidth, 14);
     }
 
-    if(isVideoInProgress) {
-        ctx.fillStyle = STATUS_zoneFillOffset;
+    if(isVideoInProgress || isVideoBlockShown) {
+        ctx.fillStyle = isVideoBlockShown ? 'white' : STATUS_zoneFillOffset;
         ctx.fillRect(18, 18, 14, 14);
 
-        ctx.fillStyle = STATUS_zoneFill;
+        ctx.fillStyle = isVideoBlockShown ? STATUS_blockFadeoutColors[stepsSinceLastBlock] : STATUS_zoneFill;
         ctx.font = '14px sans-serif';
         ctx.textBaseline = 'top';
         ctx.fillText('V', 20, 18);
@@ -99,19 +109,19 @@ function statusOnLoaded() {
 
 function statusSetImageZoneTrusted() {
     STATUS_zoneFill = '#88CC88';
-    STATUS_zoneFillOffset = '#448844';
+    STATUS_zoneFillOffset = '#66AA66';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneNeutral() {
     STATUS_zoneFill = '#CCCCCC';
-    STATUS_zoneFillOffset = '#888888';
+    STATUS_zoneFillOffset = '#AAAAAA';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneUntrusted() {
     STATUS_zoneFill = '#DD9999';
-    STATUS_zoneFillOffset = '#995555';
+    STATUS_zoneFillOffset = '#AA6666';
     statusRegenerateIcon();
 }
 
@@ -131,6 +141,9 @@ function statusIndicateVideoProgress(requestId) {
 
 function statusCompleteVideoCheck(requestId, status) {
     try {
+        if(status == 'block') {
+            STATUS_videoLastBlockProgressCounter = STATUS_videoProgressCounter;
+        }
         delete STATUS_openVideoFilters[requestId];
         statusUpdateVisuals();
     } catch(e) {
