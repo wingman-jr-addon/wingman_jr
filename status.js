@@ -1,3 +1,9 @@
+const wingman_icon_32_img = new Image();
+wingman_icon_32_img.src = 'data:image/svg+xml;base64, PHN2ZyB3aWR0aD0iMzJweCIgaGVpZ2h0PSIzMnB4IiB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4NCgk8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtNi41MzQzIC05LjQ5ODQpIj4NCgkJPHJlY3QgeD0iNi41MzQzIiB5PSI5LjQ5ODQiIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbC1vcGFjaXR5PSIwIi8+DQoJCTxnIHRyYW5zZm9ybT0ibWF0cml4KDEuMTIzIDAgMCAxLjEyMyAtMTAuNDEyIC03Ni45OTMpIj4NCgkJCTxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0uMTgyNzEpIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iLjI0MTY5cHgiPg0KCQkJCTxwYXRoIGQ9Im0xNS43ODkgODMuNjk1IDEwLjg5NyAxNC45MzcgMi4xNjktMTEuNDA4LTIuNjc1OSA1Ljc2M3oiLz4NCgkJCQk8cGF0aCBkPSJtNDMuMjUyIDgzLjY5NS0xMC44OTcgMTQuOTM3LTIuMTY5LTExLjQwOCAyLjY3NTkgNS43NjN6Ii8+DQoJCQk8L2c+DQoJCQk8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSguMjkyOTMgLTEuNTg3NSkiPg0KCQkJCTxwYXRoIGQ9Im0yNi4zODUgOTguNjAyIDIuNjQyMy0yLjkwNjYgMi42NDIzIDIuOTA2NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9Ii4yNjQ1OHB4Ii8+DQoJCQk8L2c+DQoJCQk8Y2lyY2xlIGN4PSIyOS4zMzgiIGN5PSI4Ny41NDkiIHI9Ii4zMzcwNSIgc3Ryb2tlPSIjMTMxNTFjIiBzdHJva2Utd2lkdGg9Ii4wOTM4NDgiLz4NCgkJPC9nPg0KCTwvZz4NCjwvc3ZnPg0K';
+wingman_icon_32_img.width = 32;
+wingman_icon_32_img.height = 32;
+
+
 //Note: checks can occur that fail and do not result in either a block or a pass.
 //Therefore, use block+pass as the total count in certain cases
 
@@ -44,7 +50,7 @@ function statusRegenerateIcon() {
     if(STATUS_openImageHighWaterCount > 0) {
         let currentLength = statusGetOpenImageCount();
         let percentage = currentLength / STATUS_openImageHighWaterCount;
-        currentProgressWidth = Math.round(percentage*18);
+        currentProgressWidth = Math.round(percentage*24);
     }
 
     let isVideoInProgress = statusGetOpenVideoCount() > 0;
@@ -76,20 +82,23 @@ function statusRegenerateIcon() {
     ctx.fillStyle = STATUS_zoneFill;
     ctx.fillRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
 
+    // Icon
+    ctx.drawImage(wingman_icon_32_img, 0, 0);
+
     // Image progress
     if(currentProgressWidth >= 0) {
         ctx.fillStyle = STATUS_zoneFillOffset;
-        ctx.fillRect(0, 18, currentProgressWidth, 14);
+        ctx.fillRect(0, 24, currentProgressWidth, 8);
     }
 
     if(isVideoInProgress || isVideoBlockShown) {
         ctx.fillStyle = isVideoBlockShown ? 'white' : STATUS_zoneFillOffset;
-        ctx.fillRect(18, 18, 14, 14);
+        ctx.fillRect(24, 24, 8, 8);
 
-        ctx.fillStyle = isVideoBlockShown ? STATUS_blockFadeoutColors[stepsSinceLastBlock] : STATUS_zoneFill;
-        ctx.font = '14px sans-serif';
+        ctx.fillStyle = isVideoBlockShown ? STATUS_blockFadeoutColors[stepsSinceLastBlock] : 'black';
+        ctx.font = '8px sans-serif';
         ctx.textBaseline = 'top';
-        ctx.fillText('V', 20, 18);
+        ctx.fillText('V', 24, 24);
     }
 
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
