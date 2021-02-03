@@ -174,6 +174,8 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     let flushScanStartSize = 0;
     let scanAndTransitionPromise;
 
+    statusStartVideoCheck(details.requestId);
+
     let pump = async function(newData, isComplete) {
         try
         {
@@ -263,12 +265,14 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             filter.write(stuffer);
                         }
                         filter.close();
+                        statusCompleteVideoCheck(details.requestId, status);
                     } else if(shouldError) {
                         console.warn(`DEFV: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'error';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
                         filter.disconnect();
+                        statusCompleteVideoCheck(details.requestId, status);
                     } else {
                         if(scanResults.frames.length > 0) {
                             let lastFrame = scanResults.frames[scanResults.frames.length-1];
@@ -280,6 +284,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             let disconnectBuffers = allBuffers.slice(flushIndexStart);
                             disconnectBuffers.forEach(b=>filter.write(b));
                             filter.disconnect();
+                            statusCompleteVideoCheck(details.requestId, status);
                         } else {
                             console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
@@ -308,6 +313,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     }
                 }
                 await scanAndTransitionPromise();
+                statusIndicateVideoProgress(details.requestId);
             } else {
                 console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
             }
@@ -317,6 +323,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
             if(isComplete) {
                 console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, status);
             }
         }
     }
@@ -331,6 +338,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.log('WEBREQ: Filter video error: '+ex);
         }
@@ -339,6 +347,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     filter.onstop = async _ => {
         if(status == 'scanning') {
             await scanAndTransitionPromise();
+            statusIndicateVideoProgress(details.requestId);
         }
         if(status == 'block') {
             return;
@@ -391,6 +400,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 filter.close();
             }
         }
+        statusStartVideoCheck(details.requestId);
     }
 
     filter.ondata = event => {
@@ -401,6 +411,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.error('YTVMP4: Filter video error: '+e+', '+ex);
         }
@@ -438,6 +449,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVMP4: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -447,6 +459,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVMP4: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -461,6 +474,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 console.warn(`YTVMP4: No fMP4 match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
 
@@ -491,6 +505,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 scanBlockBailCount
             );
             console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            statusIndicateVideoProgress(details.requestId);
             fmp4.scanCount += scanResults.scanCount;
             fmp4.blockCount += scanResults.blockCount;
             youtubeGroup.scanCount += scanResults.scanCount;
@@ -511,10 +526,12 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 filter.disconnect();
             }
             fmp4.markFragments(fragments, status);
+            statusCompleteVideoCheck(details.requestId, status);
         } catch(e) {
             console.error(`YTVMP4: Error for ${details.requestId} ${e}`);
             buffers.forEach(b=>filter.write(b));
             filter.close();
+            statusCompleteVideoCheck(details.requestId, 'error');
         }
     }
     return details;
@@ -545,6 +562,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 filter.close();
             }
         }
+        statusStartVideoCheck(details.requestId);
     }
 
     filter.ondata = event => {
@@ -555,6 +573,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
     filter.onerror = e => {
         try {
             filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
             console.log('YTVWEBM: Filter video error: '+e+', '+ex);
         }
@@ -592,6 +611,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -601,6 +621,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No Youtube group found for  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
             console.info(`YTVWEBM: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -615,6 +636,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 console.warn(`YTVWEBM: No WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
 
@@ -645,6 +667,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 scanBlockBailCount
             );
             console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            statusIndicateVideoProgress(details.requestId);
             webm.scanCount += scanResults.scanCount;
             webm.blockCount += scanResults.blockCount;
             youtubeGroup.scanCount += scanResults.scanCount;
@@ -665,10 +688,12 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 filter.disconnect();
             }
             webm.markFragments(fragments, status);
+            statusCompleteVideoCheck(details.requestId, status);
         } catch(e) {
             console.error(`YTVWEBM: Error for ${details.requestId} ${e}`);
             buffers.forEach(b=>filter.write(b));
             filter.close();
+            statusCompleteVideoCheck(details.requestId, 'error');
         }
     }
     return details;

@@ -706,6 +706,11 @@ async function procOnPortMessage(m) {
         break;
         case 'onerror': {
             delete PROC_openRequests[m.requestId];
+            PROC_port.postMessage({
+                type:'stat',
+                result: 'error',
+                requestId: m.requestId
+            });
         }
         break;
         case 'onstop': {

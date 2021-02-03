@@ -11,6 +11,7 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
+statusInitialize();
 
 let BK_connectedClients = {};
 let BK_connectedClientList = [];
@@ -20,8 +21,7 @@ let BK_openVidFilters = {};
 
 let BK_isInitialized = false;
 function bkInitialize() {
-    browser.browserAction.setTitle({title: "Wingman Jr."});
-    browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+    statusOnLoaded();
     bkUpdateFromSettings();
     bkSetEnabled(true); //always start on
 }
@@ -114,7 +114,7 @@ function bkOnProcessorMessage(m) {
         break;
         case 'stat': {
             console.debug('STAT: '+m.requestId+' '+m.result);
-            bkIncrementCheckCount();
+            statusCompleteImageCheck(m.requestId, m.result);
             switch(m.result) {
                 case 'pass': {
                     bkIncrementPassCount();
@@ -139,23 +139,6 @@ function bkOnProcessorMessage(m) {
         }
         break;
     }
-}
-
-
-//Note: checks can occur that fail and do not result in either a block or a pass.
-//Therefore, use block+pass as the total count in certain cases
-let BK_blockCount = 0;
-let BK_passCount = 0;
-let BK_checkCount = 0;
-function bkUpdateStatVisuals() {
-    if(BK_blockCount > 0) {
-        let txt = (BK_blockCount < 1000) ? BK_blockCount+'' : '999+';
-        browser.browserAction.setBadgeText({ "text": txt });
-    }
-    let openRequestIds = Object.keys(BK_openFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+BK_blockCount+'/'+BK_checkCount+' total images\r\n'+
-    'Blocked '+Math.round(100*BK_estimatedTruePositivePercentage)+'% of the last '+BK_predictionBuffer.length+' in this zone\r\n'+
-    openRequestIds.length +' open requests: '+openRequestIds });
 }
 
 var BK_isZoneAutomatic = true;
@@ -192,23 +175,14 @@ function bkClearPredictionBuffer() {
     BK_estimatedTruePositivePercentage = 0;
 }
 
-function bkIncrementCheckCount() {
-    BK_checkCount++;
-    bkUpdateStatVisuals();
-}
-
 function bkIncrementBlockCount() {
-    BK_blockCount++;
     bkAddToPredictionBuffer(1);
     bkCheckZone();
-    bkUpdateStatVisuals();
 }
 
 function bkIncrementPassCount() {
-    BK_passCount++;
     bkAddToPredictionBuffer(0);
     bkCheckZone();
-    bkUpdateStatVisuals();
 }
 
 function bkSetZoneAutomatic(isAutomatic) {
@@ -247,7 +221,7 @@ function bkSetZone(newZone)
         case 'trusted':
             BK_zoneThreshold = ROC_trustedRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_trustedRoc);
-            browser.browserAction.setIcon({path: "icons/wingman_icon_32_trusted.png"});
+            statusSetImageZoneTrusted();
             BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now trusted!');
@@ -255,7 +229,7 @@ function bkSetZone(newZone)
         case 'neutral':
             BK_zoneThreshold = ROC_neutralRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
-            browser.browserAction.setIcon({path: "icons/wingman_icon_32_neutral.png"});
+            statusSetImageZoneNeutral();
             BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now neutral!');
@@ -263,7 +237,7 @@ function bkSetZone(newZone)
         case 'untrusted':
             BK_zoneThreshold = ROC_untrustedRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_untrustedRoc);
-            browser.browserAction.setIcon({path: "icons/wingman_icon_32_untrusted.png"});
+            statusSetImageZoneUntrusted();
             BK_zone = newZone;
             didZoneChange = true;
             console.log('Zone is now untrusted!')
@@ -313,6 +287,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
         mimeType: mimeType,
         url: details.url
     });
+    statusStartImageCheck(details.requestId);
   
     filter.ondata = event => {
         if (dataStartTime == null) {
@@ -329,6 +304,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
     filter.onerror = e => {
         try
         {
+            console.debug('WEBREQ: error '+details.requestId);
             processor.postMessage({
                 type: 'onerror',
                 requestId: details.requestId
@@ -727,4 +703,3 @@ function bkHandleMessage(request, sender, sendResponse) {
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
 bkSetZone('neutral');
-browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});

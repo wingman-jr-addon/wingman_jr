@@ -20,6 +20,7 @@
           "dns_blocking.js",
           "mp4.js",
           "ebml.js",
+          "status.js",
           "background_video.js",
           "background.js",
           "whitelist.js"
