@@ -1,6 +1,11 @@
 let VID_PLACEHOLDER_MP4 = null;
+let VID_PLACEHOLDER_WEBM = null;
 fetch('wingman_placeholder.mp4')
 .then(async r => VID_PLACEHOLDER_MP4 = await r.arrayBuffer());
+
+fetch('wingman_placeholder.webm')
+.then(async r => VID_PLACEHOLDER_WEBM = await r.arrayBuffer());
+
 
 
 function vidConcatBuffersToUint8Array(buffers) {
@@ -247,14 +252,17 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     if(shouldBlock) {
                         console.warn(`DEFV: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
+
+                        let placeholder = mimeType.startsWith('video/webm') ? VID_PLACEHOLDER_WEBM : VID_PLACEHOLDER_MP4;
+                        
                         if(flushIndexStart == 0) {
-                            filter.write(VID_PLACEHOLDER_MP4);
+                            filter.write(placeholder);
                         }
                         //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
                         //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
                         //with random data.
                         if(expectedContentLength > 0) {
-                            let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
+                            let remainingLength = expectedContentLength - placeholder.byteLength;
                             console.log(`DEFV: BLOCK ${details.requestId} stuffing ${remainingLength}`);
                             let stuffer = new Uint8Array(1024).fill(0);
                             while(remainingLength > stuffer.length) {
@@ -680,7 +688,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 status = 'block';
                 youtubeGroup.status = 'block';
-                filter.write(VID_PLACEHOLDER_MP4);
+                filter.write(VID_PLACEHOLDER_WEBM);
                 filter.close();
             } else {
                 status = 'pass';
