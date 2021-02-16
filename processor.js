@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_108_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_109_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
