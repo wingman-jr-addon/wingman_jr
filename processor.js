@@ -520,16 +520,16 @@ let PROC_watchdogThrottleRejectionCount = 0;
 let PROC_watchdogKickCount = 0;
 async function procWatchdog() {
     //Has the throttle count increased and scan start count stayed stuck?
-    console.info(`WATCHDOG: Check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+    console.info(`WATCHDOG: Processor queue check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
     if(PROC_watchdogThrottleRejectionCount > PROC_throttleRejectionCount
         && PROC_watchdogScanStartCount == PROC_scanStartCount) {
         try {
             PROC_watchdogKickCount++;
-            console.error(`WATCHDOG: Kicked! Resetting in flight count. Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+            console.error(`WATCHDOG: Processor queue kicked! Resetting in flight count. Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
             PROC_inFlight = 0;
             await procCheckProcess();
         } catch(e) {
-            console.error(`WATCHDOG: Error kicking scan ${e}`);
+            console.error(`WATCHDOG: Error kicking processor queue check scan ${e}`);
         }
     }
 
