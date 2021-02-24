@@ -616,7 +616,7 @@ function bkDetectCharset(contentType) {
 
 ////////////////////////Actual Startup//////////////////////////////
 
-let BK_isVideoEnabled = true;
+
 
 function bkRegisterAllCallbacks() {
 
@@ -663,10 +663,19 @@ function bkUnregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(bkDirectTypedUrlListener);
     browser.webRequest.onHeadersReceived.removeListener(bkBase64ContentListener);
 
-    if(BK_isVideoEnabled) {
-        browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
-        browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+    //Try to unregister whether or not they were previously registered
+    browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
+    browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+}
+
+function bkRefreshCallbackRegistration() {
+    console.log('CONFIG: Callback wireup refresh start.');
+    bkUnregisterAllCallbacks();
+    if(BK_isEnabled) {
+        bkRegisterAllCallbacks();
     }
+    bkRefreshDnsBlocking();
+    console.log('CONFIG: Callback wireup refresh complete!');
 }
 
 let BK_isEnabled = false;
@@ -686,6 +695,18 @@ function bkSetEnabled(isOn) {
     console.log('CONFIG: Callback wireups changed!');
 }
 
+let BK_isVideoEnabled = true;
+function bkSetVideoEnabled(isOn) {
+    console.log('CONFIG: Setting video enabled to '+isOn);
+    if(isOn == BK_isVideoEnabled) {
+        return;
+    }
+    console.log('CONFIG: Handling video callback wireup change.');
+    BK_isVideoEnabled = isOn;
+    bkRefreshCallbackRegistration();
+    console.log('CONFIG: Video callback wireups changed!');
+}
+
 let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
@@ -693,6 +714,9 @@ function bkUpdateFromSettings() {
         bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get('is_on_off_shown').then(onOffResult=>
         BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    browser.storage.local.get('is_video_blocking_disabled').then(videoDisabledResult=> {
+            bkSetVideoEnabled(!videoDisabledResult.is_video_blocking_disabled);
+        });
     bkLoadBackendSettings();
 }
 
@@ -747,6 +771,10 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse({isOnOffSwitchShown: BK_isOnOffSwitchShown});
     }
     else if(request.type=='setOnOffSwitchShown')
+    {
+        bkUpdateFromSettings();
+    }
+    else if(request.type=='setVideoBlockingDisabled')
     {
         bkUpdateFromSettings();
     }

@@ -11,6 +11,12 @@ async function optSaveOptions() {
     });
     browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: isOnOffShown });
 
+    let isVideoBlockingDisabled = document.querySelector('input[name="is_video_blocking_disabled"]:checked').value == "is_video_blocking_disabled_yes";
+    await browser.storage.local.set({
+    is_video_blocking_disabled: isVideoBlockingDisabled
+    });
+    browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: isVideoBlockingDisabled });
+
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
     await browser.storage.local.set({
     backend_selection: backendSelection
@@ -43,6 +49,17 @@ function optRestoreOptions() {
         browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: result });
     }
 
+    function setCurrentVideoBlockingChoice(rawResult) {
+        let result = rawResult.is_video_blocking_disabled;
+        console.log('OPTION: Setting video blocking disabled switch to '+result);
+        if(result) {
+            document.getElementById('is_video_blocking_disabled_yes').checked = true;
+        } else {
+            document.getElementById('is_video_blocking_disabled_no').checked = true;
+        }
+        browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: result });
+    }
+
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
         let result = rawResult.backend_selection;
         console.log('OPTION: Setting backend to '+result);
@@ -61,6 +78,9 @@ function optRestoreOptions() {
     let gettingOnOffShown = browser.storage.local.get('is_on_off_shown');
     gettingOnOffShown.then(setCurrentShowOnOffSwitchChoice, onError);
 
+    let gettingVideoBlocking = browser.storage.local.get('is_video_blocking_disabled');
+    gettingVideoBlocking.then(setCurrentVideoBlockingChoice, onError);
+
     let gettingBackendSelection = browser.storage.local.get('backend_selection');
     gettingBackendSelection.then(setCurrentBackendSelectionSwitchChoice, onError);
 }
@@ -75,6 +95,12 @@ for(var i = 0, max = radios.length; i < max; i++) {
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for(var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function() {
+        optSaveOptions();
+    }
+}
+var radiosVideoBlockingDisabled = document.forms[0].elements["is_video_blocking_disabled"];
+for(var i = 0, max = radiosVideoBlockingDisabled.length; i < max; i++) {
+    radiosVideoBlockingDisabled[i].onclick = function() {
         optSaveOptions();
     }
 }
