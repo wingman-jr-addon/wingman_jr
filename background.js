@@ -44,7 +44,13 @@ function bkGetNextProcessor() {
         return null;
     }
     //TODO Right now we only use primary.
-    return BK_connectedClients[Object.keys(BK_connectedClients)[0]];
+    for(let key of Object.keys(BK_connectedClients)) {
+        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
+            console.debug(`BACKEND: Selecting client ${key}`);
+            return BK_connectedClients[key];
+        }
+    }
+    return null;
 }
 
 function bkBroadcastMessageToProcessors(m) {
@@ -56,14 +62,14 @@ function bkBroadcastMessageToProcessors(m) {
 browser.runtime.onConnect.addListener(bkOnClientConnected);
 
 
-let BK_processorBackendPreference = ['webgl'];
+let BK_processorBackendPreference = [];
 
 function bkReloadProcessors() {
     console.log('LIFECYCLE: Cleaning up old processors.');
     let keys = Object.keys(BK_connectedClients);
     for(let key of keys) {
         let client = BK_connectedClients[key];
-        browser.tabs.close(client.tabId);
+        browser.tabs.remove(client.tabId);
         delete BK_connectedClients[key];
     }
 
@@ -76,8 +82,6 @@ function bkReloadProcessors() {
     }
     console.log('LIFECYCLE: New processors are launching!');
 }
-
-bkReloadProcessors(); //Initial load
 
 
 function bkOnProcessorMessage(m) {
@@ -124,7 +128,7 @@ function bkOnProcessorMessage(m) {
         break;
         case 'registration': {
             console.dir(BK_connectedClients);
-            console.log(`LIFECYLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
+            console.log(`LIFECYCLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
             BK_connectedClients[m.processorId].backend = m.backend;
             BK_connectedClients[m.processorId].tabId = m.tabId;
         }
@@ -685,10 +689,28 @@ function bkSetEnabled(isOn) {
 let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
-    browser.storage.local.get("is_dns_blocking").then(dnsResult=>
-    bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
-    browser.storage.local.get("is_on_off_shown").then(onOffResult=>
-    BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    browser.storage.local.get('is_dns_blocking').then(dnsResult=>
+        bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
+    browser.storage.local.get('is_on_off_shown').then(onOffResult=>
+        BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    bkLoadBackendSettings();
+}
+
+function bkLoadBackendSettings() {
+    browser.storage.local.get('backend_selection').then(result => {
+        let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        let hasChanged = backends.length != BK_processorBackendPreference.length;
+        for(let i=0; i<backends.length && !hasChanged; i++) {
+            hasChanged = backends[i] != BK_processorBackendPreference[i];
+        }
+        if(hasChanged) {
+            console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
+            BK_processorBackendPreference = backends;
+            bkReloadProcessors();
+        } else {
+            console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
+        }
+    });
 }
 
 function bkHandleMessage(request, sender, sendResponse) {
@@ -728,6 +750,11 @@ function bkHandleMessage(request, sender, sendResponse) {
     {
         bkUpdateFromSettings();
     }
+    else if(request.type=='setBackendSelection')
+    {
+        bkUpdateFromSettings();
+    }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
 bkSetZone('neutral');
+bkLoadBackendSettings(); //The loading of the first processor kicks off the rest of initialization
