@@ -118,10 +118,12 @@ function bkOnProcessorMessage(m) {
             switch(m.result) {
                 case 'pass': {
                     bkIncrementPassCount();
+                    bkAddRoc(m.sqrxrScore);
                 }
                 break;
                 case 'block': {
                     bkIncrementBlockCount();
+                    bkAddRoc(m.sqrxrScore);
                 }
                 //could also be tiny or error
             }
@@ -146,6 +148,7 @@ var BK_predictionBufferBlockCount = 0;
 var BK_predictionBuffer = [];
 var BK_estimatedTruePositivePercentage = 0;
 var BK_isEstimateValid = false;
+var BK_rocHistory = [];
 
 function bkAddToPredictionBuffer(prediction)
 {
@@ -183,6 +186,43 @@ function bkIncrementBlockCount() {
 function bkIncrementPassCount() {
     bkAddToPredictionBuffer(0);
     bkCheckZone();
+}
+
+function bkAddRoc(sqrxrScore) {
+    let threshold = sqrxrScore[1][0];
+    console.log('ROC: Threshold: '+threshold);
+    let entry = rocFindEntry(threshold);
+    if(BK_rocHistory.length >= 100) {
+        BK_rocHistory.shift();
+    }
+    BK_rocHistory.push(entry);
+
+    //Calculate current stats
+    let tpSum = 0;
+    let fpSum = 0;
+    let tnSum = 0;
+    let fnSum = 0;
+    for(let e of BK_rocHistory) {
+        tpSum += e.tn; //? A
+        fpSum += e.fn; //? B
+        tnSum += e.tp; //? A
+        fnSum += e.fp; //? B
+    }
+
+    let tpr = tpSum / (tpSum + fnSum);
+    let fpr = fpSum / (fpSum + tnSum);
+
+    console.log('ROC: TPR: '+tpr.toFixed(2)+' FPR: '+fpr.toFixed(2));
+
+    let fullSum = tpSum + fpSum + tnSum + fnSum;
+    let tpNorm = tpSum / fullSum;
+    let fpNorm = fpSum / fullSum;
+    let tnNorm = tnSum / fullSum;
+    let fnNorm = fnSum / fullSum;
+    console.log('ROC: '+tpNorm.toFixed(2)+' '+fpNorm.toFixed(2)+'\r\n'
+               +'     '+fnNorm.toFixed(2)+' '+tnNorm.toFixed(2));
+
+    statusUpdateRocAggregate(tpr,fpr);
 }
 
 function bkSetZoneAutomatic(isAutomatic) {

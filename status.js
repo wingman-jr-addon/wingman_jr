@@ -47,6 +47,8 @@ const STATUS_blockFadeoutColors = [
     'rgba(255,0,0,1.0)'
 ];
 
+let STATUS_rocAggregate = { tpr : 0, fpr : 0 };
+
 function statusRegenerateIcon() {
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
@@ -185,6 +187,12 @@ function statusCompleteImageCheck(requestId, status) {
     statusUpdateVisuals();
 }
 
+function statusUpdateRocAggregate(tpr, fpr) {
+    STATUS_rocAggregate.tpr = tpr;
+    STATUS_rocAggregate.fpr = fpr;
+    statusUpdateVisuals();
+}
+
 function statusUpdateVisuals() {
     if(STATUS_imageCounts['block'] > 0) {
         //MDN notes we can only fit "about 4" characters here
@@ -194,7 +202,8 @@ function statusUpdateVisuals() {
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
     browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' total images\r\n'
-        + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });
+        + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n')  + '\r\n'
+        + 'TPR: '+STATUS_rocAggregate.tpr.toFixed(2)+' FPR: '+STATUS_rocAggregate.fpr.toFixed(2)});
 
     statusRegenerateIcon();
 }

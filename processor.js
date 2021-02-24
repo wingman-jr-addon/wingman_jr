@@ -250,7 +250,8 @@ async function procPerformFiltering(entry) {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
-        result: null
+        result: null,
+        sqrxrScore: null
     };
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
@@ -278,6 +279,7 @@ async function procPerformFiltering(entry) {
                 if(procIsSafe(sqrxrScore)) {
                     console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
+                    result.sqrxrScore = sqrxrScore;
                     result.imageBytes = await blob.arrayBuffer();
                 } else {
                     console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
@@ -286,6 +288,7 @@ async function procPerformFiltering(entry) {
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
+                    result.sqrxrScore = sqrxrScore;
                     result.imageBytes = encodedTypedBuffer.buffer;
                 }
                 const endTime = performance.now();
@@ -504,6 +507,7 @@ async function procCheckProcess() {
             PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
+                sqrxrScore: result.sqrxrScore,
                 requestId: toProcess.requestId
             });
         } catch(e) {
