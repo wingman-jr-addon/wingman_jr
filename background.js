@@ -14,7 +14,6 @@ browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfD
 statusInitialize();
 
 let BK_connectedClients = {};
-let BK_connectedClientList = [];
 let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
@@ -27,11 +26,10 @@ function bkInitialize() {
 }
 
 function bkOnClientConnected(port) {
-    console.log('LIFECYCLE: Processor '+port.name+' connected.');
-    let registration = { port: port, processorId: port.name, isBusy: false, backend: 'unknown' };
+    console.log(`LIFECYCLE: Processor ${port.name} connected.`);
+    let registration = { port: port, tabId: null, processorId: port.name, backend: 'unknown' };
     BK_connectedClients[registration.processorId] = registration;
-    BK_connectedClientList.push(registration);
-    console.log('LIFECYCLE: There are now '+BK_connectedClientList.length+' processors');
+    console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
     bkNotifyThreshold();
     if(!BK_isInitialized) {
@@ -42,24 +40,44 @@ function bkOnClientConnected(port) {
 
 let BK_currentProcessorIndex = 0;
 function bkGetNextProcessor() {
-    if(BK_connectedClientList.length == 0) {
+    if(Object.keys(BK_connectedClients).length == 0) {
         return null;
     }
-    return BK_connectedClientList[0];
+    //TODO Right now we only use primary.
+    return BK_connectedClients[Object.keys(BK_connectedClients)[0]];
 }
 
 function bkBroadcastMessageToProcessors(m) {
-    BK_connectedClientList.forEach(c=>{
-        c.port.postMessage(m);
+    Object.keys(BK_connectedClients).forEach(c=>{
+        BK_connectedClients[c].port.postMessage(m);
     });
 }
       
 browser.runtime.onConnect.addListener(bkOnClientConnected);
-browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: false})
-    .then(async tab=>await browser.tabs.hide(tab.id));
-//browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
-//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
-//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
+
+
+let BK_processorBackendPreference = ['webgl'];
+
+function bkReloadProcessors() {
+    console.log('LIFECYCLE: Cleaning up old processors.');
+    let keys = Object.keys(BK_connectedClients);
+    for(let key of keys) {
+        let client = BK_connectedClients[key];
+        browser.tabs.close(client.tabId);
+        delete BK_connectedClients[key];
+    }
+
+    console.log('LIFECYCLE: Spawning new processors.');
+    for(let i=0; i<BK_processorBackendPreference.length; i++) {
+        let backend = BK_processorBackendPreference[i];
+        console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
+        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+            .then(async tab=>await browser.tabs.hide(tab.id));
+    }
+    console.log('LIFECYCLE: New processors are launching!');
+}
+
+bkReloadProcessors(); //Initial load
 
 
 function bkOnProcessorMessage(m) {
@@ -106,8 +124,9 @@ function bkOnProcessorMessage(m) {
         break;
         case 'registration': {
             console.dir(BK_connectedClients);
-            console.log('LIFECYLE: Registration '+m.processorId);
+            console.log(`LIFECYLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
             BK_connectedClients[m.processorId].backend = m.backend;
+            BK_connectedClients[m.processorId].tabId = m.tabId;
         }
         break;
         break;

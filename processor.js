@@ -776,6 +776,7 @@ procWingmanStartup()
     PROC_port.onMessage.addListener(procOnPortMessage);
     PROC_port.postMessage({
         type: 'registration',
+        tabId: (await browser.tabs.getCurrent()).id,
         processorId: PROC_processorId,
         backend: PROC_loadedBackend
     });
