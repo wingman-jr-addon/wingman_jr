@@ -141,6 +141,7 @@ function bkOnProcessorMessage(m) {
     }
 }
 
+/////////// ZONE START /////////////////////////
 var BK_isZoneAutomatic = true;
 var BK_predictionBufferBlockCount = 0;
 var BK_predictionBuffer = [];
@@ -257,6 +258,40 @@ function bkNotifyThreshold() {
     });
 }
 
+////////////////////// ZONE END //////////////////////////
+
+//////////////////// WATCHDOG START //////////////////////
+
+let BK_watchdogCleanupCount = 0;
+let BK_watchdogKickCount = 0;
+async function bkWatchdog() {
+    let keysSnapshot = Object.keys(BK_openFilters);
+    let nowish = performance.now();
+    let cleaned = [];
+    let watchList = [];
+    console.info(`WATCHDOG: Stuck image check - Current open filters count: ${keysSnapshot.length} Watchdog kick: ${BK_watchdogKickCount} Total cleaned up: ${BK_watchdogCleanupCount}`);
+    for(let key of keysSnapshot) {
+        let ageMs = BK_openFilters[key] ? nowish - BK_openFilters[key].stopTime : 0;
+        if(ageMs >= 45000) {
+            BK_watchdogCleanupCount++;
+            delete BK_openFilters[key];
+            statusCompleteImageCheck(key, 'error');
+            cleaned.push(key);
+        } else if(ageMs >= 30000) {
+            watchList.push(key);
+        }
+    }
+    if(cleaned.length > 0) {
+        console.error(`WATCHDOG: Stuck image check watchdog cleaned up ${cleaned.join(',')} for a total kick count ${BK_watchdogKickCount}`);
+    }
+    if(watchList.length > 0) {
+        console.warn(`WATCHDOG: Stuck image check old age watchlist ${watchList.join(',')}`);
+    }
+}
+setInterval(bkWatchdog, 2500);
+
+///////////////// WATCHDOG END ////////////////////////////
+
 async function bkImageListener(details, shouldBlockSilently=false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
@@ -319,6 +354,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
   
     filter.onstop = async event => {
         console.debug('WEBREQ: onstop '+details.requestId);
+        filter.stopTime = performance.now();
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
