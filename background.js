@@ -45,30 +45,7 @@ function bkGetNextProcessor() {
     if(BK_connectedClientList.length == 0) {
         return null;
     }
-    BK_currentProcessorIndex = (BK_currentProcessorIndex+1) % BK_connectedClientList.length;
-    let preferredProcessor = BK_connectedClientList[BK_currentProcessorIndex];
-    if (preferredProcessor.isBusy) {
-        //Are any free? If so, return next one.
-        for(let i=1; i<BK_connectedClientList.length; i++) {
-            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
-            let processor = BK_connectedClientList[pIndex];
-            if(!processor.isBusy) {
-                console.debug('PERF: Choosing free processor '+processor.processorId);
-                return processor;
-            }
-        }
-        //Are any WebGL? If so, return next one.
-        for(let i=1; i<BK_connectedClientList.length; i++) {
-            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
-            let processor = BK_connectedClientList[pIndex];
-            if(processor.backend == 'webgl') {
-                console.info('PERF: Choosing webgl processor '+processor.processorId);
-                return processor;
-            }
-        }
-    }
-    console.info('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
-    return preferredProcessor;
+    return BK_connectedClientList[0];
 }
 
 function bkBroadcastMessageToProcessors(m) {
@@ -133,10 +110,6 @@ function bkOnProcessorMessage(m) {
             BK_connectedClients[m.processorId].backend = m.backend;
         }
         break;
-        case 'qos': {
-            console.debug('QOS: '+m.processorId+' isBusy: '+m.isBusy);
-            BK_connectedClients[m.processorId].isBusy = m.isBusy;
-        }
         break;
     }
 }

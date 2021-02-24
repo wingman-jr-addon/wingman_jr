@@ -463,11 +463,6 @@ let PROC_throttleRejectionCount = 0;
 async function procCheckProcess() {
     console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
-        PROC_port.postMessage({
-            type: 'qos',
-            processorId: PROC_processorId,
-            isBusy: false
-        })
         return;
     }
     if(PROC_inFlight > PROC_CTX_POOL_DEFAULT_SIZE) {
@@ -483,11 +478,6 @@ async function procCheckProcess() {
         PROC_throttleRejectionCount = 0;
         let result;
         try {
-            PROC_port.postMessage({
-                type: 'qos',
-                processorId: PROC_processorId,
-                isBusy: true
-            })
             console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
             result = await procPerformFiltering(toProcess);
             
