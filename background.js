@@ -14,7 +14,6 @@ browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfD
 statusInitialize();
 
 let BK_connectedClients = {};
-let BK_connectedClientList = [];
 let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
@@ -27,11 +26,10 @@ function bkInitialize() {
 }
 
 function bkOnClientConnected(port) {
-    console.log('LIFECYCLE: Processor '+port.name+' connected.');
-    let registration = { port: port, processorId: port.name, isBusy: false, backend: 'unknown' };
+    console.log(`LIFECYCLE: Processor ${port.name} connected.`);
+    let registration = { port: port, tabId: null, processorId: port.name, backend: 'unknown' };
     BK_connectedClients[registration.processorId] = registration;
-    BK_connectedClientList.push(registration);
-    console.log('LIFECYCLE: There are now '+BK_connectedClientList.length+' processors');
+    console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
     bkNotifyThreshold();
     if(!BK_isInitialized) {
@@ -42,47 +40,48 @@ function bkOnClientConnected(port) {
 
 let BK_currentProcessorIndex = 0;
 function bkGetNextProcessor() {
-    if(BK_connectedClientList.length == 0) {
+    if(Object.keys(BK_connectedClients).length == 0) {
         return null;
     }
-    BK_currentProcessorIndex = (BK_currentProcessorIndex+1) % BK_connectedClientList.length;
-    let preferredProcessor = BK_connectedClientList[BK_currentProcessorIndex];
-    if (preferredProcessor.isBusy) {
-        //Are any free? If so, return next one.
-        for(let i=1; i<BK_connectedClientList.length; i++) {
-            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
-            let processor = BK_connectedClientList[pIndex];
-            if(!processor.isBusy) {
-                console.debug('PERF: Choosing free processor '+processor.processorId);
-                return processor;
-            }
-        }
-        //Are any WebGL? If so, return next one.
-        for(let i=1; i<BK_connectedClientList.length; i++) {
-            let pIndex = (BK_currentProcessorIndex+i) % BK_connectedClientList.length;
-            let processor = BK_connectedClientList[pIndex];
-            if(processor.backend == 'webgl') {
-                console.info('PERF: Choosing webgl processor '+processor.processorId);
-                return processor;
-            }
+    //TODO Right now we only use primary.
+    for(let key of Object.keys(BK_connectedClients)) {
+        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
+            console.debug(`BACKEND: Selecting client ${key}`);
+            return BK_connectedClients[key];
         }
     }
-    console.info('PERF: Choosing free/fallback processor '+preferredProcessor.processorId+' with status '+(preferredProcessor.isBusy ? 'busy' : 'free'));
-    return preferredProcessor;
+    return null;
 }
 
 function bkBroadcastMessageToProcessors(m) {
-    BK_connectedClientList.forEach(c=>{
-        c.port.postMessage(m);
+    Object.keys(BK_connectedClients).forEach(c=>{
+        BK_connectedClients[c].port.postMessage(m);
     });
 }
       
 browser.runtime.onConnect.addListener(bkOnClientConnected);
-browser.tabs.create({url:'/processor.html?backend=default&id=webgl-1', active: false})
-    .then(async tab=>await browser.tabs.hide(tab.id));
-//browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-2'});
-//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-1'});
-//browser.tabs.create({url:'/processor.html?backend=wasm&id=wasm-2'});
+
+
+let BK_processorBackendPreference = [];
+
+function bkReloadProcessors() {
+    console.log('LIFECYCLE: Cleaning up old processors.');
+    let keys = Object.keys(BK_connectedClients);
+    for(let key of keys) {
+        let client = BK_connectedClients[key];
+        browser.tabs.remove(client.tabId);
+        delete BK_connectedClients[key];
+    }
+
+    console.log('LIFECYCLE: Spawning new processors.');
+    for(let i=0; i<BK_processorBackendPreference.length; i++) {
+        let backend = BK_processorBackendPreference[i];
+        console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
+        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+            .then(async tab=>await browser.tabs.hide(tab.id));
+    }
+    console.log('LIFECYCLE: New processors are launching!');
+}
 
 
 function bkOnProcessorMessage(m) {
@@ -129,18 +128,16 @@ function bkOnProcessorMessage(m) {
         break;
         case 'registration': {
             console.dir(BK_connectedClients);
-            console.log('LIFECYLE: Registration '+m.processorId);
+            console.log(`LIFECYCLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
             BK_connectedClients[m.processorId].backend = m.backend;
+            BK_connectedClients[m.processorId].tabId = m.tabId;
         }
         break;
-        case 'qos': {
-            console.debug('QOS: '+m.processorId+' isBusy: '+m.isBusy);
-            BK_connectedClients[m.processorId].isBusy = m.isBusy;
-        }
         break;
     }
 }
 
+/////////// ZONE START /////////////////////////
 var BK_isZoneAutomatic = true;
 var BK_predictionBufferBlockCount = 0;
 var BK_predictionBuffer = [];
@@ -257,6 +254,40 @@ function bkNotifyThreshold() {
     });
 }
 
+////////////////////// ZONE END //////////////////////////
+
+//////////////////// WATCHDOG START //////////////////////
+
+let BK_watchdogCleanupCount = 0;
+let BK_watchdogKickCount = 0;
+async function bkWatchdog() {
+    let keysSnapshot = Object.keys(BK_openFilters);
+    let nowish = performance.now();
+    let cleaned = [];
+    let watchList = [];
+    console.info(`WATCHDOG: Stuck image check - Current open filters count: ${keysSnapshot.length} Watchdog kick: ${BK_watchdogKickCount} Total cleaned up: ${BK_watchdogCleanupCount}`);
+    for(let key of keysSnapshot) {
+        let ageMs = BK_openFilters[key] ? nowish - BK_openFilters[key].stopTime : 0;
+        if(ageMs >= 45000) {
+            BK_watchdogCleanupCount++;
+            delete BK_openFilters[key];
+            statusCompleteImageCheck(key, 'error');
+            cleaned.push(key);
+        } else if(ageMs >= 30000) {
+            watchList.push(key);
+        }
+    }
+    if(cleaned.length > 0) {
+        console.error(`WATCHDOG: Stuck image check watchdog cleaned up ${cleaned.join(',')} for a total kick count ${BK_watchdogKickCount}`);
+    }
+    if(watchList.length > 0) {
+        console.warn(`WATCHDOG: Stuck image check old age watchlist ${watchList.join(',')}`);
+    }
+}
+setInterval(bkWatchdog, 2500);
+
+///////////////// WATCHDOG END ////////////////////////////
+
 async function bkImageListener(details, shouldBlockSilently=false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
@@ -319,6 +350,7 @@ async function bkImageListener(details, shouldBlockSilently=false) {
   
     filter.onstop = async event => {
         console.debug('WEBREQ: onstop '+details.requestId);
+        filter.stopTime = performance.now();
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
@@ -584,7 +616,7 @@ function bkDetectCharset(contentType) {
 
 ////////////////////////Actual Startup//////////////////////////////
 
-let BK_isVideoEnabled = true;
+
 
 function bkRegisterAllCallbacks() {
 
@@ -631,10 +663,19 @@ function bkUnregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(bkDirectTypedUrlListener);
     browser.webRequest.onHeadersReceived.removeListener(bkBase64ContentListener);
 
-    if(BK_isVideoEnabled) {
-        browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
-        browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+    //Try to unregister whether or not they were previously registered
+    browser.webRequest.onBeforeRequest.removeListener(vidPrerequestListener);
+    browser.webRequest.onHeadersReceived.removeListener(vidRootListener);
+}
+
+function bkRefreshCallbackRegistration() {
+    console.log('CONFIG: Callback wireup refresh start.');
+    bkUnregisterAllCallbacks();
+    if(BK_isEnabled) {
+        bkRegisterAllCallbacks();
     }
+    bkRefreshDnsBlocking();
+    console.log('CONFIG: Callback wireup refresh complete!');
 }
 
 let BK_isEnabled = false;
@@ -654,13 +695,46 @@ function bkSetEnabled(isOn) {
     console.log('CONFIG: Callback wireups changed!');
 }
 
+let BK_isVideoEnabled = true;
+function bkSetVideoEnabled(isOn) {
+    console.log('CONFIG: Setting video enabled to '+isOn);
+    if(isOn == BK_isVideoEnabled) {
+        return;
+    }
+    console.log('CONFIG: Handling video callback wireup change.');
+    BK_isVideoEnabled = isOn;
+    bkRefreshCallbackRegistration();
+    console.log('CONFIG: Video callback wireups changed!');
+}
+
 let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
-    browser.storage.local.get("is_dns_blocking").then(dnsResult=>
-    bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
-    browser.storage.local.get("is_on_off_shown").then(onOffResult=>
-    BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    browser.storage.local.get('is_dns_blocking').then(dnsResult=>
+        bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
+    browser.storage.local.get('is_on_off_shown').then(onOffResult=>
+        BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    browser.storage.local.get('is_video_blocking_disabled').then(videoDisabledResult=> {
+            bkSetVideoEnabled(!videoDisabledResult.is_video_blocking_disabled);
+        });
+    bkLoadBackendSettings();
+}
+
+function bkLoadBackendSettings() {
+    browser.storage.local.get('backend_selection').then(result => {
+        let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        let hasChanged = backends.length != BK_processorBackendPreference.length;
+        for(let i=0; i<backends.length && !hasChanged; i++) {
+            hasChanged = backends[i] != BK_processorBackendPreference[i];
+        }
+        if(hasChanged) {
+            console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
+            BK_processorBackendPreference = backends;
+            bkReloadProcessors();
+        } else {
+            console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
+        }
+    });
 }
 
 function bkHandleMessage(request, sender, sendResponse) {
@@ -700,6 +774,15 @@ function bkHandleMessage(request, sender, sendResponse) {
     {
         bkUpdateFromSettings();
     }
+    else if(request.type=='setVideoBlockingDisabled')
+    {
+        bkUpdateFromSettings();
+    }
+    else if(request.type=='setBackendSelection')
+    {
+        bkUpdateFromSettings();
+    }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
 bkSetZone('neutral');
+bkLoadBackendSettings(); //The loading of the first processor kicks off the rest of initialization

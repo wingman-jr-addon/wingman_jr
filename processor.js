@@ -463,11 +463,6 @@ let PROC_throttleRejectionCount = 0;
 async function procCheckProcess() {
     console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
-        PROC_port.postMessage({
-            type: 'qos',
-            processorId: PROC_processorId,
-            isBusy: false
-        })
         return;
     }
     if(PROC_inFlight > PROC_CTX_POOL_DEFAULT_SIZE) {
@@ -483,11 +478,6 @@ async function procCheckProcess() {
         PROC_throttleRejectionCount = 0;
         let result;
         try {
-            PROC_port.postMessage({
-                type: 'qos',
-                processorId: PROC_processorId,
-                isBusy: true
-            })
             console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
             result = await procPerformFiltering(toProcess);
             
@@ -520,16 +510,16 @@ let PROC_watchdogThrottleRejectionCount = 0;
 let PROC_watchdogKickCount = 0;
 async function procWatchdog() {
     //Has the throttle count increased and scan start count stayed stuck?
-    console.info(`WATCHDOG: Check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+    console.info(`WATCHDOG: Processor queue check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
     if(PROC_watchdogThrottleRejectionCount > PROC_throttleRejectionCount
         && PROC_watchdogScanStartCount == PROC_scanStartCount) {
         try {
             PROC_watchdogKickCount++;
-            console.error(`WATCHDOG: Kicked! Resetting in flight count. Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+            console.error(`WATCHDOG: Processor queue kicked! Resetting in flight count. Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
             PROC_inFlight = 0;
             await procCheckProcess();
         } catch(e) {
-            console.error(`WATCHDOG: Error kicking scan ${e}`);
+            console.error(`WATCHDOG: Error kicking processor queue check scan ${e}`);
         }
     }
 
@@ -786,6 +776,7 @@ procWingmanStartup()
     PROC_port.onMessage.addListener(procOnPortMessage);
     PROC_port.postMessage({
         type: 'registration',
+        tabId: (await browser.tabs.getCurrent()).id,
         processorId: PROC_processorId,
         backend: PROC_loadedBackend
     });
