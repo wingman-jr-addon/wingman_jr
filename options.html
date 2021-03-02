@@ -26,8 +26,8 @@
         When enabled, this plugin will first check to see if the domain the image is coming from is a known adult content provider before doing scanning via AI.<br />
         There are advantages of enabling DNS blocking as an additional check:<br />
         <ul>
-            <li>Checks videos. The AI does not currently check videos.</li>
-            <li>Provides a second check on images.</li>
+            <li>All videos are checked because they are simply blocked by domain.</li>
+            <li>Similarly, provides a second check on images.</li>
             <li>Done as a pre-check, so if it is blocked the request to get the image is cancelled and the slower AI doesn't need to run.</li>
         </ul>
         There are, however, some disadvantages:<br />
