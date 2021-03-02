@@ -17,6 +17,12 @@ async function optSaveOptions() {
     });
     browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: isVideoBlockingDisabled });
 
+    let isSilentModeEnabled = document.querySelector('input[name="is_silent_mode_enabled"]:checked').value == "is_silent_mode_enabled_yes";
+    await browser.storage.local.set({
+    is_silent_mode_enabled: isSilentModeEnabled
+    });
+    browser.runtime.sendMessage({ type: 'setSilentModeEnabled', value: isSilentModeEnabled });
+
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
     await browser.storage.local.set({
     backend_selection: backendSelection
@@ -60,6 +66,17 @@ function optRestoreOptions() {
         browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: result });
     }
 
+    function setCurrentSilentModeEnabledChoice(rawResult) {
+        let result = rawResult.is_silent_mode_enabled;
+        console.log('OPTION: Setting silent mode enabled switch to '+result);
+        if(result) {
+            document.getElementById('is_silent_mode_enabled_yes').checked = true;
+        } else {
+            document.getElementById('is_silent_mode_enabled_no').checked = true;
+        }
+        browser.runtime.sendMessage({ type: 'setSilentModeEnabled', value: result });
+    }
+
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
         let result = rawResult.backend_selection;
         console.log('OPTION: Setting backend to '+result);
@@ -81,6 +98,9 @@ function optRestoreOptions() {
     let gettingVideoBlocking = browser.storage.local.get('is_video_blocking_disabled');
     gettingVideoBlocking.then(setCurrentVideoBlockingChoice, onError);
 
+    let gettingSilentModeEnabled = browser.storage.local.get('is_silent_mode_enabled');
+    gettingSilentModeEnabled.then(setCurrentSilentModeEnabledChoice, onError);
+
     let gettingBackendSelection = browser.storage.local.get('backend_selection');
     gettingBackendSelection.then(setCurrentBackendSelectionSwitchChoice, onError);
 }
@@ -101,6 +121,12 @@ for(var i = 0, max = radiosOnOff.length; i < max; i++) {
 var radiosVideoBlockingDisabled = document.forms[0].elements["is_video_blocking_disabled"];
 for(var i = 0, max = radiosVideoBlockingDisabled.length; i < max; i++) {
     radiosVideoBlockingDisabled[i].onclick = function() {
+        optSaveOptions();
+    }
+}
+var radiosSilentModeEnabled = document.forms[0].elements["is_silent_mode_enabled"];
+for(var i = 0, max = radiosSilentModeEnabled.length; i < max; i++) {
+    radiosSilentModeEnabled[i].onclick = function() {
         optSaveOptions();
     }
 }
