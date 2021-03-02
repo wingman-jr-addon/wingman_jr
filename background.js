@@ -32,6 +32,7 @@ function bkOnClientConnected(port) {
     console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
     bkNotifyThreshold();
+    bkBroadcastProcessorSettings();
     if(!BK_isInitialized) {
         BK_isInitialized = true;
         bkInitialize();
@@ -56,6 +57,15 @@ function bkGetNextProcessor() {
 function bkBroadcastMessageToProcessors(m) {
     Object.keys(BK_connectedClients).forEach(c=>{
         BK_connectedClients[c].port.postMessage(m);
+    });
+}
+
+let BK_isSilentModeEnabled = false;
+
+function bkBroadcastProcessorSettings() {
+    bkBroadcastMessageToProcessors({
+        type: 'settings',
+        isSilentModeEnabled : BK_isSilentModeEnabled
     });
 }
       
@@ -132,7 +142,6 @@ function bkOnProcessorMessage(m) {
             BK_connectedClients[m.processorId].backend = m.backend;
             BK_connectedClients[m.processorId].tabId = m.tabId;
         }
-        break;
         break;
     }
 }
@@ -717,6 +726,10 @@ function bkUpdateFromSettings() {
     browser.storage.local.get('is_video_blocking_disabled').then(videoDisabledResult=> {
             bkSetVideoEnabled(!videoDisabledResult.is_video_blocking_disabled);
         });
+    browser.storage.local.get('is_silent_mode_enabled').then(silentModeEnabledResult=> {
+        BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
+        bkBroadcastProcessorSettings();
+    });
     bkLoadBackendSettings();
 }
 
@@ -775,6 +788,10 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkUpdateFromSettings();
     }
     else if(request.type=='setVideoBlockingDisabled')
+    {
+        bkUpdateFromSettings();
+    }
+    else if(request.type == 'setSilentModeEnabled')
     {
         bkUpdateFromSettings();
     }
