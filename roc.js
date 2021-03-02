@@ -13203,6 +13203,6 @@ console.log("Trusted ROC: "+rocGetEntryString(ROC_trustedRoc));
 var ROC_trustedToNeutralPercentage = 0.04;
 var ROC_neutralRoc = rocFindRocEntryByFpr(0.015);
 console.log("Neutral ROC: "+rocGetEntryString(ROC_neutralRoc));
-var ROC_neutralToUntrustedPercentage = 0.08;
+var ROC_neutralToUntrustedPercentage = 0.18;
 var ROC_untrustedRoc = rocFindRocEntryByFpr(0.10);
 console.log("Untrusted ROC: "+rocGetEntryString(ROC_untrustedRoc));
