@@ -12,7 +12,7 @@ browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
 browser.runtime.setUninstallURL("https://docs.google.com/forms/d/e/1FAIpQLSfYLfDewK-ovU-fQXOARqvNRaaH18UGxI2S6tAQUKv5RNSGaQ/viewform?usp=sf_link");
 
 //Main plugin
-const MODEL_PATH = 'sqrx_62_graphopt/model.json'
+const MODEL_PATH = 'sqrxr_112_graphopt/model.json'
 const IMAGE_SIZE = 224;
 const MIN_IMAGE_SIZE = 36;
 const MIN_IMAGE_BYTES = 1024;
@@ -33,8 +33,8 @@ const wingman_startup = async () => {
     console.log('Warming up...');
     let dummy_data = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
     let warmup_result = wingman.predict(dummy_data);
-    warmup_result.print();
-    warmup_result.dispose();
+    console.log(warmup_result);
+    warmup_result[0].dispose();
     console.log('Ready to go!');
 };
 
@@ -100,8 +100,8 @@ async function predict(imgElement) {
   const avgTime = inferenceTimeTotal / inferenceCountTotal;
   console.log(`Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${inferenceCountTotal} scanned images`);
 
-  let syncedResult = await logits.data();
-  console.log('Prediction: '+syncedResult[0]+','+syncedResult[1]);
+  let syncedResult = logits[0].dataSync();
+  console.log('Prediction: '+syncedResult[0].toFixed(2)+','+syncedResult[1].toFixed(2)+','+syncedResult[2].toFixed(2)+','+syncedResult[3].toFixed(2));
   return syncedResult;
 }
 
