@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2020 Google LLC. All Rights Reserved.
+ * Copyright 2021 Google LLC. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,15 +15,16 @@
  * =============================================================================
  */
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('@tensorflow/tfjs-core'), require('path'), require('fs'), require('worker_threads'), require('perf_hooks')) :
-  typeof define === 'function' && define.amd ? define(['exports', '@tensorflow/tfjs-core', 'path', 'fs', 'worker_threads', 'perf_hooks'], factory) :
-  (global = global || self, factory((global.tf = global.tf || {}, global.tf.wasm = global.tf.wasm || {}), global.tf, global.path, global.fs, global.worker_threads, global.perf_hooks));
-}(this, (function (exports, tfjsCore, path, fs, worker_threads, perf_hooks) { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('@tensorflow/tfjs-core'), require('path'), require('fs'), require('worker_threads'), require('perf_hooks'), require('os')) :
+  typeof define === 'function' && define.amd ? define(['exports', '@tensorflow/tfjs-core', 'path', 'fs', 'worker_threads', 'perf_hooks', 'os'], factory) :
+  (global = global || self, factory((global.tf = global.tf || {}, global.tf.wasm = global.tf.wasm || {}), global.tf, global.path, global.fs, global.worker_threads, global.perf_hooks, global.os));
+}(this, (function (exports, tfjsCore, path, fs, worker_threads, perf_hooks, os) { 'use strict';
 
-  path = path && path.hasOwnProperty('default') ? path['default'] : path;
-  fs = fs && fs.hasOwnProperty('default') ? fs['default'] : fs;
-  worker_threads = worker_threads && worker_threads.hasOwnProperty('default') ? worker_threads['default'] : worker_threads;
-  perf_hooks = perf_hooks && perf_hooks.hasOwnProperty('default') ? perf_hooks['default'] : perf_hooks;
+  path = path && Object.prototype.hasOwnProperty.call(path, 'default') ? path['default'] : path;
+  fs = fs && Object.prototype.hasOwnProperty.call(fs, 'default') ? fs['default'] : fs;
+  worker_threads = worker_threads && Object.prototype.hasOwnProperty.call(worker_threads, 'default') ? worker_threads['default'] : worker_threads;
+  perf_hooks = perf_hooks && Object.prototype.hasOwnProperty.call(perf_hooks, 'default') ? perf_hooks['default'] : perf_hooks;
+  os = os && Object.prototype.hasOwnProperty.call(os, 'default') ? os['default'] : os;
 
   /**
    * @license
@@ -57,6 +58,7 @@
       FusableActivation[FusableActivation["relu"] = 1] = "relu";
       FusableActivation[FusableActivation["relu6"] = 2] = "relu6";
       FusableActivation[FusableActivation["prelu"] = 3] = "prelu";
+      FusableActivation[FusableActivation["leakyrelu"] = 4] = "leakyrelu";
   })(FusableActivation || (FusableActivation = {}));
 
   /**
@@ -89,6 +91,7 @@
           'number',
           'number',
           'number',
+          'number',
           'number' // out_id
       ]);
   }
@@ -98,7 +101,7 @@
       if (a.dtype !== 'float32' || b.dtype !== 'float32') {
           throw new Error("_FusedMatMul for non non-float32 tensors not yet supported.");
       }
-      var transposeA = attrs.transposeA, transposeB = attrs.transposeB, activation = attrs.activation;
+      var transposeA = attrs.transposeA, transposeB = attrs.transposeB, activation = attrs.activation, leakyreluAlpha = attrs.leakyreluAlpha;
       var aId = backend.dataIdMap.get(a.dataId).id;
       var bId = backend.dataIdMap.get(b.dataId).id;
       var biasId = 0;
@@ -125,7 +128,7 @@
       var outId = backend.dataIdMap.get(out.dataId).id;
       var aShapeBytes = new Uint8Array(new Int32Array(a.shape).buffer);
       var bShapeBytes = new Uint8Array(new Int32Array(b.shape).buffer);
-      wasmFusedMatMul(aId, aShapeBytes, a.shape.length, bId, bShapeBytes, b.shape.length, transposeA, transposeB, fusedActivation, biasId, preluActivationWeightsId, outId);
+      wasmFusedMatMul(aId, aShapeBytes, a.shape.length, bId, bShapeBytes, b.shape.length, transposeA, transposeB, fusedActivation, biasId, preluActivationWeightsId, leakyreluAlpha || 0, outId);
       return out;
   }
   var fusedMatMulConfig = {
@@ -497,6 +500,126 @@
 
   /**
    * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmAll;
+  function setup$2(backend) {
+      wasmAll = backend.wasm.cwrap(tfjsCore.All, null /*void*/, ['number, number, number']);
+  }
+  function all(args) {
+      var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
+      var axis = attrs.axis, keepDims = attrs.keepDims;
+      var x = inputs.x;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var inputId = xId;
+      var input = x;
+      var _a = permuteAxesAndTranspose(x, axis, backend), transposed = _a.transposed, axes = _a.axes, originalAxes = _a.originalAxes, inputWasTransposed = _a.inputWasTransposed;
+      if (inputWasTransposed) {
+          var transposedId = backend.dataIdMap.get(transposed.dataId).id;
+          input = transposed;
+          inputId = transposedId;
+      }
+      var inputRank = input.shape.length;
+      tfjsCore.backend_util.assertAxesAreInnerMostDims('all', axes, inputRank);
+      var _b = tfjsCore.backend_util.computeOutAndReduceShapes(input.shape, axes), outShape = _b[0], reduceShape = _b[1];
+      var reduceSize = tfjsCore.util.sizeFromShape(reduceShape);
+      var out = backend.makeOutput(outShape, x.dtype);
+      if (tfjsCore.util.sizeFromShape(input.shape) !== 0) {
+          var outId = backend.dataIdMap.get(out.dataId).id;
+          wasmAll(inputId, reduceSize, outId);
+      }
+      if (inputWasTransposed) {
+          // dispose of the transposed tensor.
+          backend.disposeData(transposed.dataId);
+      }
+      if (keepDims) {
+          // reshape
+          var newShape = tfjsCore.backend_util.expandShapeToKeepDim(out.shape, originalAxes);
+          out.shape = newShape;
+      }
+      return out;
+  }
+  var allConfig = {
+      kernelName: tfjsCore.All,
+      backendName: 'wasm',
+      setupFunc: setup$2,
+      kernelFunc: all
+  };
+
+  /**
+   * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmAny;
+  function setup$3(backend) {
+      wasmAny = backend.wasm.cwrap(tfjsCore.Any, null /*void*/, ['number, number, number']);
+  }
+  function any(args) {
+      var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
+      var axis = attrs.axis, keepDims = attrs.keepDims;
+      var x = inputs.x;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var inputId = xId;
+      var input = x;
+      var _a = permuteAxesAndTranspose(x, axis, backend), transposed = _a.transposed, axes = _a.axes, originalAxes = _a.originalAxes, inputWasTransposed = _a.inputWasTransposed;
+      if (inputWasTransposed) {
+          var transposedId = backend.dataIdMap.get(transposed.dataId).id;
+          input = transposed;
+          inputId = transposedId;
+      }
+      var inputRank = input.shape.length;
+      tfjsCore.backend_util.assertAxesAreInnerMostDims('any', axes, inputRank);
+      var _b = tfjsCore.backend_util.computeOutAndReduceShapes(input.shape, axes), outShape = _b[0], reduceShape = _b[1];
+      var reduceSize = tfjsCore.util.sizeFromShape(reduceShape);
+      var out = backend.makeOutput(outShape, x.dtype);
+      if (tfjsCore.util.sizeFromShape(input.shape) !== 0) {
+          var outId = backend.dataIdMap.get(out.dataId).id;
+          wasmAny(inputId, reduceSize, outId);
+      }
+      if (inputWasTransposed) {
+          // dispose of the transposed tensor.
+          backend.disposeData(transposed.dataId);
+      }
+      if (keepDims) {
+          // reshape
+          var newShape = tfjsCore.backend_util.expandShapeToKeepDim(out.shape, originalAxes);
+          out.shape = newShape;
+      }
+      return out;
+  }
+  var anyConfig = {
+      kernelName: tfjsCore.Any,
+      backendName: 'wasm',
+      setupFunc: setup$3,
+      kernelFunc: any
+  };
+
+  /**
+   * @license
    * Copyright 2019 Google LLC. All Rights Reserved.
    * Licensed under the Apache License, Version 2.0 (the "License");
    * you may not use this file except in compliance with the License.
@@ -512,7 +635,7 @@
    * =============================================================================
    */
   var wasmFunc$1;
-  function setup$2(backend) {
+  function setup$4(backend) {
       wasmFunc$1 = backend.wasm.cwrap(tfjsCore.ArgMax, null /* void */, [
           'number',
           'number',
@@ -554,7 +677,7 @@
       kernelName: tfjsCore.ArgMax,
       backendName: 'wasm',
       kernelFunc: argmax,
-      setupFunc: setup$2
+      setupFunc: setup$4
   };
 
   /**
@@ -574,7 +697,7 @@
    * =============================================================================
    */
   var wasmAvgPool;
-  function setup$3(backend) {
+  function setup$5(backend) {
       wasmAvgPool = backend.wasm.cwrap(tfjsCore.AvgPool, null /* void */, [
           'number',
           'number',
@@ -623,7 +746,7 @@
   var avgPoolConfig = {
       kernelName: tfjsCore.AvgPool,
       backendName: 'wasm',
-      setupFunc: setup$3,
+      setupFunc: setup$5,
       kernelFunc: avgPool
   };
 
@@ -651,6 +774,8 @@
       var $shape = tfjsCore.util.inferFromImplicitShape(shape, xSize);
       tfjsCore.util.assert(xSize === tfjsCore.util.sizeFromShape($shape), function () { return "new shape: " + $shape + ", old shape: " + x.shape + ". New shape and old " +
           "shape must have the same number of elements."; });
+      // Backend needs to track refCount for the dataId for reshape op
+      args.backend.incRef(x.dataId);
       return { dataId: x.dataId, shape: $shape, dtype: x.dtype };
   }
   var reshapeConfig = {
@@ -676,7 +801,7 @@
    * =============================================================================
    */
   var wasmBatchMatMul;
-  function setup$4(backend) {
+  function setup$6(backend) {
       wasmBatchMatMul = backend.wasm.cwrap(tfjsCore.BatchMatMul, null /* void */, [
           'number',
           'array',
@@ -733,13 +858,15 @@
       var aShapeBytes = new Uint8Array(new Int32Array(a3d.shape).buffer);
       var bShapeBytes = new Uint8Array(new Int32Array(b3d.shape).buffer);
       wasmBatchMatMul(a3dId, aShapeBytes, a3d.shape.length, b3dId, bShapeBytes, b3d.shape.length, transposeA, transposeB, outId);
+      backend.disposeData(a3d.dataId);
+      backend.disposeData(b3d.dataId);
       out.shape = outShape;
       return out;
   }
   var batchMatMulConfig = {
       kernelName: tfjsCore.BatchMatMul,
       backendName: 'wasm',
-      setupFunc: setup$4,
+      setupFunc: setup$6,
       kernelFunc: batchMatMul
   };
 
@@ -775,6 +902,24 @@
 
   /**
    * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var ceilConfig = createUnaryKernelConfig(tfjsCore.Ceil);
+
+  /**
+   * @license
    * Copyright 2019 Google LLC. All Rights Reserved.
    * Licensed under the Apache License, Version 2.0 (the "License");
    * you may not use this file except in compliance with the License.
@@ -790,7 +935,7 @@
    * =============================================================================
    */
   var wasmClip;
-  function setup$5(backend) {
+  function setup$7(backend) {
       wasmClip = backend.wasm.cwrap(tfjsCore.ClipByValue, null /* void */, [
           'number',
           'number',
@@ -811,9 +956,136 @@
   var clipByValueConfig = {
       kernelName: tfjsCore.ClipByValue,
       backendName: 'wasm',
-      setupFunc: setup$5,
+      setupFunc: setup$7,
       kernelFunc: clip
   };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  function concatImpl(inputs, outShape, dtype, simplyConcat) {
+      const outVals = tfjsCore.util.getArrayFromDType(dtype, tfjsCore.util.sizeFromShape(outShape));
+      if (simplyConcat && dtype !== 'string') {
+          // Use built-in TypedArray.set() method for speed.
+          let offset = 0;
+          inputs.forEach(input => {
+              const size = tfjsCore.util.sizeFromShape(input.shape);
+              outVals.set(input.vals, offset);
+              offset += size;
+          });
+      }
+      else {
+          let colOffset = 0;
+          inputs.forEach(input => {
+              const decodedData = dtype === 'string' ?
+                  tfjsCore.backend_util.fromUint8ToStringArray(input.vals) :
+                  input.vals;
+              let tIdx = 0;
+              for (let row = 0; row < input.shape[0]; ++row) {
+                  const resIdx = row * outShape[1] + colOffset;
+                  for (let col = 0; col < input.shape[1]; ++col) {
+                      outVals[resIdx + col] = decodedData[tIdx++];
+                  }
+              }
+              colOffset += input.shape[1];
+          });
+      }
+      return outVals;
+  }
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  function rangeImpl(start, stop, step, dtype) {
+      const sameStartStop = start === stop;
+      const increasingRangeNegativeStep = start < stop && step < 0;
+      const decreasingRangePositiveStep = stop < start && step > 1;
+      if (sameStartStop || increasingRangeNegativeStep ||
+          decreasingRangePositiveStep) {
+          return tfjsCore.util.makeZerosTypedArray(0, dtype);
+      }
+      const numElements = Math.abs(Math.ceil((stop - start) / step));
+      const values = tfjsCore.util.makeZerosTypedArray(numElements, dtype);
+      if (stop < start && step === 1) {
+          // Auto adjust the step's sign if it hasn't been set
+          // (or was set to 1)
+          step = -1;
+      }
+      values[0] = start;
+      for (let i = 1; i < values.length; i++) {
+          values[i] = values[i - 1] + step;
+      }
+      return values;
+  }
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  function sliceImpl(vals, begin, size, shape, dtype) {
+      const isContinous = tfjsCore.slice_util.isSliceContinous(shape, begin, size);
+      const length = tfjsCore.util.sizeFromShape(size);
+      const xStrides = tfjsCore.util.computeStrides(shape);
+      if (isContinous) {
+          const flatOffset = tfjsCore.slice_util.computeFlatOffset(begin, xStrides);
+          if (dtype === 'string') {
+              return vals.slice(flatOffset, flatOffset + length);
+          }
+          return vals.subarray(flatOffset, flatOffset + length);
+      }
+      const decodedData = dtype === 'string' ?
+          tfjsCore.backend_util.fromUint8ToStringArray(vals) :
+          vals;
+      const inBuf = tfjsCore.buffer(shape, dtype, decodedData);
+      const outBuf = tfjsCore.buffer(size, dtype);
+      for (let i = 0; i < outBuf.size; ++i) {
+          const outLoc = outBuf.indexToLoc(i);
+          const inLoc = outLoc.map((idx, j) => idx + begin[j]);
+          outBuf.set(inBuf.get(...inLoc), ...outLoc);
+      }
+      if (dtype === 'string') {
+          return tfjsCore.backend_util.fromStringArrayToUint8(outBuf.values);
+      }
+      return outBuf.values;
+  }
 
   /**
    * @license
@@ -835,17 +1107,45 @@
       var inputs = args.inputs, backend = args.backend;
       var axis = tfjsCore.util.parseAxisParam(args.attrs.axis, inputs[0].shape)[0];
       var outShape = tfjsCore.backend_util.computeOutShape(inputs.map(function (t) { return t.shape; }), axis);
+      // Keep only non-empty tensors (ignore tensors with 0 in their shape).
+      var $inputs = inputs.filter(function (t) { return tfjsCore.util.sizeFromShape(t.shape) > 0; });
+      if ($inputs.length === 1) {
+          return identity({ inputs: { x: $inputs[0] }, backend: backend });
+      }
       var out = backend.makeOutput(outShape, inputs[0].dtype);
       if (tfjsCore.util.sizeFromShape(outShape) === 0) {
           return out;
       }
-      // Keep only non-empty tensors (ignore tensors with 0 in their shape).
-      var $inputs = inputs.filter(function (t) { return tfjsCore.util.sizeFromShape(t.shape) > 0; });
-      if ($inputs.length === 1) {
-          return $inputs[0];
-      }
       var shapes = $inputs.map(function (t) { return t.shape; });
       tfjsCore.backend_util.assertParamsConsistent(shapes, axis);
+      if ($inputs[0].dtype === 'string') {
+          // Any concat of n-dimensional tensors across any axis can be reduced to
+          // a concatenation of two-dimensional tensors across the axis 1 by first
+          // partitioning the axes of the original tensors into those less than the
+          // axis to be concatenated and the rest. Then reshape the tensors
+          // into a two-dimensional tensor by collapsing these two sets of axes and
+          // concatenate the resulting matrices across the axis 1, finally reshaping
+          // the result to have the proper shape.
+          var inputs2D = $inputs.map(function (t) {
+              var innerSize = tfjsCore.util.sizeFromShape(t.shape.slice(axis));
+              var shape = [-1, innerSize];
+              return reshape({ inputs: { x: t }, backend: backend, attrs: { shape: shape } });
+          });
+          var inputsValShapes = inputs2D.map(function (t) {
+              return { vals: backend.readSync(t.dataId), shape: t.shape };
+          });
+          // Concats 2d tensors along axis=1.
+          outShape =
+              tfjsCore.backend_util.computeOutShape(inputs2D.map(function (t) { return t.shape; }), 1 /* axis */);
+          var simplyConcat = inputs2D[0].shape[0] === 1;
+          var outVals_1 = concatImpl(inputsValShapes, outShape, inputs[0].dtype, simplyConcat);
+          var finalOutShape = tfjsCore.backend_util.computeOutShape($inputs.map(function (t) { return t.shape; }), axis);
+          out.shape = finalOutShape;
+          var outData = backend.dataIdMap.get(out.dataId);
+          outData.stringBytes = tfjsCore.backend_util.fromStringArrayToUint8(outVals_1);
+          inputs2D.forEach(function (t) { return backend.disposeData(t.dataId); });
+          return out;
+      }
       var batchDim = tfjsCore.util.sizeFromShape($inputs[0].shape.slice(0, axis));
       var sumInnerDims = 0;
       var innerDims = $inputs.map(function (input) {
@@ -890,7 +1190,7 @@
    * =============================================================================
    */
   var wasmConv2d;
-  function setup$6(backend) {
+  function setup$8(backend) {
       wasmConv2d = backend.wasm.cwrap(tfjsCore.Conv2D, null /* void */, [
           'number',
           'number',
@@ -946,7 +1246,7 @@
   var conv2DConfig = {
       kernelName: tfjsCore.Conv2D,
       backendName: 'wasm',
-      setupFunc: setup$6,
+      setupFunc: setup$8,
       kernelFunc: conv2d
   };
 
@@ -967,7 +1267,7 @@
    * =============================================================================
    */
   var wasmConv2DBackpropInput;
-  function setup$7(backend) {
+  function setup$9(backend) {
       wasmConv2DBackpropInput = backend.wasm.cwrap(tfjsCore.Conv2DBackpropInput, null, [
           'number',
           'number',
@@ -1030,7 +1330,7 @@
   var conv2DBackpropInputConfig = {
       kernelName: tfjsCore.Conv2DBackpropInput,
       backendName: 'wasm',
-      setupFunc: setup$7,
+      setupFunc: setup$9,
       kernelFunc: conv2DBackpropInput
   };
 
@@ -1075,7 +1375,7 @@
       InterpolationMethod[InterpolationMethod["nearest"] = 1] = "nearest";
   })(InterpolationMethod || (InterpolationMethod = {}));
   var wasmCropAndResize;
-  function setup$8(backend) {
+  function setup$a(backend) {
       wasmCropAndResize = backend.wasm.cwrap(tfjsCore.CropAndResize, null /*void*/, [
           'number',
           'number',
@@ -1117,7 +1417,7 @@
   var cropAndResizeConfig = {
       kernelName: tfjsCore.CropAndResize,
       backendName: 'wasm',
-      setupFunc: setup$8,
+      setupFunc: setup$a,
       kernelFunc: cropAndResize
   };
 
@@ -1138,7 +1438,7 @@
    * =============================================================================
    */
   var wasmCumsum;
-  function setup$9(backend) {
+  function setup$b(backend) {
       wasmCumsum = backend.wasm.cwrap(tfjsCore.Cumsum, null /* void */, [
           'number',
           'number',
@@ -1180,7 +1480,7 @@
   var cumsumConfig = {
       kernelName: tfjsCore.Cumsum,
       backendName: 'wasm',
-      setupFunc: setup$9,
+      setupFunc: setup$b,
       kernelFunc: cumsum
   };
 
@@ -1201,7 +1501,7 @@
    * =============================================================================
    */
   var wasmDepthToSpace;
-  function setup$a(backend) {
+  function setup$c(backend) {
       wasmDepthToSpace = backend.wasm.cwrap(tfjsCore.DepthToSpace, null /*void*/, [
           'number',
           'number',
@@ -1243,7 +1543,7 @@
   var depthToSpaceConfig = {
       kernelName: tfjsCore.DepthToSpace,
       backendName: 'wasm',
-      setupFunc: setup$a,
+      setupFunc: setup$c,
       kernelFunc: depthToSpace
   };
 
@@ -1264,7 +1564,7 @@
    * =============================================================================
    */
   var wasmDepthwiseConv2d;
-  function setup$b(backend) {
+  function setup$d(backend) {
       wasmDepthwiseConv2d =
           backend.wasm.cwrap(tfjsCore.DepthwiseConv2dNative, null /* void */, [
               'number',
@@ -1321,28 +1621,9 @@
   var depthwiseConv2dNativeConfig = {
       kernelName: tfjsCore.DepthwiseConv2dNative,
       backendName: 'wasm',
-      setupFunc: setup$b,
+      setupFunc: setup$d,
       kernelFunc: depthwiseConv2d
   };
-
-  /**
-   * @license
-   * Copyright 2019 Google LLC. All Rights Reserved.
-   * Licensed under the Apache License, Version 2.0 (the "License");
-   * you may not use this file except in compliance with the License.
-   * You may obtain a copy of the License at
-   *
-   * http://www.apache.org/licenses/LICENSE-2.0
-   *
-   * Unless required by applicable law or agreed to in writing, software
-   * distributed under the License is distributed on an "AS IS" BASIS,
-   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   * See the License for the specific language governing permissions and
-   * limitations under the License.
-   * =============================================================================
-   */
-  var supportsFullBroadcast$1 = true;
-  var divConfig = createBinaryKernelConfig(tfjsCore.Div, supportsFullBroadcast$1);
 
   /**
    * @license
@@ -1360,8 +1641,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$2 = false;
-  var equalConfig = createBinaryKernelConfig(tfjsCore.Equal, supportsFullBroadcast$2, 'bool');
+  var supportsFullBroadcast$1 = false;
+  var equalConfig = createBinaryKernelConfig(tfjsCore.Equal, supportsFullBroadcast$1, 'bool');
 
   /**
    * @license
@@ -1380,6 +1661,43 @@
    * =============================================================================
    */
   var expConfig = createUnaryKernelConfig(tfjsCore.Exp);
+
+  /**
+   * @license
+   * Copyright 2019 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  function expandDims(args) {
+      var inputs = args.inputs, attrs = args.attrs, backend = args.backend;
+      var input = inputs.input;
+      var dim = attrs.dim;
+      var inputRank = input.shape.length;
+      var newShape = input.shape.slice();
+      var $dim = dim;
+      if (dim < 0) {
+          // Negative value is counted from the tail of rank.
+          tfjsCore.util.assert(-(inputRank + 1) <= dim, function () { return "Axis must be in the interval [" + -(inputRank + 1) + ", " + inputRank + "]"; });
+          $dim = inputRank + dim + 1;
+      }
+      newShape.splice($dim, 0, 1);
+      return reshape({ inputs: { x: input }, backend: backend, attrs: { shape: newShape } });
+  }
+  var expandDimsConfig = {
+      kernelName: tfjsCore.ExpandDims,
+      backendName: 'wasm',
+      kernelFunc: expandDims,
+  };
 
   /**
    * @license
@@ -1427,7 +1745,7 @@
    * =============================================================================
    */
   var wasmFlipLeftRight;
-  function setup$c(backend) {
+  function setup$e(backend) {
       wasmFlipLeftRight = backend.wasm.cwrap(tfjsCore.FlipLeftRight, null /* void */, [
           'number',
           'number',
@@ -1451,8 +1769,26 @@
       kernelName: tfjsCore.FlipLeftRight,
       backendName: 'wasm',
       kernelFunc: flipLeftRight,
-      setupFunc: setup$c
+      setupFunc: setup$e
   };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var floorConfig = createUnaryKernelConfig(tfjsCore.Floor);
 
   /**
    * @license
@@ -1470,8 +1806,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$3 = false;
-  var floorDivConfig = createBinaryKernelConfig(tfjsCore.FloorDiv, supportsFullBroadcast$3);
+  var supportsFullBroadcast$2 = false;
+  var floorDivConfig = createBinaryKernelConfig(tfjsCore.FloorDiv, supportsFullBroadcast$2);
 
   /**
    * @license
@@ -1490,7 +1826,7 @@
    * =============================================================================
    */
   var wasmBatchNorm;
-  function setup$d(backend) {
+  function setup$f(backend) {
       wasmBatchNorm = backend.wasm.cwrap(tfjsCore.FusedBatchNorm, null /* void */, ['number', 'number', 'number', 'number', 'number', 'number', 'number']);
   }
   function fusedBatchNorm(args) {
@@ -1514,7 +1850,7 @@
   var fusedBatchNormConfig = {
       kernelName: tfjsCore.FusedBatchNorm,
       backendName: 'wasm',
-      setupFunc: setup$d,
+      setupFunc: setup$f,
       kernelFunc: fusedBatchNorm
   };
 
@@ -1535,8 +1871,9 @@
    * =============================================================================
    */
   var wasmFusedConv2d;
-  function setup$e(backend) {
+  function setup$g(backend) {
       wasmFusedConv2d = backend.wasm.cwrap(tfjsCore.FusedConv2D, null /* void */, [
+          'number',
           'number',
           'number',
           'number',
@@ -1564,7 +1901,7 @@
   function fusedConv2d(args) {
       var inputs = args.inputs, attrs = args.attrs, backend = args.backend;
       var x = inputs.x, filter = inputs.filter, bias = inputs.bias, preluActivationWeights = inputs.preluActivationWeights;
-      var strides = attrs.strides, pad = attrs.pad, dilations = attrs.dilations, dataFormat = attrs.dataFormat, dimRoundingMode = attrs.dimRoundingMode, activation = attrs.activation;
+      var strides = attrs.strides, pad = attrs.pad, dilations = attrs.dilations, dataFormat = attrs.dataFormat, dimRoundingMode = attrs.dimRoundingMode, activation = attrs.activation, leakyreluAlpha = attrs.leakyreluAlpha;
       var convInfo = tfjsCore.backend_util.computeConv2DInfo(x.shape, filter.shape, strides, dilations, pad, dimRoundingMode);
       var fusedActivation = FusableActivation[activation];
       if (fusedActivation == null) {
@@ -1611,13 +1948,13 @@
       var preluActivationWeightsId = preluActivationWeights == null ?
           0 :
           backend.dataIdMap.get(preluActivationWeights.dataId).id;
-      wasmFusedConv2d(xId, batchSize, inHeight, inWidth, filterId, filterHeight, filterWidth, biasId, padTop, padRight, padBottom, padLeft, isSamePad, dilationHeight, dilationWidth, strideHeight, strideWidth, inputChannels, outputChannels, fusedActivation, preluActivationWeightsId, outId);
+      wasmFusedConv2d(xId, batchSize, inHeight, inWidth, filterId, filterHeight, filterWidth, biasId, padTop, padRight, padBottom, padLeft, isSamePad, dilationHeight, dilationWidth, strideHeight, strideWidth, inputChannels, outputChannels, fusedActivation, preluActivationWeightsId, leakyreluAlpha || 0, outId);
       return out;
   }
   var fusedConv2DConfig = {
       kernelName: tfjsCore.FusedConv2D,
       backendName: 'wasm',
-      setupFunc: setup$e,
+      setupFunc: setup$g,
       kernelFunc: fusedConv2d
   };
 
@@ -1638,9 +1975,10 @@
    * =============================================================================
    */
   var wasmFusedDepthwiseConv2d;
-  function setup$f(backend) {
+  function setup$h(backend) {
       wasmFusedDepthwiseConv2d =
           backend.wasm.cwrap(tfjsCore.FusedDepthwiseConv2D, null /* void */, [
+              'number',
               'number',
               'number',
               'number',
@@ -1668,7 +2006,7 @@
   function fusedDepthwiseConv2d(args) {
       var inputs = args.inputs, attrs = args.attrs, backend = args.backend;
       var x = inputs.x, filter = inputs.filter, bias = inputs.bias, preluActivationWeights = inputs.preluActivationWeights;
-      var strides = attrs.strides, pad = attrs.pad, dilations = attrs.dilations, dataFormat = attrs.dataFormat, dimRoundingMode = attrs.dimRoundingMode, activation = attrs.activation;
+      var strides = attrs.strides, pad = attrs.pad, dilations = attrs.dilations, dataFormat = attrs.dataFormat, dimRoundingMode = attrs.dimRoundingMode, activation = attrs.activation, leakyreluAlpha = attrs.leakyreluAlpha;
       var convInfo = tfjsCore.backend_util.computeConv2DInfo(x.shape, filter.shape, strides, dilations, pad, dimRoundingMode, true /* depthwise */);
       var fusedActivation = FusableActivation[activation];
       if (fusedActivation == null) {
@@ -1715,13 +2053,13 @@
       var preluActivationWeightsId = preluActivationWeights == null ?
           0 :
           backend.dataIdMap.get(preluActivationWeights.dataId).id;
-      wasmFusedDepthwiseConv2d(xId, batchSize, inHeight, inWidth, filterId, filterHeight, filterWidth, biasId, padTop, padRight, padBottom, padLeft, isSamePad, dilationHeight, dilationWidth, strideHeight, strideWidth, inputChannels, outputChannels, fusedActivation, preluActivationWeightsId, outId);
+      wasmFusedDepthwiseConv2d(xId, batchSize, inHeight, inWidth, filterId, filterHeight, filterWidth, biasId, padTop, padRight, padBottom, padLeft, isSamePad, dilationHeight, dilationWidth, strideHeight, strideWidth, inputChannels, outputChannels, fusedActivation, preluActivationWeightsId, leakyreluAlpha || 0, outId);
       return out;
   }
   var fusedDepthwiseConv2DConfig = {
       kernelName: tfjsCore.FusedDepthwiseConv2D,
       backendName: 'wasm',
-      setupFunc: setup$f,
+      setupFunc: setup$h,
       kernelFunc: fusedDepthwiseConv2d
   };
 
@@ -1742,7 +2080,7 @@
    * =============================================================================
    */
   var wasmGatherNd;
-  function setup$g(backend) {
+  function setup$i(backend) {
       wasmGatherNd = backend.wasm.cwrap(tfjsCore.GatherNd, null /*void*/, [
           'number',
           'number',
@@ -1776,7 +2114,7 @@
   var gatherNdConfig = {
       kernelName: tfjsCore.GatherNd,
       backendName: 'wasm',
-      setupFunc: setup$g,
+      setupFunc: setup$i,
       kernelFunc: gatherNd
   };
 
@@ -1797,7 +2135,7 @@
    * =============================================================================
    */
   var wasmGather;
-  function setup$h(backend) {
+  function setup$j(backend) {
       wasmGather = backend.wasm.cwrap('Gather', null /*void*/, [
           'number',
           'number',
@@ -1812,32 +2150,52 @@
   function gatherV2(args) {
       var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
       var x = inputs.x, indices = inputs.indices;
-      var axis = attrs.axis;
-      var newShape = x.shape.slice();
-      newShape[axis] = tfjsCore.util.sizeFromShape(indices.shape);
-      var stridesSize = x.shape.length - 1;
-      var out = backend.makeOutput(newShape, x.dtype);
+      var axis = attrs.axis, batchDims = attrs.batchDims;
+      var parsedAxis = tfjsCore.util.parseAxisParam(axis, x.shape)[0];
+      var shapeInfo = tfjsCore.backend_util.segment_util.collectGatherOpShapeInfo(x, indices, parsedAxis, batchDims);
+      var flattenX = reshape({
+          inputs: { x: x },
+          attrs: {
+              shape: [
+                  shapeInfo.batchSize, shapeInfo.outerSize, shapeInfo.dimSize,
+                  shapeInfo.sliceSize
+              ]
+          },
+          backend: backend
+      });
+      var indicesSize = tfjsCore.util.sizeFromShape(indices.shape);
+      var flattenIndex = reshape({
+          inputs: { x: indices },
+          attrs: { shape: [shapeInfo.batchSize, indicesSize / shapeInfo.batchSize] },
+          backend: backend
+      });
+      var flattenOutputShape = [
+          shapeInfo.batchSize, shapeInfo.outerSize, indicesSize / shapeInfo.batchSize,
+          shapeInfo.sliceSize
+      ];
+      var out = backend.makeOutput(flattenOutputShape, x.dtype);
       if (tfjsCore.util.sizeFromShape(x.shape) === 0) {
           return out;
       }
-      var xData = backend.dataIdMap.get(x.dataId);
+      var stridesSize = flattenX.shape.length - 1;
+      var xData = backend.dataIdMap.get(flattenX.dataId);
       var xId = xData.id;
-      var indicesData = backend.dataIdMap.get(indices.dataId);
+      var indicesData = backend.dataIdMap.get(flattenIndex.dataId);
       var indicesId = indicesData.id;
       var outId = backend.dataIdMap.get(out.dataId).id;
-      var xStridesBytes = new Uint8Array(new Int32Array(tfjsCore.util.computeStrides(x.shape)).buffer);
-      var outStridesBytes = new Uint8Array(new Int32Array(tfjsCore.util.computeStrides(newShape)).buffer);
-      wasmGather(xId, CppDType[x.dtype], xStridesBytes, stridesSize, indicesId, axis, outStridesBytes, outId);
+      var xStridesBytes = new Uint8Array(new Int32Array(tfjsCore.util.computeStrides(flattenX.shape)).buffer);
+      var outStridesBytes = new Uint8Array(new Int32Array(tfjsCore.util.computeStrides(flattenOutputShape)).buffer);
+      wasmGather(xId, CppDType[x.dtype], xStridesBytes, stridesSize, indicesId, shapeInfo.batchSize, outStridesBytes, outId);
+      backend.disposeData(flattenX.dataId);
+      backend.disposeData(flattenIndex.dataId);
       // reshape
-      var parsedAxis = tfjsCore.util.parseAxisParam(axis, x.shape)[0];
-      var shapeInfo = tfjsCore.backend_util.segment_util.collectGatherOpShapeInfo(x, indices, parsedAxis);
       out.shape = shapeInfo.outputShape;
       return out;
   }
   var gatherV2Config = {
       kernelName: tfjsCore.GatherV2,
       backendName: 'wasm',
-      setupFunc: setup$h,
+      setupFunc: setup$j,
       kernelFunc: gatherV2
   };
 
@@ -1857,8 +2215,68 @@
    * limitations under the License.
    * =============================================================================
    */
+  var supportsFullBroadcast$3 = false;
+  var greaterConfig = createBinaryKernelConfig(tfjsCore.Greater, supportsFullBroadcast$3, 'bool');
+
+  /**
+   * @license
+   * Copyright 2019 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
   var supportsFullBroadcast$4 = false;
-  var greaterConfig = createBinaryKernelConfig(tfjsCore.Greater, supportsFullBroadcast$4, 'bool');
+  var greaterEqualConfig = createBinaryKernelConfig(tfjsCore.GreaterEqual, supportsFullBroadcast$4, 'bool');
+
+  /**
+   * @license
+   * Copyright 2019 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmFunc$2;
+  function setupFunc$1(backend) {
+      wasmFunc$2 = backend.wasm.cwrap(tfjsCore.LeakyRelu, null /* void */, [
+          'number',
+          'number',
+          'number' // out_id
+      ]);
+  }
+  function leakyRelu(args) {
+      var x = args.inputs.x, alpha = args.attrs.alpha, backend = args.backend;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var out = backend.makeOutput(x.shape, x.dtype);
+      if (tfjsCore.util.sizeFromShape(x.shape) !== 0) {
+          var outId = backend.dataIdMap.get(out.dataId).id;
+          wasmFunc$2(xId, alpha, outId);
+      }
+      return out;
+  }
+  var leakyReluConfig = {
+      kernelName: tfjsCore.LeakyRelu,
+      backendName: 'wasm',
+      setupFunc: setupFunc$1,
+      kernelFunc: leakyRelu,
+  };
 
   /**
    * @license
@@ -1877,7 +2295,7 @@
    * =============================================================================
    */
   var supportsFullBroadcast$5 = false;
-  var greaterEqualConfig = createBinaryKernelConfig(tfjsCore.GreaterEqual, supportsFullBroadcast$5, 'bool');
+  var lessConfig = createBinaryKernelConfig(tfjsCore.Less, supportsFullBroadcast$5, 'bool');
 
   /**
    * @license
@@ -1896,26 +2314,7 @@
    * =============================================================================
    */
   var supportsFullBroadcast$6 = false;
-  var lessConfig = createBinaryKernelConfig(tfjsCore.Less, supportsFullBroadcast$6, 'bool');
-
-  /**
-   * @license
-   * Copyright 2019 Google LLC. All Rights Reserved.
-   * Licensed under the Apache License, Version 2.0 (the "License");
-   * you may not use this file except in compliance with the License.
-   * You may obtain a copy of the License at
-   *
-   * http://www.apache.org/licenses/LICENSE-2.0
-   *
-   * Unless required by applicable law or agreed to in writing, software
-   * distributed under the License is distributed on an "AS IS" BASIS,
-   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   * See the License for the specific language governing permissions and
-   * limitations under the License.
-   * =============================================================================
-   */
-  var supportsFullBroadcast$7 = false;
-  var lessEqualConfig = createBinaryKernelConfig(tfjsCore.LessEqual, supportsFullBroadcast$7, 'bool');
+  var lessEqualConfig = createBinaryKernelConfig(tfjsCore.LessEqual, supportsFullBroadcast$6, 'bool');
 
   /**
    * @license
@@ -1951,8 +2350,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$8 = false;
-  var logicalAndConfig = createBinaryKernelConfig(tfjsCore.LogicalAnd, supportsFullBroadcast$8, 'bool');
+  var supportsFullBroadcast$7 = false;
+  var logicalAndConfig = createBinaryKernelConfig(tfjsCore.LogicalAnd, supportsFullBroadcast$7, 'bool');
 
   /**
    * @license
@@ -1971,7 +2370,7 @@
    * =============================================================================
    */
   var wasmMax;
-  function setup$i(backend) {
+  function setup$k(backend) {
       wasmMax = backend.wasm.cwrap(tfjsCore.Max, null /*void*/, ['number, number, number']);
   }
   function max(args) {
@@ -2010,7 +2409,7 @@
   var maxConfig = {
       kernelName: tfjsCore.Max,
       backendName: 'wasm',
-      setupFunc: setup$i,
+      setupFunc: setup$k,
       kernelFunc: max
   };
 
@@ -2030,8 +2429,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$9 = false;
-  var maximumConfig = createBinaryKernelConfig(tfjsCore.Maximum, supportsFullBroadcast$9);
+  var supportsFullBroadcast$8 = false;
+  var maximumConfig = createBinaryKernelConfig(tfjsCore.Maximum, supportsFullBroadcast$8);
 
   /**
    * @license
@@ -2050,7 +2449,7 @@
    * =============================================================================
    */
   var wasmMaxPool;
-  function setup$j(backend) {
+  function setup$l(backend) {
       wasmMaxPool = backend.wasm.cwrap(tfjsCore.MaxPool, null /* void */, [
           'number',
           'number',
@@ -2101,8 +2500,83 @@
   var maxPoolConfig = {
       kernelName: tfjsCore.MaxPool,
       backendName: 'wasm',
-      setupFunc: setup$j,
+      setupFunc: setup$l,
       kernelFunc: maxPool
+  };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmMean;
+  function setup$m(backend) {
+      wasmMean =
+          backend.wasm.cwrap(tfjsCore.Mean, null /*void*/, ['number, number, number']);
+  }
+  function mean(args) {
+      var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
+      var axis = attrs.axis, keepDims = attrs.keepDims;
+      var x = inputs.x;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var inputId = xId;
+      var input = x;
+      var _a = permuteAxesAndTranspose(x, axis, backend), transposed = _a.transposed, axes = _a.axes, originalAxes = _a.originalAxes, inputWasTransposed = _a.inputWasTransposed;
+      var reductionAxes = axes;
+      if (inputWasTransposed) {
+          var transposedId = backend.dataIdMap.get(transposed.dataId).id;
+          if (transposedId !== xId) {
+              // transpose was not a no-op. We will need to dispose of this
+              // once we are done.
+              input = transposed;
+              inputId = transposedId;
+              reductionAxes = tfjsCore.backend_util.getInnerMostAxes(reductionAxes.length, input.shape.length);
+          }
+      }
+      tfjsCore.backend_util.assertAxesAreInnerMostDims('mean', reductionAxes, input.shape.length);
+      var _b = tfjsCore.backend_util.computeOutAndReduceShapes(input.shape, reductionAxes), outShape = _b[0], reduceShape = _b[1];
+      var reduceSize = tfjsCore.util.sizeFromShape(reduceShape);
+      var castedInput = input;
+      if (input.dtype !== 'float32') {
+          castedInput =
+              cast({ backend: backend, inputs: { x: input }, attrs: { dtype: 'float32' } });
+          inputId = backend.dataIdMap.get(castedInput.dataId).id;
+      }
+      var out = backend.makeOutput(outShape, 'float32');
+      if (tfjsCore.util.sizeFromShape(input.shape) !== 0) {
+          var outId = backend.dataIdMap.get(out.dataId).id;
+          wasmMean(inputId, reduceSize, outId);
+      }
+      if (inputWasTransposed) {
+          // dispose of the transposed tensor.
+          backend.disposeData(transposed.dataId);
+      }
+      if (keepDims) {
+          // reshape
+          var newShape = tfjsCore.backend_util.expandShapeToKeepDim(out.shape, originalAxes);
+          out.shape = newShape;
+      }
+      if (input.dtype !== 'float32') {
+          backend.disposeData(castedInput.dataId);
+      }
+      return out;
+  }
+  var meanConfig = {
+      kernelName: tfjsCore.Mean,
+      backendName: 'wasm',
+      setupFunc: setup$m,
+      kernelFunc: mean
   };
 
   /**
@@ -2122,7 +2596,7 @@
    * =============================================================================
    */
   var wasmMin;
-  function setup$k(backend) {
+  function setup$n(backend) {
       wasmMin = backend.wasm.cwrap(tfjsCore.Min, null /*void*/, ['number, number, number']);
   }
   function min(args) {
@@ -2165,7 +2639,7 @@
   var minConfig = {
       kernelName: tfjsCore.Min,
       backendName: 'wasm',
-      setupFunc: setup$k,
+      setupFunc: setup$n,
       kernelFunc: min
   };
 
@@ -2185,8 +2659,64 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$a = false;
-  var minimumConfig = createBinaryKernelConfig(tfjsCore.Minimum, supportsFullBroadcast$a);
+  var supportsFullBroadcast$9 = false;
+  var minimumConfig = createBinaryKernelConfig(tfjsCore.Minimum, supportsFullBroadcast$9);
+
+  /**
+   * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  // Must match enum in MirrorPad.cc
+  var MirrorPaddingMode;
+  (function (MirrorPaddingMode) {
+      MirrorPaddingMode[MirrorPaddingMode["reflect"] = 0] = "reflect";
+      MirrorPaddingMode[MirrorPaddingMode["symmetric"] = 1] = "symmetric";
+  })(MirrorPaddingMode || (MirrorPaddingMode = {}));
+  var wasmMirrorPad;
+  function setup$o(backend) {
+      wasmMirrorPad = backend.wasm.cwrap(tfjsCore.MirrorPad, null /* void */, [
+          'number',
+          'array',
+          'number',
+          'number',
+          'array',
+          'array',
+          'number',
+          'number',
+      ]);
+  }
+  function mirrorPad(args) {
+      var x = args.inputs.x, backend = args.backend, _a = args.attrs, paddings = _a.paddings, mode = _a.mode;
+      var outShape = paddings.map(function (p, i) { return p[0] /* beforePad */ + x.shape[i] + p[1]; } /* afterPad */);
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var out = backend.makeOutput(outShape, x.dtype);
+      var outId = backend.dataIdMap.get(out.dataId).id;
+      var xShapeBytes = new Uint8Array(new Int32Array(x.shape).buffer);
+      var prePaddingsFlat = paddings.map(function (padTuple) { return padTuple[0]; });
+      var postPaddingsFlat = paddings.map(function (padTuple) { return padTuple[1]; });
+      var prePaddingsBytes = new Uint8Array(new Int32Array(prePaddingsFlat).buffer);
+      var postPaddingsBytes = new Uint8Array(new Int32Array(postPaddingsFlat).buffer);
+      wasmMirrorPad(xId, xShapeBytes, x.shape.length, CppDType[x.dtype], prePaddingsBytes, postPaddingsBytes, MirrorPaddingMode[mode], outId);
+      return out;
+  }
+  var mirrorPadConfig = {
+      kernelName: tfjsCore.MirrorPad,
+      backendName: 'wasm',
+      kernelFunc: mirrorPad,
+      setupFunc: setup$o
+  };
 
   /**
    * @license
@@ -2204,8 +2734,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$b = true;
-  var multiplyConfig = createBinaryKernelConfig(tfjsCore.Multiply, supportsFullBroadcast$b);
+  var supportsFullBroadcast$a = true;
+  var multiplyConfig = createBinaryKernelConfig(tfjsCore.Multiply, supportsFullBroadcast$a);
 
   /**
    * @license
@@ -2223,7 +2753,7 @@
    * limitations under the License.
    * =============================================================================
    */
-  var negateConfig = createUnaryKernelConfig(tfjsCore.Negate);
+  var negConfig = createUnaryKernelConfig(tfjsCore.Neg);
 
   /**
    * @license
@@ -2272,9 +2802,9 @@
    * limitations under the License.
    * =============================================================================
    */
-  var wasmFunc$2;
-  function setup$l(backend) {
-      wasmFunc$2 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV3, 'number', // Result*
+  var wasmFunc$3;
+  function setup$p(backend) {
+      wasmFunc$3 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV3, 'number', // Result*
       [
           'number',
           'number',
@@ -2289,7 +2819,7 @@
       var boxes = inputs.boxes, scores = inputs.scores;
       var boxesId = backend.dataIdMap.get(boxes.dataId).id;
       var scoresId = backend.dataIdMap.get(scores.dataId).id;
-      var resOffset = wasmFunc$2(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold);
+      var resOffset = wasmFunc$3(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold);
       var _a = parseResultStruct(backend, resOffset), pSelectedIndices = _a.pSelectedIndices, selectedSize = _a.selectedSize, pSelectedScores = _a.pSelectedScores, pValidOutputs = _a.pValidOutputs;
       // Since we are not using scores for V3, we have to delete it from the heap.
       backend.wasm._free(pSelectedScores);
@@ -2300,7 +2830,7 @@
   var nonMaxSuppressionV3Config = {
       kernelName: tfjsCore.NonMaxSuppressionV3,
       backendName: 'wasm',
-      setupFunc: setup$l,
+      setupFunc: setup$p,
       kernelFunc: kernelFunc,
   };
 
@@ -2320,9 +2850,9 @@
    * limitations under the License.
    * =============================================================================
    */
-  var wasmFunc$3;
-  function setup$m(backend) {
-      wasmFunc$3 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV4, 'number', // Result*
+  var wasmFunc$4;
+  function setup$q(backend) {
+      wasmFunc$4 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV4, 'number', // Result*
       [
           'number',
           'number',
@@ -2338,7 +2868,7 @@
       var boxes = inputs.boxes, scores = inputs.scores;
       var boxesId = backend.dataIdMap.get(boxes.dataId).id;
       var scoresId = backend.dataIdMap.get(scores.dataId).id;
-      var resOffset = wasmFunc$3(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold, padToMaxOutputSize);
+      var resOffset = wasmFunc$4(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold, padToMaxOutputSize);
       var _a = parseResultStruct(backend, resOffset), pSelectedIndices = _a.pSelectedIndices, selectedSize = _a.selectedSize, pSelectedScores = _a.pSelectedScores, pValidOutputs = _a.pValidOutputs;
       // Since we are not using scores for V4, we have to delete it from the heap.
       backend.wasm._free(pSelectedScores);
@@ -2349,7 +2879,7 @@
   var nonMaxSuppressionV4Config = {
       kernelName: tfjsCore.NonMaxSuppressionV4,
       backendName: 'wasm',
-      setupFunc: setup$m,
+      setupFunc: setup$q,
       kernelFunc: nonMaxSuppressionV4,
   };
 
@@ -2369,9 +2899,9 @@
    * limitations under the License.
    * =============================================================================
    */
-  var wasmFunc$4;
-  function setup$n(backend) {
-      wasmFunc$4 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV5, 'number', // Result*
+  var wasmFunc$5;
+  function setup$r(backend) {
+      wasmFunc$5 = backend.wasm.cwrap(tfjsCore.NonMaxSuppressionV5, 'number', // Result*
       [
           'number',
           'number',
@@ -2387,7 +2917,7 @@
       var boxes = inputs.boxes, scores = inputs.scores;
       var boxesId = backend.dataIdMap.get(boxes.dataId).id;
       var scoresId = backend.dataIdMap.get(scores.dataId).id;
-      var resOffset = wasmFunc$4(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold, softNmsSigma);
+      var resOffset = wasmFunc$5(boxesId, scoresId, maxOutputSize, iouThreshold, scoreThreshold, softNmsSigma);
       var _a = parseResultStruct(backend, resOffset), pSelectedIndices = _a.pSelectedIndices, selectedSize = _a.selectedSize, pSelectedScores = _a.pSelectedScores, pValidOutputs = _a.pValidOutputs;
       // Since we are not using validOutputs for V5, we have to delete it from the
       // heap.
@@ -2399,7 +2929,7 @@
   var nonMaxSuppressionV5Config = {
       kernelName: tfjsCore.NonMaxSuppressionV5,
       backendName: 'wasm',
-      setupFunc: setup$n,
+      setupFunc: setup$r,
       kernelFunc: kernelFunc$1,
   };
 
@@ -2419,8 +2949,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$c = false;
-  var notEqualConfig = createBinaryKernelConfig(tfjsCore.NotEqual, supportsFullBroadcast$c, 'bool');
+  var supportsFullBroadcast$b = false;
+  var notEqualConfig = createBinaryKernelConfig(tfjsCore.NotEqual, supportsFullBroadcast$b, 'bool');
 
   /**
    * @license
@@ -2439,7 +2969,7 @@
    * =============================================================================
    */
   var wasmOneHot;
-  function setup$o(backend) {
+  function setup$s(backend) {
       wasmOneHot = backend.wasm.cwrap(tfjsCore.OneHot, null /* void */, [
           'number',
           'number',
@@ -2462,7 +2992,7 @@
   var oneHotConfig = {
       kernelName: tfjsCore.OneHot,
       backendName: 'wasm',
-      setupFunc: setup$o,
+      setupFunc: setup$s,
       kernelFunc: oneHot,
   };
 
@@ -2497,6 +3027,50 @@
 
   /**
    * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  function pack(args) {
+      var inputs = args.inputs, backend = args.backend, attrs = args.attrs;
+      var axis = attrs.axis;
+      if (inputs.length === 1) {
+          return expandDims({ inputs: { input: inputs[0] }, backend: backend, attrs: { dim: axis } });
+      }
+      var shape = inputs[0].shape;
+      var dtype = inputs[0].dtype;
+      inputs.forEach(function (t) {
+          tfjsCore.util.assertShapesMatch(shape, t.shape, 'All tensors passed to stack must have matching shapes');
+          tfjsCore.util.assert(dtype === t.dtype, function () { return 'All tensors passed to stack must have matching dtypes'; });
+      });
+      var intermediateTensorInfos = [];
+      var expandedTensors = inputs.map(function (t) {
+          var expandedT = expandDims({ inputs: { input: t }, backend: backend, attrs: { dim: axis } });
+          intermediateTensorInfos.push(expandedT);
+          return expandedT;
+      });
+      var result = concat({ inputs: expandedTensors, backend: backend, attrs: { axis: axis } });
+      intermediateTensorInfos.forEach(function (t) { return backend.disposeData(t.dataId); });
+      return result;
+  }
+  var packConfig = {
+      kernelName: tfjsCore.Pack,
+      backendName: 'wasm',
+      kernelFunc: pack
+  };
+
+  /**
+   * @license
    * Copyright 2019 Google LLC. All Rights Reserved.
    * Licensed under the Apache License, Version 2.0 (the "License");
    * you may not use this file except in compliance with the License.
@@ -2512,7 +3086,7 @@
    * =============================================================================
    */
   var wasmPadV2;
-  function setup$p(backend) {
+  function setup$t(backend) {
       wasmPadV2 = backend.wasm.cwrap(tfjsCore.PadV2, null /* void */, [
           'number',
           'array',
@@ -2542,7 +3116,7 @@
       kernelName: tfjsCore.PadV2,
       backendName: 'wasm',
       kernelFunc: pad,
-      setupFunc: setup$p
+      setupFunc: setup$t
   };
 
   /**
@@ -2561,8 +3135,8 @@
    * limitations under the License.
    * =============================================================================
    */
-  var supportsFullBroadcast$d = false;
-  var powConfig = createBinaryKernelConfig(tfjsCore.Pow, supportsFullBroadcast$d);
+  var supportsFullBroadcast$c = false;
+  var powConfig = createBinaryKernelConfig(tfjsCore.Pow, supportsFullBroadcast$c);
 
   /**
    * @license
@@ -2581,7 +3155,7 @@
    * =============================================================================
    */
   var wasmPrelu;
-  function setup$q(backend) {
+  function setup$u(backend) {
       wasmPrelu = backend.wasm.cwrap(tfjsCore.Prelu, null /* void */, [
           'number',
           'number',
@@ -2601,9 +3175,129 @@
   var preluConfig = {
       kernelName: tfjsCore.Prelu,
       backendName: 'wasm',
-      setupFunc: setup$q,
+      setupFunc: setup$u,
       kernelFunc: prelu
   };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmProd;
+  function setup$v(backend) {
+      wasmProd = backend.wasm.cwrap(tfjsCore.Prod, null /*void*/, [
+          'number',
+          'number',
+          'number',
+          'number'
+      ]);
+  }
+  function prod(args) {
+      var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
+      var axis = attrs.axis, keepDims = attrs.keepDims;
+      var x = inputs.x;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var inputId = xId;
+      var input = x;
+      var _a = permuteAxesAndTranspose(x, axis, backend), transposed = _a.transposed, axes = _a.axes, originalAxes = _a.originalAxes, inputWasTransposed = _a.inputWasTransposed;
+      var reductionAxes = axes;
+      if (inputWasTransposed) {
+          var transposedId = backend.dataIdMap.get(transposed.dataId).id;
+          if (transposedId !== xId) {
+              // transpose was not a no-op. We will need to dispose of this
+              // once we are done.
+              input = transposed;
+              inputId = transposedId;
+              reductionAxes = tfjsCore.backend_util.getInnerMostAxes(reductionAxes.length, input.shape.length);
+          }
+      }
+      tfjsCore.backend_util.assertAxesAreInnerMostDims('prod', reductionAxes, input.shape.length);
+      var _b = tfjsCore.backend_util.computeOutAndReduceShapes(input.shape, reductionAxes), outShape = _b[0], reduceShape = _b[1];
+      var reduceSize = tfjsCore.util.sizeFromShape(reduceShape);
+      var out = backend.makeOutput(outShape, input.dtype);
+      if (tfjsCore.util.sizeFromShape(input.shape) !== 0) {
+          var outId = backend.dataIdMap.get(out.dataId).id;
+          wasmProd(inputId, reduceSize, CppDType[out.dtype], outId);
+      }
+      if (inputWasTransposed) {
+          // dispose of the transposed tensor.
+          backend.disposeData(transposed.dataId);
+      }
+      if (keepDims) {
+          // reshape
+          var newShape = tfjsCore.backend_util.expandShapeToKeepDim(out.shape, originalAxes);
+          out.shape = newShape;
+      }
+      return out;
+  }
+  var prodConfig = {
+      kernelName: tfjsCore.Prod,
+      backendName: 'wasm',
+      setupFunc: setup$v,
+      kernelFunc: prod
+  };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var range = function (args) {
+      var backend = args.backend, attrs = args.attrs;
+      var start = attrs.start, stop = attrs.stop, step = attrs.step, dtype = attrs.dtype;
+      var values = rangeImpl(start, stop, step, dtype);
+      var out = backend.makeOutput([values.length], dtype);
+      var outVals = backend.typedArrayFromHeap(out);
+      outVals.set(values);
+      return out;
+  };
+  var rangeConfig = {
+      kernelName: tfjsCore.Range,
+      backendName: 'wasm',
+      kernelFunc: range
+  };
+
+  /**
+   * @license
+   * Copyright 2019 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var supportsFullBroadcast$d = true;
+  var realDivConfig = createBinaryKernelConfig(tfjsCore.RealDiv, supportsFullBroadcast$d);
 
   /**
    * @license
@@ -2658,8 +3352,9 @@
    * =============================================================================
    */
   var wasmResizeBilinear;
-  function setup$r(backend) {
+  function setup$w(backend) {
       wasmResizeBilinear = backend.wasm.cwrap(tfjsCore.ResizeBilinear, null /*void*/, [
+          'number',
           'number',
           'number',
           'number',
@@ -2674,7 +3369,7 @@
   function resizeBilinear(args) {
       var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
       var images = inputs.images;
-      var alignCorners = attrs.alignCorners, size = attrs.size;
+      var alignCorners = attrs.alignCorners, halfPixelCenters = attrs.halfPixelCenters, size = attrs.size;
       var newHeight = size[0], newWidth = size[1];
       var _a = images.shape, batch = _a[0], oldHeight = _a[1], oldWidth = _a[2], numChannels = _a[3];
       var outShape = [batch, newHeight, newWidth, numChannels];
@@ -2691,7 +3386,7 @@
           return out;
       }
       var outId = backend.dataIdMap.get(out.dataId).id;
-      wasmResizeBilinear(xId, batch, oldHeight, oldWidth, numChannels, newHeight, newWidth, alignCorners ? 1 : 0, outId);
+      wasmResizeBilinear(xId, batch, oldHeight, oldWidth, numChannels, newHeight, newWidth, alignCorners ? 1 : 0, halfPixelCenters ? 1 : 0, outId);
       if (castedData != null) {
           backend.disposeData(castedData.dataId);
       }
@@ -2700,7 +3395,7 @@
   var resizeBilinearConfig = {
       kernelName: tfjsCore.ResizeBilinear,
       backendName: 'wasm',
-      setupFunc: setup$r,
+      setupFunc: setup$w,
       kernelFunc: resizeBilinear
   };
 
@@ -2721,7 +3416,7 @@
    * =============================================================================
    */
   var wasmReverse;
-  function setup$s(backend) {
+  function setup$x(backend) {
       wasmReverse = backend.wasm.cwrap(tfjsCore.Reverse, null, [
           'number',
           'array',
@@ -2745,13 +3440,15 @@
       var axesBytes = new Uint8Array(new Int32Array(axes).buffer);
       var outShapeBytes = new Uint8Array(new Int32Array(x.shape).buffer);
       wasmReverse(xId, axesBytes, axes.length, outShapeBytes, x.shape.length, outId);
-      return reshape({ inputs: { x: out }, attrs: { shape: x.shape }, backend: backend });
+      var reshaped = reshape({ inputs: { x: out }, attrs: { shape: x.shape }, backend: backend });
+      backend.disposeData(out.dataId);
+      return reshaped;
   }
   var reverseConfig = {
       kernelName: tfjsCore.Reverse,
       backendName: 'wasm',
       kernelFunc: reverse,
-      setupFunc: setup$s
+      setupFunc: setup$x
   };
 
   /**
@@ -2771,7 +3468,7 @@
    * =============================================================================
    */
   var wasmRotate;
-  function setup$t(backend) {
+  function setup$y(backend) {
       wasmRotate = backend.wasm.cwrap(tfjsCore.RotateWithOffset, null /* void */, [
           'number',
           'number',
@@ -2807,8 +3504,26 @@
       kernelName: tfjsCore.RotateWithOffset,
       backendName: 'wasm',
       kernelFunc: rotateWithOffset,
-      setupFunc: setup$t
+      setupFunc: setup$y
   };
+
+  /**
+   * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var roundConfig = createUnaryKernelConfig(tfjsCore.Round);
 
   /**
    * @license
@@ -2845,7 +3560,7 @@
    * =============================================================================
    */
   var wasmScatterNd;
-  function setup$u(backend) {
+  function setup$z(backend) {
       wasmScatterNd = backend.wasm.cwrap(tfjsCore.ScatterNd, null /*void*/, [
           'number',
           'number',
@@ -2879,7 +3594,7 @@
   var scatterNdConfig = {
       kernelName: tfjsCore.ScatterNd,
       backendName: 'wasm',
-      setupFunc: setup$u,
+      setupFunc: setup$z,
       kernelFunc: scatterNd
   };
 
@@ -2900,8 +3615,8 @@
    * =============================================================================
    */
   var wasmSelect;
-  function setup$v(backend) {
-      wasmSelect = backend.wasm.cwrap(tfjsCore.SelectV2, null, [
+  function setup$A(backend) {
+      wasmSelect = backend.wasm.cwrap('SelectV2', null, [
           'number',
           'number',
           'number',
@@ -2925,11 +3640,11 @@
       wasmSelect(conditionId, tId, eId, offset, outId);
       return out;
   }
-  var selectV2Config = {
-      kernelName: tfjsCore.SelectV2,
+  var selectConfig = {
+      kernelName: tfjsCore.Select,
       backendName: 'wasm',
       kernelFunc: select,
-      setupFunc: setup$v
+      setupFunc: setup$A
   };
 
   /**
@@ -2948,9 +3663,9 @@
    * limitations under the License.
    * =============================================================================
    */
-  var wasmFunc$5;
-  function setup$w(backend) {
-      wasmFunc$5 = backend.wasm.cwrap(tfjsCore.Sigmoid, null /* void */, ['number', 'number']);
+  var wasmFunc$6;
+  function setup$B(backend) {
+      wasmFunc$6 = backend.wasm.cwrap(tfjsCore.Sigmoid, null /* void */, ['number', 'number']);
   }
   function sigmoid(args) {
       var backend = args.backend, x = args.inputs.x;
@@ -2961,13 +3676,13 @@
       if (tfjsCore.util.sizeFromShape(out.shape) === 0) {
           return out;
       }
-      wasmFunc$5(xId, outId);
+      wasmFunc$6(xId, outId);
       return out;
   }
   var sigmoidConfig = {
       kernelName: 'Sigmoid',
       backendName: 'wasm',
-      setupFunc: setup$w,
+      setupFunc: setup$B,
       kernelFunc: sigmoid
   };
 
@@ -3009,15 +3724,30 @@
       var x = args.inputs.x, _a = args.attrs, begin = _a.begin, size = _a.size, backend = args.backend;
       var _b = tfjsCore.slice_util.parseSliceParams(x, begin, size), begin_ = _b[0], size_ = _b[1];
       var isContinous = tfjsCore.slice_util.isSliceContinous(x.shape, begin_, size_);
-      var xVals = backend.typedArrayFromHeap(x);
+      var xVals = backend.readSync(x.dataId);
       var out = backend.makeOutput(size_, x.dtype);
-      var outVals = backend.typedArrayFromHeap(out);
       var xStrides = tfjsCore.util.computeStrides(x.shape);
+      var outData = backend.dataIdMap.get(out.dataId);
       if (isContinous) {
           var flatOffset = tfjsCore.slice_util.computeFlatOffset(begin_, xStrides);
-          outVals.set(xVals.subarray(flatOffset, flatOffset + tfjsCore.util.sizeFromShape(size_)));
+          if (x.dtype === 'string') {
+              outData.stringBytes =
+                  xVals
+                      .slice(flatOffset, flatOffset + tfjsCore.util.sizeFromShape(size_));
+          }
+          else {
+              var outVals_1 = backend.typedArrayFromHeap(out);
+              outVals_1.set(xVals
+                  .subarray(flatOffset, flatOffset + tfjsCore.util.sizeFromShape(size_)));
+          }
           return out;
       }
+      if (x.dtype === 'string') {
+          var res = sliceImpl(xVals, begin_, size_, x.shape, x.dtype);
+          outData.stringBytes = res;
+          return out;
+      }
+      var outVals = backend.typedArrayFromHeap(out);
       var rank = x.shape.length;
       if (rank === 2) {
           slice2d(xVals, xStrides[0], outVals, begin_, size_);
@@ -3029,7 +3759,8 @@
           slice4d(xVals, xStrides[0], xStrides[1], xStrides[2], outVals, begin_, size_);
       }
       else {
-          genericSliceSlow(xVals, x, outVals, begin_, size_);
+          var res = sliceImpl(xVals, begin_, size_, x.shape, x.dtype);
+          outVals.set(res);
       }
       return out;
   }
@@ -3078,15 +3809,6 @@
           }
       }
   }
-  function genericSliceSlow(xVals, xInfo, outVals, begin, size) {
-      var outBuf = tfjsCore.buffer(size, xInfo.dtype, outVals);
-      var xBuf = tfjsCore.buffer(xInfo.shape, xInfo.dtype, xVals);
-      for (var i = 0; i < outBuf.size; ++i) {
-          var loc = outBuf.indexToLoc(i);
-          var xLoc = loc.map(function (idx, j) { return idx + begin[j]; });
-          outVals[i] = xBuf.get.apply(xBuf, xLoc);
-      }
-  }
   var sliceConfig = {
       kernelName: tfjsCore.Slice,
       backendName: 'wasm',
@@ -3109,9 +3831,9 @@
    * limitations under the License.
    * =============================================================================
    */
-  var wasmFunc$6;
-  function setup$x(backend) {
-      wasmFunc$6 = backend.wasm.cwrap(tfjsCore.Softmax, null /* void */, [
+  var wasmFunc$7;
+  function setup$C(backend) {
+      wasmFunc$7 = backend.wasm.cwrap(tfjsCore.Softmax, null /* void */, [
           'number',
           'number',
           'number',
@@ -3129,13 +3851,13 @@
       if (tfjsCore.util.sizeFromShape(out.shape) === 0) {
           return out;
       }
-      wasmFunc$6(xId, outId, channels, batch);
+      wasmFunc$7(xId, outId, channels, batch);
       return out;
   }
   var softmaxConfig = {
       kernelName: tfjsCore.Softmax,
       backendName: 'wasm',
-      setupFunc: setup$x,
+      setupFunc: setup$C,
       kernelFunc: softmax
   };
 
@@ -3155,12 +3877,12 @@
    * limitations under the License.
    * =============================================================================
    */
-  function split(args) {
+  function splitV(args) {
       var inputs = args.inputs, attrs = args.attrs, backend = args.backend;
       var x = inputs.x;
       var numOrSizeSplits = attrs.numOrSizeSplits, axis = attrs.axis;
       var $axis = tfjsCore.util.parseAxisParam(axis, x.shape)[0];
-      var splitSizes = tfjsCore.backend_util.prepareSplitSize(x, numOrSizeSplits, axis);
+      var splitSizes = tfjsCore.backend_util.prepareSplitSize(x, numOrSizeSplits, $axis);
       var begin = new Array(x.shape.length).fill(0);
       var size = x.shape.slice();
       return splitSizes.map(function (s) {
@@ -3174,7 +3896,7 @@
   var splitVConfig = {
       kernelName: tfjsCore.SplitV,
       backendName: 'wasm',
-      kernelFunc: split
+      kernelFunc: splitV
   };
 
   /**
@@ -3248,8 +3970,49 @@
    * limitations under the License.
    * =============================================================================
    */
+  var wasmStep;
+  function setup$D(backend) {
+      wasmStep = backend.wasm.cwrap(tfjsCore.Step, null /*void*/, [
+          'number',
+          'number',
+          'number',
+      ]);
+  }
+  function step(args) {
+      var backend = args.backend, inputs = args.inputs, attrs = args.attrs;
+      var alpha = attrs.alpha;
+      var x = inputs.x;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var out = backend.makeOutput(x.shape, x.dtype);
+      var outId = backend.dataIdMap.get(out.dataId).id;
+      wasmStep(xId, alpha, outId);
+      return out;
+  }
+  var stepConfig = {
+      kernelName: tfjsCore.Step,
+      backendName: 'wasm',
+      setupFunc: setup$D,
+      kernelFunc: step
+  };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
   var wasmStridedSlice;
-  function setup$y(backend) {
+  function setup$E(backend) {
       wasmStridedSlice = backend.wasm.cwrap(tfjsCore.StridedSlice, null /*void*/, [
           'number',
           'array',
@@ -3307,8 +4070,11 @@
       var outShape = size.filter(function (_, axis) { return shrinkAxes.indexOf(axis) === -1; });
       var nonStrided = strides.every(function (v) { return v === 1; });
       if (nonStrided) {
-          var xSliced = slice({ inputs: { x: x }, attrs: { begin: begin, size: size }, backend: backend });
-          return reshape({ inputs: { x: xSliced }, attrs: { shape: outShape }, backend: backend });
+          var xSliced = slice({ inputs: { x: xReshaped }, attrs: { begin: begin, size: size }, backend: backend });
+          backend.disposeData(xReshaped.dataId);
+          var reshaped_1 = reshape({ inputs: { x: xSliced }, attrs: { shape: outShape }, backend: backend });
+          backend.disposeData(xSliced.dataId);
+          return reshaped_1;
       }
       var out = backend.makeOutput(outShape, 'float32');
       if (!outShape.some(function (axis) { return axis === 0; })) {
@@ -3322,12 +4088,15 @@
           var outId = backend.dataIdMap.get(out.dataId).id;
           wasmStridedSlice(xId, xStridesBytes, xReshaped.shape.length, beginBytes, endBytes, stridesBytes, outputShapeBytes, outStridesBytes, outShape.length, outId);
       }
-      return reshape({ inputs: { x: out }, attrs: { shape: outShape }, backend: backend });
+      backend.disposeData(xReshaped.dataId);
+      var reshaped = reshape({ inputs: { x: out }, attrs: { shape: outShape }, backend: backend });
+      backend.disposeData(out.dataId);
+      return reshaped;
   }
   var stridedSliceConfig = {
       kernelName: tfjsCore.StridedSlice,
       backendName: 'wasm',
-      setupFunc: setup$y,
+      setupFunc: setup$E,
       kernelFunc: stridedSlice
   };
 
@@ -3367,7 +4136,7 @@
    * =============================================================================
    */
   var wasmSum;
-  function setup$z(backend) {
+  function setup$F(backend) {
       wasmSum = backend.wasm.cwrap(tfjsCore.Sum, null /*void*/, ['number, number, number']);
   }
   function sum(args) {
@@ -3411,9 +4180,27 @@
   var sumConfig = {
       kernelName: tfjsCore.Sum,
       backendName: 'wasm',
-      setupFunc: setup$z,
+      setupFunc: setup$F,
       kernelFunc: sum
   };
+
+  /**
+   * @license
+   * Copyright 2021 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var tanConfig = createUnaryKernelConfig(tfjsCore.Tan);
 
   /**
    * @license
@@ -3450,7 +4237,7 @@
    * =============================================================================
    */
   var wasmTile;
-  function setup$A(backend) {
+  function setup$G(backend) {
       wasmTile = backend.wasm.cwrap(tfjsCore.Tile, null /* void */, [
           'number',
           'array',
@@ -3479,8 +4266,59 @@
   var tileConfig = {
       kernelName: tfjsCore.Tile,
       backendName: 'wasm',
-      setupFunc: setup$A,
+      setupFunc: setup$G,
       kernelFunc: tile
+  };
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var wasmTopK;
+  function setup$H(backend) {
+      wasmTopK = backend.wasm.cwrap(tfjsCore.TopK, null /* void */, [
+          'number',
+          'array',
+          'number',
+          'number',
+          'number',
+          'bool',
+          'number',
+          'number',
+      ]);
+  }
+  var topk = function (_a) {
+      var inputs = _a.inputs, backend = _a.backend, attrs = _a.attrs;
+      var x = inputs.x;
+      var k = attrs.k, sorted = attrs.sorted;
+      var xId = backend.dataIdMap.get(x.dataId).id;
+      var xShapeBytes = new Uint8Array(new Int32Array(x.shape).buffer);
+      var outputShape = x.shape.slice();
+      outputShape[outputShape.length - 1] = k;
+      var outValues = backend.makeOutput(outputShape, x.dtype);
+      var outValuesId = backend.dataIdMap.get(outValues.dataId).id;
+      var outIndices = backend.makeOutput(outputShape, 'int32');
+      var outIndicesId = backend.dataIdMap.get(outIndices.dataId).id;
+      wasmTopK(xId, xShapeBytes, x.shape.length, CppDType[x.dtype], k, sorted, outValuesId, outIndicesId);
+      return [outValues, outIndices];
+  };
+  var topKConfig = {
+      kernelName: tfjsCore.TopK,
+      backendName: 'wasm',
+      setupFunc: setup$H,
+      kernelFunc: topk,
   };
 
   /**
@@ -3503,6 +4341,9 @@
       var inputs = args.inputs, backend = args.backend, attrs = args.attrs;
       var value = inputs.value;
       var axis = attrs.axis;
+      if (axis < 0) {
+          axis += value.shape.length;
+      }
       var numOutputs = value.shape[axis];
       var rank = value.shape.length;
       var outShape = new Array(rank - 1);
@@ -3581,10 +4422,13 @@
       absConfig,
       addConfig,
       addNConfig,
+      allConfig,
+      anyConfig,
       argMaxConfig,
       avgPoolConfig,
       batchMatMulConfig,
       castConfig,
+      ceilConfig,
       clipByValueConfig,
       concatConfig,
       conv2DConfig,
@@ -3594,11 +4438,12 @@
       cumsumConfig,
       depthToSpaceConfig,
       depthwiseConv2dNativeConfig,
-      divConfig,
       equalConfig,
       expConfig,
+      expandDimsConfig,
       fillConfig,
       flipLeftRightConfig,
+      floorConfig,
       floorDivConfig,
       fusedMatMulConfig,
       fusedBatchNormConfig,
@@ -3609,6 +4454,7 @@
       greaterConfig,
       greaterEqualConfig,
       identityConfig,
+      leakyReluConfig,
       lessConfig,
       lessEqualConfig,
       logConfig,
@@ -3616,19 +4462,25 @@
       maxConfig,
       maximumConfig,
       maxPoolConfig,
+      meanConfig,
       minConfig,
       minimumConfig,
+      mirrorPadConfig,
       multiplyConfig,
-      negateConfig,
+      negConfig,
       nonMaxSuppressionV3Config,
       nonMaxSuppressionV4Config,
       nonMaxSuppressionV5Config,
       notEqualConfig,
       oneHotConfig,
       onesLikeConfig,
+      packConfig,
       padV2Config,
       powConfig,
       preluConfig,
+      prodConfig,
+      rangeConfig,
+      realDivConfig,
       reluConfig,
       relu6Config,
       reshapeConfig,
@@ -3636,8 +4488,9 @@
       reverseConfig,
       rotateWithOffsetConfig,
       rsqrtConfig,
+      roundConfig,
       scatterNdConfig,
-      selectV2Config,
+      selectConfig,
       sigmoidConfig,
       sinConfig,
       sliceConfig,
@@ -3646,11 +4499,14 @@
       sqrtConfig,
       squareConfig,
       squaredDifferenceConfig,
+      stepConfig,
       stridedSliceConfig,
       subConfig,
       sumConfig,
+      tanConfig,
       tanhConfig,
       tileConfig,
+      topKConfig,
       transposeConfig,
       unpackConfig,
       zerosLikeConfig
@@ -3790,29 +4646,31 @@
       });
   }); });
 
+  var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
+
   function createCommonjsModule(fn, module) {
   	return module = { exports: {} }, fn(module, module.exports), module.exports;
   }
 
   var tfjsBackendWasmThreadedSimd = createCommonjsModule(function (module, exports) {
-  var WasmBackendModuleThreadedSimd = (function() {
+  var WasmBackendModule = (function() {
     var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
     if (typeof __filename !== 'undefined') _scriptDir = _scriptDir || __filename;
     return (
-  function(WasmBackendModuleThreadedSimd) {
-    WasmBackendModuleThreadedSimd = WasmBackendModuleThreadedSimd || {};
+  function(WasmBackendModule) {
+    WasmBackendModule = WasmBackendModule || {};
 
-  function GROWABLE_HEAP_I8(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAP8}function GROWABLE_HEAP_U8(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPU8}function GROWABLE_HEAP_I32(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAP32}function GROWABLE_HEAP_U32(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPU32}function GROWABLE_HEAP_F64(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPF64}var Module=typeof WasmBackendModuleThreadedSimd!=="undefined"?WasmBackendModuleThreadedSimd:{};var moduleOverrides={};var key;for(key in Module){if(Module.hasOwnProperty(key)){moduleOverrides[key]=Module[key];}}var arguments_=[];var thisProgram="./this.program";var quit_=function(status,toThrow){throw toThrow};var ENVIRONMENT_IS_WEB=false;var ENVIRONMENT_IS_WORKER=false;var ENVIRONMENT_IS_NODE=false;var ENVIRONMENT_IS_SHELL=false;ENVIRONMENT_IS_WEB=typeof window==="object";ENVIRONMENT_IS_WORKER=typeof importScripts==="function";ENVIRONMENT_IS_NODE=typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string";ENVIRONMENT_IS_SHELL=!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_NODE&&!ENVIRONMENT_IS_WORKER;var ENVIRONMENT_IS_PTHREAD=Module["ENVIRONMENT_IS_PTHREAD"]||false;if(ENVIRONMENT_IS_PTHREAD){buffer=Module["buffer"];DYNAMIC_BASE=Module["DYNAMIC_BASE"];DYNAMICTOP_PTR=Module["DYNAMICTOP_PTR"];}var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readBinary;var nodeFS;var nodePath;if(ENVIRONMENT_IS_NODE){if(ENVIRONMENT_IS_WORKER){scriptDirectory=path.dirname(scriptDirectory)+"/";}else{scriptDirectory=__dirname+"/";}read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};if(process["argv"].length>1){thisProgram=process["argv"][1].replace(/\\/g,"/");}arguments_=process["argv"].slice(2);process["on"]("uncaughtException",function(ex){if(!(ex instanceof ExitStatus)){throw ex}});process["on"]("unhandledRejection",abort);quit_=function(status){process["exit"](status);};Module["inspect"]=function(){return "[Emscripten Module object]"};var nodeWorkerThreads;try{nodeWorkerThreads=worker_threads;}catch(e){console.error('The "worker_threads" module is not supported in this node.js build - perhaps a newer version is needed?');throw e}Worker=nodeWorkerThreads.Worker;}else if(ENVIRONMENT_IS_SHELL){if(typeof read!="undefined"){read_=function shell_read(f){return read(f)};}readBinary=function readBinary(f){var data;if(typeof readbuffer==="function"){return new Uint8Array(readbuffer(f))}data=read(f,"binary");assert(typeof data==="object");return data};if(typeof scriptArgs!="undefined"){arguments_=scriptArgs;}else if(typeof arguments!="undefined"){arguments_=arguments;}if(typeof quit==="function"){quit_=function(status){quit(status);};}if(typeof print!=="undefined"){if(typeof console==="undefined")console={};console.log=print;console.warn=console.error=typeof printErr!=="undefined"?printErr:print;}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href;}else if(document.currentScript){scriptDirectory=document.currentScript.src;}if(_scriptDir){scriptDirectory=_scriptDir;}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.lastIndexOf("/")+1);}else{scriptDirectory="";}if(ENVIRONMENT_IS_NODE){read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};}else{read_=function shell_read(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=function readBinary(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)};}}}if(ENVIRONMENT_IS_NODE){if(typeof performance==="undefined"){performance=perf_hooks.performance;}}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);for(key in moduleOverrides){if(moduleOverrides.hasOwnProperty(key)){Module[key]=moduleOverrides[key];}}moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime;if(Module["noExitRuntime"])noExitRuntime=Module["noExitRuntime"];if(typeof WebAssembly!=="object"){err("no native wasm support detected");}var wasmMemory;var wasmTable=new WebAssembly.Table({"initial":165,"maximum":165+0,"element":"anyfunc"});var wasmModule;var threadInfoStruct=0;var selfThreadId=0;var ABORT=false;function assert(condition,text){if(!condition){abort("Assertion failed: "+text);}}function getCFunc(ident){var func=Module["_"+ident];assert(func,"Cannot call unknown function "+ident+", make sure it is exported");return func}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":function(str){var ret=0;if(str!==null&&str!==undefined&&str!==0){var len=(str.length<<2)+1;ret=stackAlloc(len);stringToUTF8(str,ret,len);}return ret},"array":function(arr){var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string")return UTF8ToString(ret);if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i]);}else{cArgs[i]=args[i];}}}var ret=func.apply(null,cArgs);ret=convertReturnValue(ret);if(stack!==0)stackRestore(stack);return ret}function cwrap(ident,returnType,argTypes,opts){argTypes=argTypes||[];var numericArgs=argTypes.every(function(type){return type==="number"});var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments)}}function UTF8ArrayToString(heap,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var str="";while(!(idx>=endIdx)){var u0=heap[idx++];if(!u0)return str;if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heap[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heap[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2;}else{u0=(u0&7)<<18|u1<<12|u2<<6|heap[idx++]&63;}if(u0<65536){str+=String.fromCharCode(u0);}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023);}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(GROWABLE_HEAP_U8(),ptr,maxBytesToRead):""}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023;}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u;}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63;}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}}heap[outIdx]=0;return outIdx-startIdx}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,GROWABLE_HEAP_U8(),outPtr,maxBytesToWrite)}function lengthBytesUTF8(str){var len=0;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343)u=65536+((u&1023)<<10)|str.charCodeAt(++i)&1023;if(u<=127)++len;else if(u<=2047)len+=2;else if(u<=65535)len+=3;else len+=4;}return len}function writeArrayToMemory(array,buffer){GROWABLE_HEAP_I8().set(array,buffer);}var WASM_PAGE_SIZE=65536;function alignUp(x,multiple){if(x%multiple>0){x+=multiple-x%multiple;}return x}var buffer,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64;function updateGlobalBufferAndViews(buf){buffer=buf;Module["HEAP8"]=HEAP8=new Int8Array(buf);Module["HEAP16"]=HEAP16=new Int16Array(buf);Module["HEAP32"]=HEAP32=new Int32Array(buf);Module["HEAPU8"]=HEAPU8=new Uint8Array(buf);Module["HEAPU16"]=HEAPU16=new Uint16Array(buf);Module["HEAPU32"]=HEAPU32=new Uint32Array(buf);Module["HEAPF32"]=HEAPF32=new Float32Array(buf);Module["HEAPF64"]=HEAPF64=new Float64Array(buf);}var DYNAMIC_BASE=5256384,DYNAMICTOP_PTR=12576;var INITIAL_INITIAL_MEMORY=Module["INITIAL_MEMORY"]||16777216;if(ENVIRONMENT_IS_PTHREAD){wasmMemory=Module["wasmMemory"];buffer=Module["buffer"];}else{if(Module["wasmMemory"]){wasmMemory=Module["wasmMemory"];}else{wasmMemory=new WebAssembly.Memory({"initial":INITIAL_INITIAL_MEMORY/WASM_PAGE_SIZE,"maximum":2147483648/WASM_PAGE_SIZE,"shared":true});if(!(wasmMemory.buffer instanceof SharedArrayBuffer)){err("requested a shared WebAssembly.Memory but the returned buffer is not a SharedArrayBuffer, indicating that while the browser has SharedArrayBuffer it does not have WebAssembly threads support - you may need to set a flag");if(ENVIRONMENT_IS_NODE){console.log("(on node you may need: --experimental-wasm-threads --experimental-wasm-bulk-memory and also use a recent version)");}throw Error("bad memory")}}}if(wasmMemory){buffer=wasmMemory.buffer;}INITIAL_INITIAL_MEMORY=buffer.byteLength;updateGlobalBufferAndViews(buffer);if(!ENVIRONMENT_IS_PTHREAD){GROWABLE_HEAP_I32()[DYNAMICTOP_PTR>>2]=DYNAMIC_BASE;}function callRuntimeCallbacks(callbacks){while(callbacks.length>0){var callback=callbacks.shift();if(typeof callback=="function"){callback(Module);continue}var func=callback.func;if(typeof func==="number"){if(callback.arg===undefined){Module["dynCall_v"](func);}else{Module["dynCall_vi"](func,callback.arg);}}else{func(callback.arg===undefined?null:callback.arg);}}}var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];function preRun(){if(ENVIRONMENT_IS_PTHREAD)return;if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift());}}callRuntimeCallbacks(__ATPRERUN__);}function initRuntime(){callRuntimeCallbacks(__ATINIT__);}function preMain(){if(ENVIRONMENT_IS_PTHREAD)return;callRuntimeCallbacks(__ATMAIN__);}function postRun(){if(ENVIRONMENT_IS_PTHREAD)return;if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift());}}callRuntimeCallbacks(__ATPOSTRUN__);}function addOnPreRun(cb){__ATPRERUN__.unshift(cb);}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb);}var Math_ceil=Math.ceil;var Math_floor=Math.floor;var runDependencies=0;var runDependencyWatcher=null;var dependenciesFulfilled=null;function addRunDependency(id){assert(!ENVIRONMENT_IS_PTHREAD,"addRunDependency cannot be used in a pthread worker");runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}if(runDependencies==0){if(runDependencyWatcher!==null){clearInterval(runDependencyWatcher);runDependencyWatcher=null;}if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback();}}}Module["preloadedImages"]={};Module["preloadedAudios"]={};function abort(what){if(Module["onAbort"]){Module["onAbort"](what);}if(ENVIRONMENT_IS_PTHREAD)console.error("Pthread aborting at "+(new Error).stack);what+="";out(what);err(what);ABORT=true;what="abort("+what+"). Build with -s ASSERTIONS=1 for more info.";throw new WebAssembly.RuntimeError(what)}function hasPrefix(str,prefix){return String.prototype.startsWith?str.startsWith(prefix):str.indexOf(prefix)===0}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return hasPrefix(filename,dataURIPrefix)}var fileURIPrefix="file://";function isFileURI(filename){return hasPrefix(filename,fileURIPrefix)}var wasmBinaryFile="tfjs-backend-wasm-threaded-simd.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile);}function getBinary(){try{if(wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(wasmBinaryFile)}else{throw "both async and sync fetching of the wasm failed"}}catch(err){abort(err);}}function getBinaryPromise(){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)&&typeof fetch==="function"&&!isFileURI(wasmBinaryFile)){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw "failed to load wasm binary file at '"+wasmBinaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary()})}return new Promise(function(resolve,reject){resolve(getBinary());})}function createWasm(){var info={"a":asmLibraryArg};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmModule=module;if(!ENVIRONMENT_IS_PTHREAD){var numWorkersToLoad=PThread.unusedWorkers.length;PThread.unusedWorkers.forEach(function(w){PThread.loadWasmModuleToWorker(w,function(){if(!--numWorkersToLoad)removeRunDependency();});});}}if(!ENVIRONMENT_IS_PTHREAD){addRunDependency();}function receiveInstantiatedSource(output){receiveInstance(output["instance"],output["module"]);}function instantiateArrayBuffer(receiver){return getBinaryPromise().then(function(binary){return WebAssembly.instantiate(binary,info)}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason);})}function instantiateAsync(){if(!wasmBinary&&typeof WebAssembly.instantiateStreaming==="function"&&!isDataURI(wasmBinaryFile)&&!isFileURI(wasmBinaryFile)&&typeof fetch==="function"){fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,info);return result.then(receiveInstantiatedSource,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");instantiateArrayBuffer(receiveInstantiatedSource);})});}else{return instantiateArrayBuffer(receiveInstantiatedSource)}}if(Module["instantiateWasm"]){try{var exports=Module["instantiateWasm"](info,receiveInstance);return exports}catch(e){err("Module.instantiateWasm callback failed with error: "+e);return false}}instantiateAsync();return {}}var ASM_CONSTS={};function initPthreadsJS(){PThread.initRuntime();}if(!ENVIRONMENT_IS_PTHREAD)__ATINIT__.push({func:function(){___wasm_call_ctors();}});var __pthread_ptr=0;var __pthread_is_main_runtime_thread=0;var __pthread_is_main_browser_thread=0;function __register_pthread_ptr(pthreadPtr,isMainBrowserThread,isMainRuntimeThread){pthreadPtr=pthreadPtr|0;isMainBrowserThread=isMainBrowserThread|0;isMainRuntimeThread=isMainRuntimeThread|0;__pthread_ptr=pthreadPtr;__pthread_is_main_browser_thread=isMainBrowserThread;__pthread_is_main_runtime_thread=isMainRuntimeThread;}Module["__register_pthread_ptr"]=__register_pthread_ptr;var ERRNO_CODES={EPERM:63,ENOENT:44,ESRCH:71,EINTR:27,EIO:29,ENXIO:60,E2BIG:1,ENOEXEC:45,EBADF:8,ECHILD:12,EAGAIN:6,EWOULDBLOCK:6,ENOMEM:48,EACCES:2,EFAULT:21,ENOTBLK:105,EBUSY:10,EEXIST:20,EXDEV:75,ENODEV:43,ENOTDIR:54,EISDIR:31,EINVAL:28,ENFILE:41,EMFILE:33,ENOTTY:59,ETXTBSY:74,EFBIG:22,ENOSPC:51,ESPIPE:70,EROFS:69,EMLINK:34,EPIPE:64,EDOM:18,ERANGE:68,ENOMSG:49,EIDRM:24,ECHRNG:106,EL2NSYNC:156,EL3HLT:107,EL3RST:108,ELNRNG:109,EUNATCH:110,ENOCSI:111,EL2HLT:112,EDEADLK:16,ENOLCK:46,EBADE:113,EBADR:114,EXFULL:115,ENOANO:104,EBADRQC:103,EBADSLT:102,EDEADLOCK:16,EBFONT:101,ENOSTR:100,ENODATA:116,ETIME:117,ENOSR:118,ENONET:119,ENOPKG:120,EREMOTE:121,ENOLINK:47,EADV:122,ESRMNT:123,ECOMM:124,EPROTO:65,EMULTIHOP:36,EDOTDOT:125,EBADMSG:9,ENOTUNIQ:126,EBADFD:127,EREMCHG:128,ELIBACC:129,ELIBBAD:130,ELIBSCN:131,ELIBMAX:132,ELIBEXEC:133,ENOSYS:52,ENOTEMPTY:55,ENAMETOOLONG:37,ELOOP:32,EOPNOTSUPP:138,EPFNOSUPPORT:139,ECONNRESET:15,ENOBUFS:42,EAFNOSUPPORT:5,EPROTOTYPE:67,ENOTSOCK:57,ENOPROTOOPT:50,ESHUTDOWN:140,ECONNREFUSED:14,EADDRINUSE:3,ECONNABORTED:13,ENETUNREACH:40,ENETDOWN:38,ETIMEDOUT:73,EHOSTDOWN:142,EHOSTUNREACH:23,EINPROGRESS:26,EALREADY:7,EDESTADDRREQ:17,EMSGSIZE:35,EPROTONOSUPPORT:66,ESOCKTNOSUPPORT:137,EADDRNOTAVAIL:4,ENETRESET:39,EISCONN:30,ENOTCONN:53,ETOOMANYREFS:141,EUSERS:136,EDQUOT:19,ESTALE:72,ENOTSUP:138,ENOMEDIUM:148,EILSEQ:25,EOVERFLOW:61,ECANCELED:11,ENOTRECOVERABLE:56,EOWNERDEAD:62,ESTRPIPE:135};var __main_thread_futex_wait_address=13488;function _emscripten_futex_wake(addr,count){if(addr<=0||addr>GROWABLE_HEAP_I8().length||addr&3!=0||count<0)return -28;if(count==0)return 0;if(count>=2147483647)count=Infinity;var mainThreadWaitAddress=Atomics.load(GROWABLE_HEAP_I32(),__main_thread_futex_wait_address>>2);var mainThreadWoken=0;if(mainThreadWaitAddress==addr){var loadedAddr=Atomics.compareExchange(GROWABLE_HEAP_I32(),__main_thread_futex_wait_address>>2,mainThreadWaitAddress,0);if(loadedAddr==mainThreadWaitAddress){--count;mainThreadWoken=1;if(count<=0)return 1}}var ret=Atomics.notify(GROWABLE_HEAP_I32(),addr>>2,count);if(ret>=0)return ret+mainThreadWoken;throw "Atomics.notify returned an unexpected value "+ret}Module["_emscripten_futex_wake"]=_emscripten_futex_wake;function __kill_thread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! _kill_thread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in _kill_thread!";GROWABLE_HEAP_I32()[pthread_ptr+12>>2]=0;var pthread=PThread.pthreads[pthread_ptr];pthread.worker.terminate();PThread.freeThreadData(pthread);PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(pthread.worker),1);pthread.worker.pthread=undefined;}function __cancel_thread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! _cancel_thread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in _cancel_thread!";var pthread=PThread.pthreads[pthread_ptr];pthread.worker.postMessage({"cmd":"cancel"});}function __cleanup_thread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! _cleanup_thread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in _cleanup_thread!";GROWABLE_HEAP_I32()[pthread_ptr+12>>2]=0;var pthread=PThread.pthreads[pthread_ptr];if(pthread){var worker=pthread.worker;PThread.returnWorkerToPool(worker);}}var PThread={MAIN_THREAD_ID:1,mainThreadInfo:{schedPolicy:0,schedPrio:0},unusedWorkers:[],runningWorkers:[],initRuntime:function(){__register_pthread_ptr(PThread.mainThreadBlock,!ENVIRONMENT_IS_WORKER,1);_emscripten_register_main_browser_thread_id(PThread.mainThreadBlock);},initMainThreadBlock:function(){var pthreadPoolSize=8;for(var i=0;i<pthreadPoolSize;++i){PThread.allocateUnusedWorker();}PThread.mainThreadBlock=12736;for(var i=0;i<232/4;++i)GROWABLE_HEAP_U32()[PThread.mainThreadBlock/4+i]=0;GROWABLE_HEAP_I32()[PThread.mainThreadBlock+12>>2]=PThread.mainThreadBlock;var headPtr=PThread.mainThreadBlock+156;GROWABLE_HEAP_I32()[headPtr>>2]=headPtr;var tlsMemory=12976;for(var i=0;i<128;++i)GROWABLE_HEAP_U32()[tlsMemory/4+i]=0;Atomics.store(GROWABLE_HEAP_U32(),PThread.mainThreadBlock+104>>2,tlsMemory);Atomics.store(GROWABLE_HEAP_U32(),PThread.mainThreadBlock+40>>2,PThread.mainThreadBlock);Atomics.store(GROWABLE_HEAP_U32(),PThread.mainThreadBlock+44>>2,42);},initWorker:function(){},pthreads:{},exitHandlers:null,setThreadStatus:function(){},runExitHandlers:function(){if(PThread.exitHandlers!==null){while(PThread.exitHandlers.length>0){PThread.exitHandlers.pop()();}PThread.exitHandlers=null;}if(ENVIRONMENT_IS_PTHREAD&&threadInfoStruct)___pthread_tsd_run_dtors();},threadExit:function(exitCode){var tb=_pthread_self();if(tb){Atomics.store(GROWABLE_HEAP_U32(),tb+4>>2,exitCode);Atomics.store(GROWABLE_HEAP_U32(),tb+0>>2,1);Atomics.store(GROWABLE_HEAP_U32(),tb+60>>2,1);Atomics.store(GROWABLE_HEAP_U32(),tb+64>>2,0);PThread.runExitHandlers();_emscripten_futex_wake(tb+0,2147483647);__register_pthread_ptr(0,0,0);threadInfoStruct=0;if(ENVIRONMENT_IS_PTHREAD){postMessage({"cmd":"exit"});}}},threadCancel:function(){PThread.runExitHandlers();Atomics.store(GROWABLE_HEAP_U32(),threadInfoStruct+4>>2,-1);Atomics.store(GROWABLE_HEAP_U32(),threadInfoStruct+0>>2,1);_emscripten_futex_wake(threadInfoStruct+0,2147483647);threadInfoStruct=selfThreadId=0;__register_pthread_ptr(0,0,0);postMessage({"cmd":"cancelDone"});},terminateAllThreads:function(){for(var t in PThread.pthreads){var pthread=PThread.pthreads[t];if(pthread&&pthread.worker){PThread.returnWorkerToPool(pthread.worker);}}PThread.pthreads={};for(var i=0;i<PThread.unusedWorkers.length;++i){var worker=PThread.unusedWorkers[i];worker.terminate();}PThread.unusedWorkers=[];for(var i=0;i<PThread.runningWorkers.length;++i){var worker=PThread.runningWorkers[i];var pthread=worker.pthread;PThread.freeThreadData(pthread);worker.terminate();}PThread.runningWorkers=[];},freeThreadData:function(pthread){if(!pthread)return;if(pthread.threadInfoStruct){var tlsMemory=GROWABLE_HEAP_I32()[pthread.threadInfoStruct+104>>2];GROWABLE_HEAP_I32()[pthread.threadInfoStruct+104>>2]=0;_free(tlsMemory);_free(pthread.threadInfoStruct);}pthread.threadInfoStruct=0;if(pthread.allocatedOwnStack&&pthread.stackBase)_free(pthread.stackBase);pthread.stackBase=0;if(pthread.worker)pthread.worker.pthread=null;},returnWorkerToPool:function(worker){delete PThread.pthreads[worker.pthread.thread];PThread.unusedWorkers.push(worker);PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(worker),1);PThread.freeThreadData(worker.pthread);worker.pthread=undefined;},receiveObjectTransfer:function(data){},loadWasmModuleToWorker:function(worker,onFinishedLoading){worker.onmessage=function(e){var d=e["data"];var cmd=d["cmd"];if(worker.pthread)PThread.currentProxiedOperationCallerThread=worker.pthread.threadInfoStruct;if(d["targetThread"]&&d["targetThread"]!=_pthread_self()){var thread=PThread.pthreads[d.targetThread];if(thread){thread.worker.postMessage(e.data,d["transferList"]);}else{console.error('Internal error! Worker sent a message "'+cmd+'" to target pthread '+d["targetThread"]+", but that thread no longer exists!");}PThread.currentProxiedOperationCallerThread=undefined;return}if(cmd==="processQueuedMainThreadWork"){_emscripten_main_thread_process_queued_calls();}else if(cmd==="spawnThread"){__spawn_thread(e.data);}else if(cmd==="cleanupThread"){__cleanup_thread(d["thread"]);}else if(cmd==="killThread"){__kill_thread(d["thread"]);}else if(cmd==="cancelThread"){__cancel_thread(d["thread"]);}else if(cmd==="loaded"){worker.loaded=true;if(onFinishedLoading)onFinishedLoading(worker);if(worker.runPthread){worker.runPthread();delete worker.runPthread;}}else if(cmd==="print"){out("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="printErr"){err("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="alert"){alert("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="exit"){var detached=worker.pthread&&Atomics.load(GROWABLE_HEAP_U32(),worker.pthread.thread+68>>2);if(detached){PThread.returnWorkerToPool(worker);}}else if(cmd==="cancelDone"){PThread.returnWorkerToPool(worker);}else if(cmd==="objectTransfer"){PThread.receiveObjectTransfer(e.data);}else if(e.data.target==="setimmediate"){worker.postMessage(e.data);}else{err("worker sent an unknown command "+cmd);}PThread.currentProxiedOperationCallerThread=undefined;};worker.onerror=function(e){err("pthread sent an error! "+e.filename+":"+e.lineno+": "+e.message);};if(ENVIRONMENT_IS_NODE){worker.on("message",function(data){worker.onmessage({data:data});});worker.on("error",function(data){worker.onerror(data);});worker.on("exit",function(data){console.log("worker exited - TODO: update the worker queue?");});}worker.postMessage({"cmd":"load","urlOrBlob":Module["mainScriptUrlOrBlob"]||_scriptDir,"wasmMemory":wasmMemory,"wasmModule":wasmModule,"DYNAMIC_BASE":DYNAMIC_BASE,"DYNAMICTOP_PTR":DYNAMICTOP_PTR});},allocateUnusedWorker:function(){var pthreadMainJs=locateFile("tfjs-backend-wasm-threaded-simd.worker.js");PThread.unusedWorkers.push(new Worker(pthreadMainJs));},getNewWorker:function(){if(PThread.unusedWorkers.length==0){PThread.allocateUnusedWorker();PThread.loadWasmModuleToWorker(PThread.unusedWorkers[0]);}if(PThread.unusedWorkers.length>0)return PThread.unusedWorkers.pop();else return null},busySpinWait:function(msecs){var t=performance.now()+msecs;while(performance.now()<t){}}};function establishStackSpace(stackTop,stackMax){stackRestore(stackTop);}Module["establishStackSpace"]=establishStackSpace;function getNoExitRuntime(){return noExitRuntime}Module["getNoExitRuntime"]=getNoExitRuntime;function ___assert_fail(condition,filename,line,func){abort("Assertion failed: "+UTF8ToString(condition)+", at: "+[filename?UTF8ToString(filename):"unknown filename",line,func?UTF8ToString(func):"unknown function"]);}function ___call_main(argc,argv){var returnCode=_main(argc,argv);}var _emscripten_get_now;if(ENVIRONMENT_IS_NODE){_emscripten_get_now=function(){var t=process["hrtime"]();return t[0]*1e3+t[1]/1e6};}else if(ENVIRONMENT_IS_PTHREAD){_emscripten_get_now=function(){return performance.now()-Module["__performance_now_clock_drift"]};}else if(typeof dateNow!=="undefined"){_emscripten_get_now=dateNow;}else _emscripten_get_now=function(){return performance.now()};function setErrNo(value){GROWABLE_HEAP_I32()[___errno_location()>>2]=value;return value}function _atexit(func,arg){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(1,1,func,arg);}function __emscripten_notify_thread_queue(targetThreadId,mainThreadId){if(targetThreadId==mainThreadId){postMessage({"cmd":"processQueuedMainThreadWork"});}else if(ENVIRONMENT_IS_PTHREAD){postMessage({"targetThread":targetThreadId,"cmd":"processThreadQueue"});}else{var pthread=PThread.pthreads[targetThreadId];var worker=pthread&&pthread.worker;if(!worker){return}worker.postMessage({"cmd":"processThreadQueue"});}return 1}function _abort(){abort();}function _emscripten_conditional_set_current_thread_status(expectedStatus,newStatus){}function _emscripten_futex_wait(addr,val,timeout){if(addr<=0||addr>GROWABLE_HEAP_I8().length||addr&3!=0)return -28;if(ENVIRONMENT_IS_WORKER){var ret=Atomics.wait(GROWABLE_HEAP_I32(),addr>>2,val,timeout);if(ret==="timed-out")return -73;if(ret==="not-equal")return -6;if(ret==="ok")return 0;throw "Atomics.wait returned an unexpected value "+ret}else{var loadedVal=Atomics.load(GROWABLE_HEAP_I32(),addr>>2);if(val!=loadedVal)return -6;var tNow=performance.now();var tEnd=tNow+timeout;Atomics.store(GROWABLE_HEAP_I32(),__main_thread_futex_wait_address>>2,addr);var ourWaitAddress=addr;while(addr==ourWaitAddress){tNow=performance.now();if(tNow>tEnd){return -73}_emscripten_main_thread_process_queued_calls();addr=Atomics.load(GROWABLE_HEAP_I32(),__main_thread_futex_wait_address>>2);}return 0}}function _emscripten_is_main_browser_thread(){return __pthread_is_main_browser_thread|0}function _emscripten_is_main_runtime_thread(){return __pthread_is_main_runtime_thread|0}function _emscripten_memcpy_big(dest,src,num){GROWABLE_HEAP_U8().copyWithin(dest,src,src+num);}function _emscripten_num_logical_cores(){return navigator["hardwareConcurrency"]}function _emscripten_proxy_to_main_thread_js(index,sync){var numCallArgs=arguments.length-2;var stack=stackSave();var args=stackAlloc(numCallArgs*8);var b=args>>3;for(var i=0;i<numCallArgs;i++){GROWABLE_HEAP_F64()[b+i]=arguments[2+i];}var ret=_emscripten_run_in_main_runtime_thread_js(index,numCallArgs,args,sync);stackRestore(stack);return ret}var _emscripten_receive_on_main_thread_js_callArgs=[];function readAsmConstArgs(sigPtr,buf){if(!readAsmConstArgs.array){readAsmConstArgs.array=[];}var args=readAsmConstArgs.array;args.length=0;var ch;while(ch=GROWABLE_HEAP_U8()[sigPtr++]){if(ch===100||ch===102){buf=buf+7&~7;args.push(GROWABLE_HEAP_F64()[buf>>3]);buf+=8;}else{buf=buf+3&~3;args.push(GROWABLE_HEAP_I32()[buf>>2]);buf+=4;}}return args}function _emscripten_receive_on_main_thread_js(index,numCallArgs,args){_emscripten_receive_on_main_thread_js_callArgs.length=numCallArgs;var b=args>>3;for(var i=0;i<numCallArgs;i++){_emscripten_receive_on_main_thread_js_callArgs[i]=GROWABLE_HEAP_F64()[b+i];}var isEmAsmConst=index<0;var func=!isEmAsmConst?proxiedFunctionTable[index]:ASM_CONSTS[-index-1];if(isEmAsmConst){var sigPtr=_emscripten_receive_on_main_thread_js_callArgs[1];var varargPtr=_emscripten_receive_on_main_thread_js_callArgs[2];var constArgs=readAsmConstArgs(sigPtr,varargPtr);return func.apply(null,constArgs)}return func.apply(null,_emscripten_receive_on_main_thread_js_callArgs)}function _emscripten_get_heap_size(){return GROWABLE_HEAP_U8().length}function emscripten_realloc_buffer(size){try{wasmMemory.grow(size-buffer.byteLength+65535>>>16);updateGlobalBufferAndViews(wasmMemory.buffer);return 1}catch(e){}}function _emscripten_resize_heap(requestedSize){requestedSize=requestedSize>>>0;var oldSize=_emscripten_get_heap_size();if(requestedSize<=oldSize){return false}var PAGE_MULTIPLE=65536;var maxHeapSize=2147483648;if(requestedSize>maxHeapSize){return false}var minHeapSize=16777216;for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignUp(Math.max(minHeapSize,requestedSize,overGrownHeapSize),PAGE_MULTIPLE));var replacement=emscripten_realloc_buffer(newSize);if(replacement){return true}}return false}var JSEvents={keyEvent:0,mouseEvent:0,wheelEvent:0,uiEvent:0,focusEvent:0,deviceOrientationEvent:0,deviceMotionEvent:0,fullscreenChangeEvent:0,pointerlockChangeEvent:0,visibilityChangeEvent:0,touchEvent:0,previousFullscreenElement:null,previousScreenX:null,previousScreenY:null,removeEventListenersRegistered:false,removeAllEventListeners:function(){for(var i=JSEvents.eventHandlers.length-1;i>=0;--i){JSEvents._removeHandler(i);}JSEvents.eventHandlers=[];JSEvents.deferredCalls=[];},registerRemoveEventListeners:function(){if(!JSEvents.removeEventListenersRegistered){JSEvents.removeEventListenersRegistered=true;}},deferredCalls:[],deferCall:function(targetFunction,precedence,argsList){function arraysHaveEqualContent(arrA,arrB){if(arrA.length!=arrB.length)return false;for(var i in arrA){if(arrA[i]!=arrB[i])return false}return true}for(var i in JSEvents.deferredCalls){var call=JSEvents.deferredCalls[i];if(call.targetFunction==targetFunction&&arraysHaveEqualContent(call.argsList,argsList)){return}}JSEvents.deferredCalls.push({targetFunction:targetFunction,precedence:precedence,argsList:argsList});JSEvents.deferredCalls.sort(function(x,y){return x.precedence<y.precedence});},removeDeferredCalls:function(targetFunction){for(var i=0;i<JSEvents.deferredCalls.length;++i){if(JSEvents.deferredCalls[i].targetFunction==targetFunction){JSEvents.deferredCalls.splice(i,1);--i;}}},canPerformEventHandlerRequests:function(){return JSEvents.inEventHandler&&JSEvents.currentEventHandler.allowsDeferredCalls},runDeferredCalls:function(){if(!JSEvents.canPerformEventHandlerRequests()){return}for(var i=0;i<JSEvents.deferredCalls.length;++i){var call=JSEvents.deferredCalls[i];JSEvents.deferredCalls.splice(i,1);--i;call.targetFunction.apply(null,call.argsList);}},inEventHandler:0,currentEventHandler:null,eventHandlers:[],removeAllHandlersOnTarget:function(target,eventTypeString){for(var i=0;i<JSEvents.eventHandlers.length;++i){if(JSEvents.eventHandlers[i].target==target&&(!eventTypeString||eventTypeString==JSEvents.eventHandlers[i].eventTypeString)){JSEvents._removeHandler(i--);}}},_removeHandler:function(i){var h=JSEvents.eventHandlers[i];h.target.removeEventListener(h.eventTypeString,h.eventListenerFunc,h.useCapture);JSEvents.eventHandlers.splice(i,1);},registerOrRemoveHandler:function(eventHandler){var jsEventHandler=function jsEventHandler(event){++JSEvents.inEventHandler;JSEvents.currentEventHandler=eventHandler;JSEvents.runDeferredCalls();eventHandler.handlerFunc(event);JSEvents.runDeferredCalls();--JSEvents.inEventHandler;};if(eventHandler.callbackfunc){eventHandler.eventListenerFunc=jsEventHandler;eventHandler.target.addEventListener(eventHandler.eventTypeString,jsEventHandler,eventHandler.useCapture);JSEvents.eventHandlers.push(eventHandler);JSEvents.registerRemoveEventListeners();}else{for(var i=0;i<JSEvents.eventHandlers.length;++i){if(JSEvents.eventHandlers[i].target==eventHandler.target&&JSEvents.eventHandlers[i].eventTypeString==eventHandler.eventTypeString){JSEvents._removeHandler(i--);}}}},queueEventHandlerOnThread_iiii:function(targetThread,eventHandlerFunc,eventTypeId,eventData,userData){var stackTop=stackSave();var varargs=stackAlloc(12);GROWABLE_HEAP_I32()[varargs>>2]=eventTypeId;GROWABLE_HEAP_I32()[varargs+4>>2]=eventData;GROWABLE_HEAP_I32()[varargs+8>>2]=userData;_emscripten_async_queue_on_thread_(targetThread,637534208,eventHandlerFunc,eventData,varargs);stackRestore(stackTop);},getTargetThreadForEventCallback:function(targetThread){switch(targetThread){case 1:return 0;case 2:return PThread.currentProxiedOperationCallerThread;default:return targetThread}},getNodeNameForTarget:function(target){if(!target)return "";if(target==window)return "#window";if(target==screen)return "#screen";return target&&target.nodeName?target.nodeName:""},fullscreenEnabled:function(){return document.fullscreenEnabled||document.webkitFullscreenEnabled}};function stringToNewUTF8(jsString){var length=lengthBytesUTF8(jsString)+1;var cString=_malloc(length);stringToUTF8(jsString,cString,length);return cString}function _emscripten_set_offscreencanvas_size_on_target_thread_js(targetThread,targetCanvas,width,height){var stackTop=stackSave();var varargs=stackAlloc(12);var targetCanvasPtr=0;if(targetCanvas){targetCanvasPtr=stringToNewUTF8(targetCanvas);}GROWABLE_HEAP_I32()[varargs>>2]=targetCanvasPtr;GROWABLE_HEAP_I32()[varargs+4>>2]=width;GROWABLE_HEAP_I32()[varargs+8>>2]=height;_emscripten_async_queue_on_thread_(targetThread,657457152,0,targetCanvasPtr,varargs);stackRestore(stackTop);}function _emscripten_set_offscreencanvas_size_on_target_thread(targetThread,targetCanvas,width,height){targetCanvas=targetCanvas?UTF8ToString(targetCanvas):"";_emscripten_set_offscreencanvas_size_on_target_thread_js(targetThread,targetCanvas,width,height);}function __maybeCStringToJsString(cString){return cString>2?UTF8ToString(cString):cString}var specialHTMLTargets=[0,typeof document!=="undefined"?document:0,typeof window!=="undefined"?window:0];function __findEventTarget(target){target=__maybeCStringToJsString(target);var domElement=specialHTMLTargets[target]||(typeof document!=="undefined"?document.querySelector(target):undefined);return domElement}function __findCanvasEventTarget(target){return __findEventTarget(target)}function _emscripten_set_canvas_element_size_calling_thread(target,width,height){var canvas=__findCanvasEventTarget(target);if(!canvas)return -4;if(canvas.canvasSharedPtr){GROWABLE_HEAP_I32()[canvas.canvasSharedPtr>>2]=width;GROWABLE_HEAP_I32()[canvas.canvasSharedPtr+4>>2]=height;}if(canvas.offscreenCanvas||!canvas.controlTransferredOffscreen){if(canvas.offscreenCanvas)canvas=canvas.offscreenCanvas;var autoResizeViewport=false;if(canvas.GLctxObject&&canvas.GLctxObject.GLctx){var prevViewport=canvas.GLctxObject.GLctx.getParameter(2978);autoResizeViewport=prevViewport[0]===0&&prevViewport[1]===0&&prevViewport[2]===canvas.width&&prevViewport[3]===canvas.height;}canvas.width=width;canvas.height=height;if(autoResizeViewport){canvas.GLctxObject.GLctx.viewport(0,0,width,height);}}else if(canvas.canvasSharedPtr){var targetThread=GROWABLE_HEAP_I32()[canvas.canvasSharedPtr+8>>2];_emscripten_set_offscreencanvas_size_on_target_thread(targetThread,target,width,height);return 1}else{return -4}return 0}function _emscripten_set_canvas_element_size_main_thread(target,width,height){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(2,1,target,width,height);return _emscripten_set_canvas_element_size_calling_thread(target,width,height)}function _emscripten_set_canvas_element_size(target,width,height){var canvas=__findCanvasEventTarget(target);if(canvas){return _emscripten_set_canvas_element_size_calling_thread(target,width,height)}else{return _emscripten_set_canvas_element_size_main_thread(target,width,height)}}function _emscripten_set_current_thread_status(newStatus){}function _emscripten_set_thread_name(threadId,name){}function __webgl_enable_ANGLE_instanced_arrays(ctx){var ext=ctx.getExtension("ANGLE_instanced_arrays");if(ext){ctx["vertexAttribDivisor"]=function(index,divisor){ext["vertexAttribDivisorANGLE"](index,divisor);};ctx["drawArraysInstanced"]=function(mode,first,count,primcount){ext["drawArraysInstancedANGLE"](mode,first,count,primcount);};ctx["drawElementsInstanced"]=function(mode,count,type,indices,primcount){ext["drawElementsInstancedANGLE"](mode,count,type,indices,primcount);};return 1}}function __webgl_enable_OES_vertex_array_object(ctx){var ext=ctx.getExtension("OES_vertex_array_object");if(ext){ctx["createVertexArray"]=function(){return ext["createVertexArrayOES"]()};ctx["deleteVertexArray"]=function(vao){ext["deleteVertexArrayOES"](vao);};ctx["bindVertexArray"]=function(vao){ext["bindVertexArrayOES"](vao);};ctx["isVertexArray"]=function(vao){return ext["isVertexArrayOES"](vao)};return 1}}function __webgl_enable_WEBGL_draw_buffers(ctx){var ext=ctx.getExtension("WEBGL_draw_buffers");if(ext){ctx["drawBuffers"]=function(n,bufs){ext["drawBuffersWEBGL"](n,bufs);};return 1}}var GL={counter:1,lastError:0,buffers:[],mappedBuffers:{},programs:[],framebuffers:[],renderbuffers:[],textures:[],uniforms:[],shaders:[],vaos:[],contexts:{},currentContext:null,offscreenCanvases:{},timerQueriesEXT:[],programInfos:{},stringCache:{},unpackAlignment:4,init:function(){var miniTempFloatBuffer=new Float32Array(GL.MINI_TEMP_BUFFER_SIZE);for(var i=0;i<GL.MINI_TEMP_BUFFER_SIZE;i++){GL.miniTempBufferFloatViews[i]=miniTempFloatBuffer.subarray(0,i+1);}var miniTempIntBuffer=new Int32Array(GL.MINI_TEMP_BUFFER_SIZE);for(var i=0;i<GL.MINI_TEMP_BUFFER_SIZE;i++){GL.miniTempBufferIntViews[i]=miniTempIntBuffer.subarray(0,i+1);}},recordError:function recordError(errorCode){if(!GL.lastError){GL.lastError=errorCode;}},getNewId:function(table){var ret=GL.counter++;for(var i=table.length;i<ret;i++){table[i]=null;}return ret},MINI_TEMP_BUFFER_SIZE:256,miniTempBufferFloatViews:[0],miniTempBufferIntViews:[0],getSource:function(shader,count,string,length){var source="";for(var i=0;i<count;++i){var len=length?GROWABLE_HEAP_I32()[length+i*4>>2]:-1;source+=UTF8ToString(GROWABLE_HEAP_I32()[string+i*4>>2],len<0?undefined:len);}return source},createContext:function(canvas,webGLContextAttributes){var ctx=canvas.getContext("webgl",webGLContextAttributes);if(!ctx)return 0;var handle=GL.registerContext(ctx,webGLContextAttributes);return handle},registerContext:function(ctx,webGLContextAttributes){var handle=_malloc(8);GROWABLE_HEAP_I32()[handle+4>>2]=_pthread_self();var context={handle:handle,attributes:webGLContextAttributes,version:webGLContextAttributes.majorVersion,GLctx:ctx};if(ctx.canvas)ctx.canvas.GLctxObject=context;GL.contexts[handle]=context;if(typeof webGLContextAttributes.enableExtensionsByDefault==="undefined"||webGLContextAttributes.enableExtensionsByDefault){GL.initExtensions(context);}return handle},makeContextCurrent:function(contextHandle){GL.currentContext=GL.contexts[contextHandle];Module.ctx=GLctx=GL.currentContext&&GL.currentContext.GLctx;return !(contextHandle&&!GLctx)},getContext:function(contextHandle){return GL.contexts[contextHandle]},deleteContext:function(contextHandle){if(GL.currentContext===GL.contexts[contextHandle])GL.currentContext=null;if(typeof JSEvents==="object")JSEvents.removeAllHandlersOnTarget(GL.contexts[contextHandle].GLctx.canvas);if(GL.contexts[contextHandle]&&GL.contexts[contextHandle].GLctx.canvas)GL.contexts[contextHandle].GLctx.canvas.GLctxObject=undefined;_free(GL.contexts[contextHandle].handle);GL.contexts[contextHandle]=null;},initExtensions:function(context){if(!context)context=GL.currentContext;if(context.initExtensionsDone)return;context.initExtensionsDone=true;var GLctx=context.GLctx;__webgl_enable_ANGLE_instanced_arrays(GLctx);__webgl_enable_OES_vertex_array_object(GLctx);__webgl_enable_WEBGL_draw_buffers(GLctx);GLctx.disjointTimerQueryExt=GLctx.getExtension("EXT_disjoint_timer_query");var automaticallyEnabledExtensions=["OES_texture_float","OES_texture_half_float","OES_standard_derivatives","OES_vertex_array_object","WEBGL_compressed_texture_s3tc","WEBGL_depth_texture","OES_element_index_uint","EXT_texture_filter_anisotropic","EXT_frag_depth","WEBGL_draw_buffers","ANGLE_instanced_arrays","OES_texture_float_linear","OES_texture_half_float_linear","EXT_blend_minmax","EXT_shader_texture_lod","EXT_texture_norm16","WEBGL_compressed_texture_pvrtc","EXT_color_buffer_half_float","WEBGL_color_buffer_float","EXT_sRGB","WEBGL_compressed_texture_etc1","EXT_disjoint_timer_query","WEBGL_compressed_texture_etc","WEBGL_compressed_texture_astc","EXT_color_buffer_float","WEBGL_compressed_texture_s3tc_srgb","EXT_disjoint_timer_query_webgl2","WEBKIT_WEBGL_compressed_texture_pvrtc"];var exts=GLctx.getSupportedExtensions()||[];exts.forEach(function(ext){if(automaticallyEnabledExtensions.indexOf(ext)!=-1){GLctx.getExtension(ext);}});},populateUniformTable:function(program){var p=GL.programs[program];var ptable=GL.programInfos[program]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};var utable=ptable.uniforms;var numUniforms=GLctx.getProgramParameter(p,35718);for(var i=0;i<numUniforms;++i){var u=GLctx.getActiveUniform(p,i);var name=u.name;ptable.maxUniformLength=Math.max(ptable.maxUniformLength,name.length+1);if(name.slice(-1)=="]"){name=name.slice(0,name.lastIndexOf("["));}var loc=GLctx.getUniformLocation(p,name);if(loc){var id=GL.getNewId(GL.uniforms);utable[name]=[u.size,id];GL.uniforms[id]=loc;for(var j=1;j<u.size;++j){var n=name+"["+j+"]";loc=GLctx.getUniformLocation(p,n);id=GL.getNewId(GL.uniforms);GL.uniforms[id]=loc;}}}}};var __emscripten_webgl_power_preferences=["default","low-power","high-performance"];function _emscripten_webgl_do_create_context(target,attributes){var contextAttributes={};var a=attributes>>2;contextAttributes["alpha"]=!!GROWABLE_HEAP_I32()[a+(0>>2)];contextAttributes["depth"]=!!GROWABLE_HEAP_I32()[a+(4>>2)];contextAttributes["stencil"]=!!GROWABLE_HEAP_I32()[a+(8>>2)];contextAttributes["antialias"]=!!GROWABLE_HEAP_I32()[a+(12>>2)];contextAttributes["premultipliedAlpha"]=!!GROWABLE_HEAP_I32()[a+(16>>2)];contextAttributes["preserveDrawingBuffer"]=!!GROWABLE_HEAP_I32()[a+(20>>2)];var powerPreference=GROWABLE_HEAP_I32()[a+(24>>2)];contextAttributes["powerPreference"]=__emscripten_webgl_power_preferences[powerPreference];contextAttributes["failIfMajorPerformanceCaveat"]=!!GROWABLE_HEAP_I32()[a+(28>>2)];contextAttributes.majorVersion=GROWABLE_HEAP_I32()[a+(32>>2)];contextAttributes.minorVersion=GROWABLE_HEAP_I32()[a+(36>>2)];contextAttributes.enableExtensionsByDefault=GROWABLE_HEAP_I32()[a+(40>>2)];contextAttributes.explicitSwapControl=GROWABLE_HEAP_I32()[a+(44>>2)];contextAttributes.proxyContextToMainThread=GROWABLE_HEAP_I32()[a+(48>>2)];contextAttributes.renderViaOffscreenBackBuffer=GROWABLE_HEAP_I32()[a+(52>>2)];var canvas=__findCanvasEventTarget(target);if(!canvas){return -4}if(contextAttributes.explicitSwapControl){return -1}var contextHandle=GL.createContext(canvas,contextAttributes);return contextHandle}function _emscripten_webgl_create_context(a0,a1){return _emscripten_webgl_do_create_context(a0,a1)}var SYSCALLS={mappings:{},buffers:[null,[],[]],printChar:function(stream,curr){var buffer=SYSCALLS.buffers[stream];if(curr===0||curr===10){(stream===1?out:err)(UTF8ArrayToString(buffer,0));buffer.length=0;}else{buffer.push(curr);}},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=GROWABLE_HEAP_I32()[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},get64:function(low,high){return low}};function _fd_close(fd){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(3,1,fd);return 0}function _fd_seek(fd,offset_low,offset_high,whence,newOffset){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(4,1,fd,offset_low,offset_high,whence,newOffset)}function _fd_write(fd,iov,iovcnt,pnum){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(5,1,fd,iov,iovcnt,pnum);var num=0;for(var i=0;i<iovcnt;i++){var ptr=GROWABLE_HEAP_I32()[iov+i*8>>2];var len=GROWABLE_HEAP_I32()[iov+(i*8+4)>>2];for(var j=0;j<len;j++){SYSCALLS.printChar(fd,GROWABLE_HEAP_U8()[ptr+j]);}num+=len;}GROWABLE_HEAP_I32()[pnum>>2]=num;return 0}function _pthread_cleanup_pop(execute){var routine=PThread.exitHandlers.pop();if(execute)routine();}function _pthread_cleanup_push(routine,arg){if(PThread.exitHandlers===null){PThread.exitHandlers=[];}PThread.exitHandlers.push(function(){dynCall_vi(routine,arg);});}function __spawn_thread(threadParams){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! _spawn_thread() can only ever be called from main application thread!";var worker=PThread.getNewWorker();if(worker.pthread!==undefined)throw "Internal error!";if(!threadParams.pthread_ptr)throw "Internal error, no pthread ptr!";PThread.runningWorkers.push(worker);var tlsMemory=_malloc(128*4);for(var i=0;i<128;++i){GROWABLE_HEAP_I32()[tlsMemory+i*4>>2]=0;}var stackHigh=threadParams.stackBase+threadParams.stackSize;var pthread=PThread.pthreads[threadParams.pthread_ptr]={worker:worker,stackBase:threadParams.stackBase,stackSize:threadParams.stackSize,allocatedOwnStack:threadParams.allocatedOwnStack,thread:threadParams.pthread_ptr,threadInfoStruct:threadParams.pthread_ptr};var tis=pthread.threadInfoStruct>>2;Atomics.store(GROWABLE_HEAP_U32(),tis+(0>>2),0);Atomics.store(GROWABLE_HEAP_U32(),tis+(4>>2),0);Atomics.store(GROWABLE_HEAP_U32(),tis+(8>>2),0);Atomics.store(GROWABLE_HEAP_U32(),tis+(68>>2),threadParams.detached);Atomics.store(GROWABLE_HEAP_U32(),tis+(104>>2),tlsMemory);Atomics.store(GROWABLE_HEAP_U32(),tis+(48>>2),0);Atomics.store(GROWABLE_HEAP_U32(),tis+(40>>2),pthread.threadInfoStruct);Atomics.store(GROWABLE_HEAP_U32(),tis+(44>>2),42);Atomics.store(GROWABLE_HEAP_U32(),tis+(108>>2),threadParams.stackSize);Atomics.store(GROWABLE_HEAP_U32(),tis+(84>>2),threadParams.stackSize);Atomics.store(GROWABLE_HEAP_U32(),tis+(80>>2),stackHigh);Atomics.store(GROWABLE_HEAP_U32(),tis+(108+8>>2),stackHigh);Atomics.store(GROWABLE_HEAP_U32(),tis+(108+12>>2),threadParams.detached);Atomics.store(GROWABLE_HEAP_U32(),tis+(108+20>>2),threadParams.schedPolicy);Atomics.store(GROWABLE_HEAP_U32(),tis+(108+24>>2),threadParams.schedPrio);var global_libc=_emscripten_get_global_libc();var global_locale=global_libc+40;Atomics.store(GROWABLE_HEAP_U32(),tis+(176>>2),global_locale);worker.pthread=pthread;var msg={"cmd":"run","start_routine":threadParams.startRoutine,"arg":threadParams.arg,"threadInfoStruct":threadParams.pthread_ptr,"selfThreadId":threadParams.pthread_ptr,"parentThreadId":threadParams.parent_pthread_ptr,"stackBase":threadParams.stackBase,"stackSize":threadParams.stackSize};worker.runPthread=function(){msg.time=performance.now();worker.postMessage(msg,threadParams.transferList);};if(worker.loaded){worker.runPthread();delete worker.runPthread;}}function _pthread_getschedparam(thread,policy,schedparam){if(!policy&&!schedparam)return ERRNO_CODES.EINVAL;if(!thread){err("pthread_getschedparam called with a null thread pointer!");return ERRNO_CODES.ESRCH}var self=GROWABLE_HEAP_I32()[thread+12>>2];if(self!==thread){err("pthread_getschedparam attempted on thread "+thread+", which does not point to a valid thread, or does not exist anymore!");return ERRNO_CODES.ESRCH}var schedPolicy=Atomics.load(GROWABLE_HEAP_U32(),thread+108+20>>2);var schedPrio=Atomics.load(GROWABLE_HEAP_U32(),thread+108+24>>2);if(policy)GROWABLE_HEAP_I32()[policy>>2]=schedPolicy;if(schedparam)GROWABLE_HEAP_I32()[schedparam>>2]=schedPrio;return 0}function _pthread_self(){return __pthread_ptr|0}Module["_pthread_self"]=_pthread_self;function _pthread_create(pthread_ptr,attr,start_routine,arg){if(typeof SharedArrayBuffer==="undefined"){err("Current environment does not support SharedArrayBuffer, pthreads are not available!");return 6}if(!pthread_ptr){err("pthread_create called with a null thread pointer!");return 28}var transferList=[];var error=0;if(ENVIRONMENT_IS_PTHREAD&&(transferList.length===0||error)){return _emscripten_sync_run_in_main_thread_4(687865856,pthread_ptr,attr,start_routine,arg)}var stackSize=0;var stackBase=0;var detached=0;var schedPolicy=0;var schedPrio=0;if(attr){stackSize=GROWABLE_HEAP_I32()[attr>>2];stackSize+=81920;stackBase=GROWABLE_HEAP_I32()[attr+8>>2];detached=GROWABLE_HEAP_I32()[attr+12>>2]!==0;var inheritSched=GROWABLE_HEAP_I32()[attr+16>>2]===0;if(inheritSched){var prevSchedPolicy=GROWABLE_HEAP_I32()[attr+20>>2];var prevSchedPrio=GROWABLE_HEAP_I32()[attr+24>>2];var parentThreadPtr=PThread.currentProxiedOperationCallerThread?PThread.currentProxiedOperationCallerThread:_pthread_self();_pthread_getschedparam(parentThreadPtr,attr+20,attr+24);schedPolicy=GROWABLE_HEAP_I32()[attr+20>>2];schedPrio=GROWABLE_HEAP_I32()[attr+24>>2];GROWABLE_HEAP_I32()[attr+20>>2]=prevSchedPolicy;GROWABLE_HEAP_I32()[attr+24>>2]=prevSchedPrio;}else{schedPolicy=GROWABLE_HEAP_I32()[attr+20>>2];schedPrio=GROWABLE_HEAP_I32()[attr+24>>2];}}else{stackSize=2097152;}var allocatedOwnStack=stackBase==0;if(allocatedOwnStack){stackBase=_memalign(16,stackSize);}else{stackBase-=stackSize;assert(stackBase>0);}var threadInfoStruct=_malloc(232);for(var i=0;i<232>>2;++i)GROWABLE_HEAP_U32()[(threadInfoStruct>>2)+i]=0;GROWABLE_HEAP_I32()[pthread_ptr>>2]=threadInfoStruct;GROWABLE_HEAP_I32()[threadInfoStruct+12>>2]=threadInfoStruct;var headPtr=threadInfoStruct+156;GROWABLE_HEAP_I32()[headPtr>>2]=headPtr;var threadParams={stackBase:stackBase,stackSize:stackSize,allocatedOwnStack:allocatedOwnStack,schedPolicy:schedPolicy,schedPrio:schedPrio,detached:detached,startRoutine:start_routine,pthread_ptr:threadInfoStruct,parent_pthread_ptr:_pthread_self(),arg:arg,transferList:transferList};if(ENVIRONMENT_IS_PTHREAD){threadParams.cmd="spawnThread";postMessage(threadParams,transferList);}else{__spawn_thread(threadParams);}return 0}function _roundf(d){d=+d;return d>=+0?+Math_floor(d+ +.5):+Math_ceil(d-+.5)}function _sysconf(name){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(6,1,name);switch(name){case 30:return 16384;case 85:var maxHeapSize=2147483648;return maxHeapSize/16384;case 132:case 133:case 12:case 137:case 138:case 15:case 235:case 16:case 17:case 18:case 19:case 20:case 149:case 13:case 10:case 236:case 153:case 9:case 21:case 22:case 159:case 154:case 14:case 77:case 78:case 139:case 80:case 81:case 82:case 68:case 67:case 164:case 11:case 29:case 47:case 48:case 95:case 52:case 51:case 46:case 79:return 200809;case 27:case 246:case 127:case 128:case 23:case 24:case 160:case 161:case 181:case 182:case 242:case 183:case 184:case 243:case 244:case 245:case 165:case 178:case 179:case 49:case 50:case 168:case 169:case 175:case 170:case 171:case 172:case 97:case 76:case 32:case 173:case 35:return -1;case 176:case 177:case 7:case 155:case 8:case 157:case 125:case 126:case 92:case 93:case 129:case 130:case 131:case 94:case 91:return 1;case 74:case 60:case 69:case 70:case 4:return 1024;case 31:case 42:case 72:return 32;case 87:case 26:case 33:return 2147483647;case 34:case 1:return 47839;case 38:case 36:return 99;case 43:case 37:return 2048;case 0:return 2097152;case 3:return 65536;case 28:return 32768;case 44:return 32767;case 75:return 16384;case 39:return 1e3;case 89:return 700;case 71:return 256;case 40:return 255;case 2:return 100;case 180:return 64;case 25:return 20;case 5:return 16;case 6:return 6;case 73:return 4;case 84:{if(typeof navigator==="object")return navigator["hardwareConcurrency"]||1;return 1}}setErrNo(28);return -1}if(!ENVIRONMENT_IS_PTHREAD)PThread.initMainThreadBlock();else PThread.initWorker();var GLctx;GL.init();var proxiedFunctionTable=[null,_atexit,_emscripten_set_canvas_element_size_main_thread,_fd_close,_fd_seek,_fd_write,_sysconf];var asmLibraryArg={"e":___assert_fail,"r":___call_main,"w":__emscripten_notify_thread_queue,"a":_abort,"l":_emscripten_conditional_set_current_thread_status,"d":_emscripten_futex_wait,"c":_emscripten_futex_wake,"h":_emscripten_get_now,"g":_emscripten_is_main_browser_thread,"x":_emscripten_is_main_runtime_thread,"q":_emscripten_memcpy_big,"B":_emscripten_num_logical_cores,"t":_emscripten_receive_on_main_thread_js,"A":_emscripten_resize_heap,"u":_emscripten_set_canvas_element_size,"k":_emscripten_set_current_thread_status,"s":_emscripten_set_thread_name,"v":_emscripten_webgl_create_context,"m":_fd_close,"o":_fd_seek,"i":_fd_write,"p":initPthreadsJS,"memory":wasmMemory||Module["wasmMemory"],"y":_pthread_cleanup_pop,"z":_pthread_cleanup_push,"j":_pthread_create,"b":_pthread_self,"f":_roundf,"n":_sysconf,"table":wasmTable};var asm=createWasm();Module["asm"]=asm;var ___wasm_call_ctors=Module["___wasm_call_ctors"]=function(){return (___wasm_call_ctors=Module["___wasm_call_ctors"]=Module["asm"]["C"]).apply(null,arguments)};var _init=Module["_init"]=function(){return (_init=Module["_init"]=Module["asm"]["D"]).apply(null,arguments)};var _register_tensor=Module["_register_tensor"]=function(){return (_register_tensor=Module["_register_tensor"]=Module["asm"]["E"]).apply(null,arguments)};var _dispose_data=Module["_dispose_data"]=function(){return (_dispose_data=Module["_dispose_data"]=Module["asm"]["F"]).apply(null,arguments)};var _dispose=Module["_dispose"]=function(){return (_dispose=Module["_dispose"]=Module["asm"]["G"]).apply(null,arguments)};var _Abs=Module["_Abs"]=function(){return (_Abs=Module["_Abs"]=Module["asm"]["H"]).apply(null,arguments)};var _Add=Module["_Add"]=function(){return (_Add=Module["_Add"]=Module["asm"]["I"]).apply(null,arguments)};var _AddN=Module["_AddN"]=function(){return (_AddN=Module["_AddN"]=Module["asm"]["J"]).apply(null,arguments)};var _ArgMax=Module["_ArgMax"]=function(){return (_ArgMax=Module["_ArgMax"]=Module["asm"]["K"]).apply(null,arguments)};var _AvgPool=Module["_AvgPool"]=function(){return (_AvgPool=Module["_AvgPool"]=Module["asm"]["L"]).apply(null,arguments)};var _BatchMatMul=Module["_BatchMatMul"]=function(){return (_BatchMatMul=Module["_BatchMatMul"]=Module["asm"]["M"]).apply(null,arguments)};var _ClipByValue=Module["_ClipByValue"]=function(){return (_ClipByValue=Module["_ClipByValue"]=Module["asm"]["N"]).apply(null,arguments)};var _Conv2D=Module["_Conv2D"]=function(){return (_Conv2D=Module["_Conv2D"]=Module["asm"]["O"]).apply(null,arguments)};var _Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=function(){return (_Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=Module["asm"]["P"]).apply(null,arguments)};var _Cos=Module["_Cos"]=function(){return (_Cos=Module["_Cos"]=Module["asm"]["Q"]).apply(null,arguments)};var _CropAndResize=Module["_CropAndResize"]=function(){return (_CropAndResize=Module["_CropAndResize"]=Module["asm"]["R"]).apply(null,arguments)};var _Cumsum=Module["_Cumsum"]=function(){return (_Cumsum=Module["_Cumsum"]=Module["asm"]["S"]).apply(null,arguments)};var _DepthToSpace=Module["_DepthToSpace"]=function(){return (_DepthToSpace=Module["_DepthToSpace"]=Module["asm"]["T"]).apply(null,arguments)};var _DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=function(){return (_DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=Module["asm"]["U"]).apply(null,arguments)};var _Div=Module["_Div"]=function(){return (_Div=Module["_Div"]=Module["asm"]["V"]).apply(null,arguments)};var _Equal=Module["_Equal"]=function(){return (_Equal=Module["_Equal"]=Module["asm"]["W"]).apply(null,arguments)};var _Exp=Module["_Exp"]=function(){return (_Exp=Module["_Exp"]=Module["asm"]["X"]).apply(null,arguments)};var _FlipLeftRight=Module["_FlipLeftRight"]=function(){return (_FlipLeftRight=Module["_FlipLeftRight"]=Module["asm"]["Y"]).apply(null,arguments)};var _FloorDiv=Module["_FloorDiv"]=function(){return (_FloorDiv=Module["_FloorDiv"]=Module["asm"]["Z"]).apply(null,arguments)};var _FusedBatchNorm=Module["_FusedBatchNorm"]=function(){return (_FusedBatchNorm=Module["_FusedBatchNorm"]=Module["asm"]["_"]).apply(null,arguments)};var _FusedConv2D=Module["_FusedConv2D"]=function(){return (_FusedConv2D=Module["_FusedConv2D"]=Module["asm"]["$"]).apply(null,arguments)};var _FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=function(){return (_FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=Module["asm"]["aa"]).apply(null,arguments)};var _Gather=Module["_Gather"]=function(){return (_Gather=Module["_Gather"]=Module["asm"]["ba"]).apply(null,arguments)};var _GatherNd=Module["_GatherNd"]=function(){return (_GatherNd=Module["_GatherNd"]=Module["asm"]["ca"]).apply(null,arguments)};var _Greater=Module["_Greater"]=function(){return (_Greater=Module["_Greater"]=Module["asm"]["da"]).apply(null,arguments)};var _GreaterEqual=Module["_GreaterEqual"]=function(){return (_GreaterEqual=Module["_GreaterEqual"]=Module["asm"]["ea"]).apply(null,arguments)};var _Less=Module["_Less"]=function(){return (_Less=Module["_Less"]=Module["asm"]["fa"]).apply(null,arguments)};var _LessEqual=Module["_LessEqual"]=function(){return (_LessEqual=Module["_LessEqual"]=Module["asm"]["ga"]).apply(null,arguments)};var _Log=Module["_Log"]=function(){return (_Log=Module["_Log"]=Module["asm"]["ha"]).apply(null,arguments)};var _LogicalAnd=Module["_LogicalAnd"]=function(){return (_LogicalAnd=Module["_LogicalAnd"]=Module["asm"]["ia"]).apply(null,arguments)};var _Max=Module["_Max"]=function(){return (_Max=Module["_Max"]=Module["asm"]["ja"]).apply(null,arguments)};var _MaxPool=Module["_MaxPool"]=function(){return (_MaxPool=Module["_MaxPool"]=Module["asm"]["ka"]).apply(null,arguments)};var _Maximum=Module["_Maximum"]=function(){return (_Maximum=Module["_Maximum"]=Module["asm"]["la"]).apply(null,arguments)};var _Min=Module["_Min"]=function(){return (_Min=Module["_Min"]=Module["asm"]["ma"]).apply(null,arguments)};var _Minimum=Module["_Minimum"]=function(){return (_Minimum=Module["_Minimum"]=Module["asm"]["na"]).apply(null,arguments)};var _Multiply=Module["_Multiply"]=function(){return (_Multiply=Module["_Multiply"]=Module["asm"]["oa"]).apply(null,arguments)};var _Negate=Module["_Negate"]=function(){return (_Negate=Module["_Negate"]=Module["asm"]["pa"]).apply(null,arguments)};var _NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=function(){return (_NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=Module["asm"]["qa"]).apply(null,arguments)};var _NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=function(){return (_NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=Module["asm"]["ra"]).apply(null,arguments)};var _NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=function(){return (_NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=Module["asm"]["sa"]).apply(null,arguments)};var _NotEqual=Module["_NotEqual"]=function(){return (_NotEqual=Module["_NotEqual"]=Module["asm"]["ta"]).apply(null,arguments)};var _OneHot=Module["_OneHot"]=function(){return (_OneHot=Module["_OneHot"]=Module["asm"]["ua"]).apply(null,arguments)};var _PadV2=Module["_PadV2"]=function(){return (_PadV2=Module["_PadV2"]=Module["asm"]["va"]).apply(null,arguments)};var _Pow=Module["_Pow"]=function(){return (_Pow=Module["_Pow"]=Module["asm"]["wa"]).apply(null,arguments)};var _Prelu=Module["_Prelu"]=function(){return (_Prelu=Module["_Prelu"]=Module["asm"]["xa"]).apply(null,arguments)};var _Relu=Module["_Relu"]=function(){return (_Relu=Module["_Relu"]=Module["asm"]["ya"]).apply(null,arguments)};var _Relu6=Module["_Relu6"]=function(){return (_Relu6=Module["_Relu6"]=Module["asm"]["za"]).apply(null,arguments)};var _ResizeBilinear=Module["_ResizeBilinear"]=function(){return (_ResizeBilinear=Module["_ResizeBilinear"]=Module["asm"]["Aa"]).apply(null,arguments)};var _Reverse=Module["_Reverse"]=function(){return (_Reverse=Module["_Reverse"]=Module["asm"]["Ba"]).apply(null,arguments)};var _RotateWithOffset=Module["_RotateWithOffset"]=function(){return (_RotateWithOffset=Module["_RotateWithOffset"]=Module["asm"]["Ca"]).apply(null,arguments)};var _Rsqrt=Module["_Rsqrt"]=function(){return (_Rsqrt=Module["_Rsqrt"]=Module["asm"]["Da"]).apply(null,arguments)};var _ScatterNd=Module["_ScatterNd"]=function(){return (_ScatterNd=Module["_ScatterNd"]=Module["asm"]["Ea"]).apply(null,arguments)};var _SelectV2=Module["_SelectV2"]=function(){return (_SelectV2=Module["_SelectV2"]=Module["asm"]["Fa"]).apply(null,arguments)};var _Sigmoid=Module["_Sigmoid"]=function(){return (_Sigmoid=Module["_Sigmoid"]=Module["asm"]["Ga"]).apply(null,arguments)};var _Sin=Module["_Sin"]=function(){return (_Sin=Module["_Sin"]=Module["asm"]["Ha"]).apply(null,arguments)};var _Softmax=Module["_Softmax"]=function(){return (_Softmax=Module["_Softmax"]=Module["asm"]["Ia"]).apply(null,arguments)};var _Sqrt=Module["_Sqrt"]=function(){return (_Sqrt=Module["_Sqrt"]=Module["asm"]["Ja"]).apply(null,arguments)};var _Square=Module["_Square"]=function(){return (_Square=Module["_Square"]=Module["asm"]["Ka"]).apply(null,arguments)};var _SquaredDifference=Module["_SquaredDifference"]=function(){return (_SquaredDifference=Module["_SquaredDifference"]=Module["asm"]["La"]).apply(null,arguments)};var _StridedSlice=Module["_StridedSlice"]=function(){return (_StridedSlice=Module["_StridedSlice"]=Module["asm"]["Ma"]).apply(null,arguments)};var _Sub=Module["_Sub"]=function(){return (_Sub=Module["_Sub"]=Module["asm"]["Na"]).apply(null,arguments)};var _Sum=Module["_Sum"]=function(){return (_Sum=Module["_Sum"]=Module["asm"]["Oa"]).apply(null,arguments)};var _Tanh=Module["_Tanh"]=function(){return (_Tanh=Module["_Tanh"]=Module["asm"]["Pa"]).apply(null,arguments)};var _Tile=Module["_Tile"]=function(){return (_Tile=Module["_Tile"]=Module["asm"]["Qa"]).apply(null,arguments)};var _Transpose=Module["_Transpose"]=function(){return (_Transpose=Module["_Transpose"]=Module["asm"]["Ra"]).apply(null,arguments)};var __FusedMatMul=Module["__FusedMatMul"]=function(){return (__FusedMatMul=Module["__FusedMatMul"]=Module["asm"]["Sa"]).apply(null,arguments)};var _malloc=Module["_malloc"]=function(){return (_malloc=Module["_malloc"]=Module["asm"]["Ta"]).apply(null,arguments)};var _free=Module["_free"]=function(){return (_free=Module["_free"]=Module["asm"]["Ua"]).apply(null,arguments)};var _emscripten_get_global_libc=Module["_emscripten_get_global_libc"]=function(){return (_emscripten_get_global_libc=Module["_emscripten_get_global_libc"]=Module["asm"]["Va"]).apply(null,arguments)};var ___errno_location=Module["___errno_location"]=function(){return (___errno_location=Module["___errno_location"]=Module["asm"]["Wa"]).apply(null,arguments)};var ___em_js__initPthreadsJS=Module["___em_js__initPthreadsJS"]=function(){return (___em_js__initPthreadsJS=Module["___em_js__initPthreadsJS"]=Module["asm"]["Xa"]).apply(null,arguments)};var _memalign=Module["_memalign"]=function(){return (_memalign=Module["_memalign"]=Module["asm"]["Ya"]).apply(null,arguments)};var ___pthread_tsd_run_dtors=Module["___pthread_tsd_run_dtors"]=function(){return (___pthread_tsd_run_dtors=Module["___pthread_tsd_run_dtors"]=Module["asm"]["Za"]).apply(null,arguments)};var _emscripten_main_thread_process_queued_calls=Module["_emscripten_main_thread_process_queued_calls"]=function(){return (_emscripten_main_thread_process_queued_calls=Module["_emscripten_main_thread_process_queued_calls"]=Module["asm"]["_a"]).apply(null,arguments)};var _emscripten_current_thread_process_queued_calls=Module["_emscripten_current_thread_process_queued_calls"]=function(){return (_emscripten_current_thread_process_queued_calls=Module["_emscripten_current_thread_process_queued_calls"]=Module["asm"]["$a"]).apply(null,arguments)};var _emscripten_register_main_browser_thread_id=Module["_emscripten_register_main_browser_thread_id"]=function(){return (_emscripten_register_main_browser_thread_id=Module["_emscripten_register_main_browser_thread_id"]=Module["asm"]["ab"]).apply(null,arguments)};var _emscripten_main_browser_thread_id=Module["_emscripten_main_browser_thread_id"]=function(){return (_emscripten_main_browser_thread_id=Module["_emscripten_main_browser_thread_id"]=Module["asm"]["bb"]).apply(null,arguments)};var _emscripten_async_run_in_main_thread=Module["_emscripten_async_run_in_main_thread"]=function(){return (_emscripten_async_run_in_main_thread=Module["_emscripten_async_run_in_main_thread"]=Module["asm"]["cb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread=Module["_emscripten_sync_run_in_main_thread"]=function(){return (_emscripten_sync_run_in_main_thread=Module["_emscripten_sync_run_in_main_thread"]=Module["asm"]["db"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_0=Module["_emscripten_sync_run_in_main_thread_0"]=function(){return (_emscripten_sync_run_in_main_thread_0=Module["_emscripten_sync_run_in_main_thread_0"]=Module["asm"]["eb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_1=Module["_emscripten_sync_run_in_main_thread_1"]=function(){return (_emscripten_sync_run_in_main_thread_1=Module["_emscripten_sync_run_in_main_thread_1"]=Module["asm"]["fb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_2=Module["_emscripten_sync_run_in_main_thread_2"]=function(){return (_emscripten_sync_run_in_main_thread_2=Module["_emscripten_sync_run_in_main_thread_2"]=Module["asm"]["gb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_xprintf_varargs=Module["_emscripten_sync_run_in_main_thread_xprintf_varargs"]=function(){return (_emscripten_sync_run_in_main_thread_xprintf_varargs=Module["_emscripten_sync_run_in_main_thread_xprintf_varargs"]=Module["asm"]["hb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_3=Module["_emscripten_sync_run_in_main_thread_3"]=function(){return (_emscripten_sync_run_in_main_thread_3=Module["_emscripten_sync_run_in_main_thread_3"]=Module["asm"]["ib"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_4=Module["_emscripten_sync_run_in_main_thread_4"]=function(){return (_emscripten_sync_run_in_main_thread_4=Module["_emscripten_sync_run_in_main_thread_4"]=Module["asm"]["jb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_5=Module["_emscripten_sync_run_in_main_thread_5"]=function(){return (_emscripten_sync_run_in_main_thread_5=Module["_emscripten_sync_run_in_main_thread_5"]=Module["asm"]["kb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_6=Module["_emscripten_sync_run_in_main_thread_6"]=function(){return (_emscripten_sync_run_in_main_thread_6=Module["_emscripten_sync_run_in_main_thread_6"]=Module["asm"]["lb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_7=Module["_emscripten_sync_run_in_main_thread_7"]=function(){return (_emscripten_sync_run_in_main_thread_7=Module["_emscripten_sync_run_in_main_thread_7"]=Module["asm"]["mb"]).apply(null,arguments)};var _emscripten_run_in_main_runtime_thread_js=Module["_emscripten_run_in_main_runtime_thread_js"]=function(){return (_emscripten_run_in_main_runtime_thread_js=Module["_emscripten_run_in_main_runtime_thread_js"]=Module["asm"]["nb"]).apply(null,arguments)};var _emscripten_async_queue_on_thread_=Module["_emscripten_async_queue_on_thread_"]=function(){return (_emscripten_async_queue_on_thread_=Module["_emscripten_async_queue_on_thread_"]=Module["asm"]["ob"]).apply(null,arguments)};var _emscripten_tls_init=Module["_emscripten_tls_init"]=function(){return (_emscripten_tls_init=Module["_emscripten_tls_init"]=Module["asm"]["pb"]).apply(null,arguments)};var stackSave=Module["stackSave"]=function(){return (stackSave=Module["stackSave"]=Module["asm"]["qb"]).apply(null,arguments)};var stackAlloc=Module["stackAlloc"]=function(){return (stackAlloc=Module["stackAlloc"]=Module["asm"]["rb"]).apply(null,arguments)};var stackRestore=Module["stackRestore"]=function(){return (stackRestore=Module["stackRestore"]=Module["asm"]["sb"]).apply(null,arguments)};var dynCall_vi=Module["dynCall_vi"]=function(){return (dynCall_vi=Module["dynCall_vi"]=Module["asm"]["tb"]).apply(null,arguments)};var dynCall_v=Module["dynCall_v"]=function(){return (dynCall_v=Module["dynCall_v"]=Module["asm"]["ub"]).apply(null,arguments)};var dynCall_ii=Module["dynCall_ii"]=function(){return (dynCall_ii=Module["dynCall_ii"]=Module["asm"]["vb"]).apply(null,arguments)};Module["asm"]=asm;Module["cwrap"]=cwrap;Module["PThread"]=PThread;Module["PThread"]=PThread;Module["_pthread_self"]=_pthread_self;Module["wasmMemory"]=wasmMemory;Module["ExitStatus"]=ExitStatus;var calledRun;Module["then"]=function(func){if(calledRun){func(Module);}else{var old=Module["onRuntimeInitialized"];Module["onRuntimeInitialized"]=function(){if(old)old();func(Module);};}return Module};function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status;}dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller;};function run(args){if(runDependencies>0){return}preRun();if(runDependencies>0)return;function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();postRun();}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("");},1);doRun();},1);}else{doRun();}}Module["run"]=run;if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()();}}if(!ENVIRONMENT_IS_PTHREAD)noExitRuntime=true;if(!ENVIRONMENT_IS_PTHREAD)run();
+  function GROWABLE_HEAP_I8(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAP8}function GROWABLE_HEAP_U8(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPU8}function GROWABLE_HEAP_I32(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAP32}function GROWABLE_HEAP_U32(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPU32}function GROWABLE_HEAP_F64(){if(wasmMemory.buffer!=buffer){updateGlobalBufferAndViews(wasmMemory.buffer);}return HEAPF64}var Module=typeof WasmBackendModule!=="undefined"?WasmBackendModule:{};var readyPromiseResolve,readyPromiseReject;Module["ready"]=new Promise(function(resolve,reject){readyPromiseResolve=resolve;readyPromiseReject=reject;});var moduleOverrides={};var key;for(key in Module){if(Module.hasOwnProperty(key)){moduleOverrides[key]=Module[key];}}var arguments_=[];var thisProgram="./this.program";var quit_=function(status,toThrow){throw toThrow};var ENVIRONMENT_IS_WEB=false;var ENVIRONMENT_IS_WORKER=false;var ENVIRONMENT_IS_NODE=false;var ENVIRONMENT_IS_SHELL=false;ENVIRONMENT_IS_WEB=typeof window==="object";ENVIRONMENT_IS_WORKER=typeof importScripts==="function";ENVIRONMENT_IS_NODE=typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string";ENVIRONMENT_IS_SHELL=!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_NODE&&!ENVIRONMENT_IS_WORKER;var ENVIRONMENT_IS_PTHREAD=Module["ENVIRONMENT_IS_PTHREAD"]||false;if(ENVIRONMENT_IS_PTHREAD){buffer=Module["buffer"];}var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readAsync,readBinary;var nodeFS;var nodePath;if(ENVIRONMENT_IS_NODE){if(ENVIRONMENT_IS_WORKER){scriptDirectory=path.dirname(scriptDirectory)+"/";}else {scriptDirectory=__dirname+"/";}read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};if(process["argv"].length>1){thisProgram=process["argv"][1].replace(/\\/g,"/");}arguments_=process["argv"].slice(2);process["on"]("uncaughtException",function(ex){if(!(ex instanceof ExitStatus)){throw ex}});process["on"]("unhandledRejection",abort);quit_=function(status){process["exit"](status);};Module["inspect"]=function(){return "[Emscripten Module object]"};var nodeWorkerThreads;try{nodeWorkerThreads=worker_threads;}catch(e){console.error('The "worker_threads" module is not supported in this node.js build - perhaps a newer version is needed?');throw e}commonjsGlobal.Worker=nodeWorkerThreads.Worker;}else if(ENVIRONMENT_IS_SHELL){if(typeof read!="undefined"){read_=function shell_read(f){return read(f)};}readBinary=function readBinary(f){var data;if(typeof readbuffer==="function"){return new Uint8Array(readbuffer(f))}data=read(f,"binary");assert(typeof data==="object");return data};if(typeof scriptArgs!="undefined"){arguments_=scriptArgs;}else if(typeof arguments!="undefined"){arguments_=arguments;}if(typeof quit==="function"){quit_=function(status){quit(status);};}if(typeof print!=="undefined"){if(typeof console==="undefined")console={};console.log=print;console.warn=console.error=typeof printErr!=="undefined"?printErr:print;}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href;}else if(typeof document!=="undefined"&&document.currentScript){scriptDirectory=document.currentScript.src;}if(typeof _scriptDir !== "undefined" && _scriptDir){scriptDirectory=_scriptDir;}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.lastIndexOf("/")+1);}else {scriptDirectory="";}if(ENVIRONMENT_IS_NODE){read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};}else {read_=function(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=function(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)};}readAsync=function(url,onload,onerror){var xhr=new XMLHttpRequest;xhr.open("GET",url,true);xhr.responseType="arraybuffer";xhr.onload=function(){if(xhr.status==200||xhr.status==0&&xhr.response){onload(xhr.response);return}onerror();};xhr.onerror=onerror;xhr.send(null);};}}if(ENVIRONMENT_IS_NODE){if(typeof performance==="undefined"){commonjsGlobal.performance=perf_hooks.performance;}}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);for(key in moduleOverrides){if(moduleOverrides.hasOwnProperty(key)){Module[key]=moduleOverrides[key];}}moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime=Module["noExitRuntime"]||true;if(typeof WebAssembly!=="object"){abort("no native wasm support detected");}var wasmMemory;var wasmModule;var ABORT=false;function assert(condition,text){if(!condition){abort("Assertion failed: "+text);}}function getCFunc(ident){var func=Module["_"+ident];assert(func,"Cannot call unknown function "+ident+", make sure it is exported");return func}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":function(str){var ret=0;if(str!==null&&str!==undefined&&str!==0){var len=(str.length<<2)+1;ret=stackAlloc(len);stringToUTF8(str,ret,len);}return ret},"array":function(arr){var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string")return UTF8ToString(ret);if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i]);}else {cArgs[i]=args[i];}}}var ret=func.apply(null,cArgs);ret=convertReturnValue(ret);if(stack!==0)stackRestore(stack);return ret}function cwrap(ident,returnType,argTypes,opts){argTypes=argTypes||[];var numericArgs=argTypes.every(function(type){return type==="number"});var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments)}}function UTF8ArrayToString(heap,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var str="";while(!(idx>=endIdx)){var u0=heap[idx++];if(!u0)return str;if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heap[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heap[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2;}else {u0=(u0&7)<<18|u1<<12|u2<<6|heap[idx++]&63;}if(u0<65536){str+=String.fromCharCode(u0);}else {var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023);}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(GROWABLE_HEAP_U8(),ptr,maxBytesToRead):""}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023;}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u;}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63;}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}else {if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}}heap[outIdx]=0;return outIdx-startIdx}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,GROWABLE_HEAP_U8(),outPtr,maxBytesToWrite)}function lengthBytesUTF8(str){var len=0;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343)u=65536+((u&1023)<<10)|str.charCodeAt(++i)&1023;if(u<=127)++len;else if(u<=2047)len+=2;else if(u<=65535)len+=3;else len+=4;}return len}function writeArrayToMemory(array,buffer){GROWABLE_HEAP_I8().set(array,buffer);}function alignUp(x,multiple){if(x%multiple>0){x+=multiple-x%multiple;}return x}var buffer,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64;function updateGlobalBufferAndViews(buf){buffer=buf;Module["HEAP8"]=HEAP8=new Int8Array(buf);Module["HEAP16"]=HEAP16=new Int16Array(buf);Module["HEAP32"]=HEAP32=new Int32Array(buf);Module["HEAPU8"]=HEAPU8=new Uint8Array(buf);Module["HEAPU16"]=HEAPU16=new Uint16Array(buf);Module["HEAPU32"]=HEAPU32=new Uint32Array(buf);Module["HEAPF32"]=HEAPF32=new Float32Array(buf);Module["HEAPF64"]=HEAPF64=new Float64Array(buf);}var INITIAL_MEMORY=Module["INITIAL_MEMORY"]||16777216;if(ENVIRONMENT_IS_PTHREAD){wasmMemory=Module["wasmMemory"];buffer=Module["buffer"];}else {if(Module["wasmMemory"]){wasmMemory=Module["wasmMemory"];}else {wasmMemory=new WebAssembly.Memory({"initial":INITIAL_MEMORY/65536,"maximum":2147483648/65536,"shared":true});if(!(wasmMemory.buffer instanceof SharedArrayBuffer)){err("requested a shared WebAssembly.Memory but the returned buffer is not a SharedArrayBuffer, indicating that while the browser has SharedArrayBuffer it does not have WebAssembly threads support - you may need to set a flag");if(ENVIRONMENT_IS_NODE){console.log("(on node you may need: --experimental-wasm-threads --experimental-wasm-bulk-memory and also use a recent version)");}throw Error("bad memory")}}}if(wasmMemory){buffer=wasmMemory.buffer;}INITIAL_MEMORY=buffer.byteLength;updateGlobalBufferAndViews(buffer);var wasmTable;var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];if(!ENVIRONMENT_IS_PTHREAD)__ATINIT__.push({func:function(){___wasm_call_ctors();}});function preRun(){if(ENVIRONMENT_IS_PTHREAD)return;if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift());}}callRuntimeCallbacks(__ATPRERUN__);}function initRuntime(){if(ENVIRONMENT_IS_PTHREAD)return;callRuntimeCallbacks(__ATINIT__);}function preMain(){if(ENVIRONMENT_IS_PTHREAD)return;callRuntimeCallbacks(__ATMAIN__);}function postRun(){if(ENVIRONMENT_IS_PTHREAD)return;if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift());}}callRuntimeCallbacks(__ATPOSTRUN__);}function addOnPreRun(cb){__ATPRERUN__.unshift(cb);}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb);}var runDependencies=0;var dependenciesFulfilled=null;function addRunDependency(id){assert(!ENVIRONMENT_IS_PTHREAD,"addRunDependency cannot be used in a pthread worker");runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}if(runDependencies==0){if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback();}}}Module["preloadedImages"]={};Module["preloadedAudios"]={};function abort(what){if(Module["onAbort"]){Module["onAbort"](what);}if(ENVIRONMENT_IS_PTHREAD)console.error("Pthread aborting at "+(new Error).stack);what+="";err(what);ABORT=true;what="abort("+what+"). Build with -s ASSERTIONS=1 for more info.";var e=new WebAssembly.RuntimeError(what);readyPromiseReject(e);throw e}function hasPrefix(str,prefix){return String.prototype.startsWith?str.startsWith(prefix):str.indexOf(prefix)===0}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return hasPrefix(filename,dataURIPrefix)}var fileURIPrefix="file://";function isFileURI(filename){return hasPrefix(filename,fileURIPrefix)}var wasmBinaryFile="tfjs-backend-wasm.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile);}function getBinary(file){try{if(file==wasmBinaryFile&&wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(file)}else {throw "both async and sync fetching of the wasm failed"}}catch(err){abort(err);}}function getBinaryPromise(){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)){if(typeof fetch==="function"&&!isFileURI(wasmBinaryFile)){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw "failed to load wasm binary file at '"+wasmBinaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary(wasmBinaryFile)})}else {if(readAsync){return new Promise(function(resolve,reject){readAsync(wasmBinaryFile,function(response){resolve(new Uint8Array(response));},reject);})}}}return Promise.resolve().then(function(){return getBinary(wasmBinaryFile)})}function createWasm(){var info={"a":asmLibraryArg};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmTable=Module["asm"]["D"];wasmModule=module;if(!ENVIRONMENT_IS_PTHREAD){removeRunDependency();}}if(!ENVIRONMENT_IS_PTHREAD){addRunDependency();}function receiveInstantiatedSource(output){receiveInstance(output["instance"],output["module"]);}function instantiateArrayBuffer(receiver){return getBinaryPromise().then(function(binary){return WebAssembly.instantiate(binary,info)}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason);})}function instantiateAsync(){if(!wasmBinary&&typeof WebAssembly.instantiateStreaming==="function"&&!isDataURI(wasmBinaryFile)&&!isFileURI(wasmBinaryFile)&&typeof fetch==="function"){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,info);return result.then(receiveInstantiatedSource,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");return instantiateArrayBuffer(receiveInstantiatedSource)})})}else {return instantiateArrayBuffer(receiveInstantiatedSource)}}if(Module["instantiateWasm"]){try{var exports=Module["instantiateWasm"](info,receiveInstance);return exports}catch(e){err("Module.instantiateWasm callback failed with error: "+e);return false}}instantiateAsync().catch(readyPromiseReject);return {}}var ASM_CONSTS={9800:function(){throw "Canceled!"},9818:function($0,$1){setTimeout(function(){__emscripten_do_dispatch_to_thread($0,$1);},0);}};function initPthreadsJS(){PThread.initRuntime();}function callRuntimeCallbacks(callbacks){while(callbacks.length>0){var callback=callbacks.shift();if(typeof callback=="function"){callback(Module);continue}var func=callback.func;if(typeof func==="number"){if(callback.arg===undefined){wasmTable.get(func)();}else {wasmTable.get(func)(callback.arg);}}else {func(callback.arg===undefined?null:callback.arg);}}}function _emscripten_futex_wake(addr,count){if(addr<=0||addr>GROWABLE_HEAP_I8().length||addr&3!=0||count<0)return -28;if(count==0)return 0;if(count>=2147483647)count=Infinity;var mainThreadWaitAddress=Atomics.load(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2);var mainThreadWoken=0;if(mainThreadWaitAddress==addr){var loadedAddr=Atomics.compareExchange(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2,mainThreadWaitAddress,0);if(loadedAddr==mainThreadWaitAddress){--count;mainThreadWoken=1;if(count<=0)return 1}}var ret=Atomics.notify(GROWABLE_HEAP_I32(),addr>>2,count);if(ret>=0)return ret+mainThreadWoken;throw "Atomics.notify returned an unexpected value "+ret}Module["_emscripten_futex_wake"]=_emscripten_futex_wake;function killThread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! killThread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in killThread!";GROWABLE_HEAP_I32()[pthread_ptr+12>>2]=0;var pthread=PThread.pthreads[pthread_ptr];pthread.worker.terminate();PThread.freeThreadData(pthread);PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(pthread.worker),1);pthread.worker.pthread=undefined;}function cancelThread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! cancelThread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in cancelThread!";var pthread=PThread.pthreads[pthread_ptr];pthread.worker.postMessage({"cmd":"cancel"});}function cleanupThread(pthread_ptr){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! cleanupThread() can only ever be called from main application thread!";if(!pthread_ptr)throw "Internal Error! Null pthread_ptr in cleanupThread!";var pthread=PThread.pthreads[pthread_ptr];if(pthread){GROWABLE_HEAP_I32()[pthread_ptr+12>>2]=0;var worker=pthread.worker;PThread.returnWorkerToPool(worker);}}var PThread={unusedWorkers:[],runningWorkers:[],initMainThreadBlock:function(){},initRuntime:function(){var tb=_malloc(228);for(var i=0;i<228/4;++i)GROWABLE_HEAP_U32()[tb/4+i]=0;GROWABLE_HEAP_I32()[tb+12>>2]=tb;var headPtr=tb+152;GROWABLE_HEAP_I32()[headPtr>>2]=headPtr;var tlsMemory=_malloc(512);for(var i=0;i<128;++i)GROWABLE_HEAP_U32()[tlsMemory/4+i]=0;Atomics.store(GROWABLE_HEAP_U32(),tb+100>>2,tlsMemory);Atomics.store(GROWABLE_HEAP_U32(),tb+40>>2,tb);__emscripten_thread_init(tb,!ENVIRONMENT_IS_WORKER,1);_emscripten_register_main_browser_thread_id(tb);},initWorker:function(){},pthreads:{},threadExitHandlers:[],setThreadStatus:function(){},runExitHandlers:function(){while(PThread.threadExitHandlers.length>0){PThread.threadExitHandlers.pop()();}if(ENVIRONMENT_IS_PTHREAD&&_pthread_self())___pthread_tsd_run_dtors();},runExitHandlersAndDeinitThread:function(tb,exitCode){Atomics.store(GROWABLE_HEAP_U32(),tb+56>>2,1);Atomics.store(GROWABLE_HEAP_U32(),tb+60>>2,0);PThread.runExitHandlers();Atomics.store(GROWABLE_HEAP_U32(),tb+4>>2,exitCode);Atomics.store(GROWABLE_HEAP_U32(),tb+0>>2,1);_emscripten_futex_wake(tb+0,2147483647);__emscripten_thread_init(0,0,0);},threadExit:function(exitCode){var tb=_pthread_self();if(tb){PThread.runExitHandlersAndDeinitThread(tb,exitCode);if(ENVIRONMENT_IS_PTHREAD){postMessage({"cmd":"exit"});}}},threadCancel:function(){PThread.runExitHandlersAndDeinitThread(_pthread_self(),-1);postMessage({"cmd":"cancelDone"});},terminateAllThreads:function(){for(var t in PThread.pthreads){var pthread=PThread.pthreads[t];if(pthread&&pthread.worker){PThread.returnWorkerToPool(pthread.worker);}}PThread.pthreads={};for(var i=0;i<PThread.unusedWorkers.length;++i){var worker=PThread.unusedWorkers[i];worker.terminate();}PThread.unusedWorkers=[];for(var i=0;i<PThread.runningWorkers.length;++i){var worker=PThread.runningWorkers[i];var pthread=worker.pthread;PThread.freeThreadData(pthread);worker.terminate();}PThread.runningWorkers=[];},freeThreadData:function(pthread){if(!pthread)return;if(pthread.threadInfoStruct){var tlsMemory=GROWABLE_HEAP_I32()[pthread.threadInfoStruct+100>>2];GROWABLE_HEAP_I32()[pthread.threadInfoStruct+100>>2]=0;_free(tlsMemory);_free(pthread.threadInfoStruct);}pthread.threadInfoStruct=0;if(pthread.allocatedOwnStack&&pthread.stackBase)_free(pthread.stackBase);pthread.stackBase=0;if(pthread.worker)pthread.worker.pthread=null;},returnWorkerToPool:function(worker){PThread.runWithoutMainThreadQueuedCalls(function(){delete PThread.pthreads[worker.pthread.threadInfoStruct];PThread.unusedWorkers.push(worker);PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(worker),1);PThread.freeThreadData(worker.pthread);worker.pthread=undefined;});},runWithoutMainThreadQueuedCalls:function(func){GROWABLE_HEAP_I32()[__emscripten_allow_main_runtime_queued_calls>>2]=0;try{func();}finally{GROWABLE_HEAP_I32()[__emscripten_allow_main_runtime_queued_calls>>2]=1;}},receiveObjectTransfer:function(data){},loadWasmModuleToWorker:function(worker,onFinishedLoading){worker.onmessage=function(e){var d=e["data"];var cmd=d["cmd"];if(worker.pthread)PThread.currentProxiedOperationCallerThread=worker.pthread.threadInfoStruct;if(d["targetThread"]&&d["targetThread"]!=_pthread_self()){var thread=PThread.pthreads[d.targetThread];if(thread){thread.worker.postMessage(e.data,d["transferList"]);}else {console.error('Internal error! Worker sent a message "'+cmd+'" to target pthread '+d["targetThread"]+", but that thread no longer exists!");}PThread.currentProxiedOperationCallerThread=undefined;return}if(cmd==="processQueuedMainThreadWork"){_emscripten_main_thread_process_queued_calls();}else if(cmd==="spawnThread"){spawnThread(e.data);}else if(cmd==="cleanupThread"){cleanupThread(d["thread"]);}else if(cmd==="killThread"){killThread(d["thread"]);}else if(cmd==="cancelThread"){cancelThread(d["thread"]);}else if(cmd==="loaded"){worker.loaded=true;if(onFinishedLoading)onFinishedLoading(worker);if(worker.runPthread){worker.runPthread();delete worker.runPthread;}}else if(cmd==="print"){out("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="printErr"){err("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="alert"){alert("Thread "+d["threadId"]+": "+d["text"]);}else if(cmd==="exit"){var detached=worker.pthread&&Atomics.load(GROWABLE_HEAP_U32(),worker.pthread.threadInfoStruct+64>>2);if(detached){PThread.returnWorkerToPool(worker);}}else if(cmd==="exitProcess"){try{exit(d["returnCode"]);}catch(e){if(e instanceof ExitStatus)return;throw e}}else if(cmd==="cancelDone"){PThread.returnWorkerToPool(worker);}else if(cmd==="objectTransfer"){PThread.receiveObjectTransfer(e.data);}else if(e.data.target==="setimmediate"){worker.postMessage(e.data);}else {err("worker sent an unknown command "+cmd);}PThread.currentProxiedOperationCallerThread=undefined;};worker.onerror=function(e){err("pthread sent an error! "+e.filename+":"+e.lineno+": "+e.message);};if(ENVIRONMENT_IS_NODE){worker.on("message",function(data){worker.onmessage({data:data});});worker.on("error",function(data){worker.onerror(data);});worker.on("exit",function(data){});}worker.postMessage({"cmd":"load","urlOrBlob":Module["mainScriptUrlOrBlob"]||_scriptDir,"wasmMemory":wasmMemory,"wasmModule":wasmModule});},allocateUnusedWorker:function(){var pthreadMainJs=locateFile("tfjs-backend-wasm.worker.js");PThread.unusedWorkers.push(new Worker(pthreadMainJs));},getNewWorker:function(){if(PThread.unusedWorkers.length==0){PThread.allocateUnusedWorker();PThread.loadWasmModuleToWorker(PThread.unusedWorkers[0]);}if(PThread.unusedWorkers.length>0)return PThread.unusedWorkers.pop();else return null},busySpinWait:function(msecs){var t=performance.now()+msecs;while(performance.now()<t){}}};function establishStackSpace(stackTop,stackMax){_emscripten_stack_set_limits(stackTop,stackMax);stackRestore(stackTop);}Module["establishStackSpace"]=establishStackSpace;function getNoExitRuntime(){return noExitRuntime}Module["getNoExitRuntime"]=getNoExitRuntime;function invokeEntryPoint(ptr,arg){return wasmTable.get(ptr)(arg)}Module["invokeEntryPoint"]=invokeEntryPoint;function ___assert_fail(condition,filename,line,func){abort("Assertion failed: "+UTF8ToString(condition)+", at: "+[filename?UTF8ToString(filename):"unknown filename",line,func?UTF8ToString(func):"unknown function"]);}var _emscripten_get_now;if(ENVIRONMENT_IS_NODE){_emscripten_get_now=function(){var t=process["hrtime"]();return t[0]*1e3+t[1]/1e6};}else if(ENVIRONMENT_IS_PTHREAD){_emscripten_get_now=function(){return performance.now()-Module["__performance_now_clock_drift"]};}else if(typeof dateNow!=="undefined"){_emscripten_get_now=dateNow;}else _emscripten_get_now=function(){return performance.now()};function setErrNo(value){GROWABLE_HEAP_I32()[___errno_location()>>2]=value;return value}function _atexit(func,arg){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(1,1,func,arg)}function __emscripten_notify_thread_queue(targetThreadId,mainThreadId){if(targetThreadId==mainThreadId){postMessage({"cmd":"processQueuedMainThreadWork"});}else if(ENVIRONMENT_IS_PTHREAD){postMessage({"targetThread":targetThreadId,"cmd":"processThreadQueue"});}else {var pthread=PThread.pthreads[targetThreadId];var worker=pthread&&pthread.worker;if(!worker){return}worker.postMessage({"cmd":"processThreadQueue"});}return 1}function _abort(){abort();}function _emscripten_asm_const_int(code,sigPtr,argbuf){var args=readAsmConstArgs(sigPtr,argbuf);return ASM_CONSTS[code].apply(null,args)}function _emscripten_conditional_set_current_thread_status(expectedStatus,newStatus){}function _emscripten_futex_wait(addr,val,timeout){if(addr<=0||addr>GROWABLE_HEAP_I8().length||addr&3!=0)return -28;if(!ENVIRONMENT_IS_WEB){var ret=Atomics.wait(GROWABLE_HEAP_I32(),addr>>2,val,timeout);if(ret==="timed-out")return -73;if(ret==="not-equal")return -6;if(ret==="ok")return 0;throw "Atomics.wait returned an unexpected value "+ret}else {if(Atomics.load(GROWABLE_HEAP_I32(),addr>>2)!=val){return -6}var tNow=performance.now();var tEnd=tNow+timeout;var lastAddr=Atomics.exchange(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2,addr);while(1){tNow=performance.now();if(tNow>tEnd){lastAddr=Atomics.exchange(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2,0);return -73}lastAddr=Atomics.exchange(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2,0);if(lastAddr==0){break}_emscripten_main_thread_process_queued_calls();if(Atomics.load(GROWABLE_HEAP_I32(),addr>>2)!=val){return -6}lastAddr=Atomics.exchange(GROWABLE_HEAP_I32(),__emscripten_main_thread_futex>>2,addr);}return 0}}function _emscripten_memcpy_big(dest,src,num){GROWABLE_HEAP_U8().copyWithin(dest,src,src+num);}function _emscripten_num_logical_cores(){if(ENVIRONMENT_IS_NODE)return os.cpus().length;return navigator["hardwareConcurrency"]}function _emscripten_proxy_to_main_thread_js(index,sync){var numCallArgs=arguments.length-2;var stack=stackSave();var serializedNumCallArgs=numCallArgs;var args=stackAlloc(serializedNumCallArgs*8);var b=args>>3;for(var i=0;i<numCallArgs;i++){var arg=arguments[2+i];GROWABLE_HEAP_F64()[b+i]=arg;}var ret=_emscripten_run_in_main_runtime_thread_js(index,serializedNumCallArgs,args,sync);stackRestore(stack);return ret}var _emscripten_receive_on_main_thread_js_callArgs=[];var readAsmConstArgsArray=[];function readAsmConstArgs(sigPtr,buf){readAsmConstArgsArray.length=0;var ch;buf>>=2;while(ch=GROWABLE_HEAP_U8()[sigPtr++]){var double=ch<105;if(double&&buf&1)buf++;readAsmConstArgsArray.push(double?GROWABLE_HEAP_F64()[buf++>>1]:GROWABLE_HEAP_I32()[buf]);++buf;}return readAsmConstArgsArray}function _emscripten_receive_on_main_thread_js(index,numCallArgs,args){_emscripten_receive_on_main_thread_js_callArgs.length=numCallArgs;var b=args>>3;for(var i=0;i<numCallArgs;i++){_emscripten_receive_on_main_thread_js_callArgs[i]=GROWABLE_HEAP_F64()[b+i];}var isEmAsmConst=index<0;var func=!isEmAsmConst?proxiedFunctionTable[index]:ASM_CONSTS[-index-1];return func.apply(null,_emscripten_receive_on_main_thread_js_callArgs)}function _emscripten_get_heap_size(){return GROWABLE_HEAP_U8().length}function emscripten_realloc_buffer(size){try{wasmMemory.grow(size-buffer.byteLength+65535>>>16);updateGlobalBufferAndViews(wasmMemory.buffer);return 1}catch(e){}}function _emscripten_resize_heap(requestedSize){var oldSize=_emscripten_get_heap_size();if(requestedSize<=oldSize){return false}var maxHeapSize=2147483648;if(requestedSize>maxHeapSize){return false}for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignUp(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=emscripten_realloc_buffer(newSize);if(replacement){return true}}return false}var JSEvents={inEventHandler:0,removeAllEventListeners:function(){for(var i=JSEvents.eventHandlers.length-1;i>=0;--i){JSEvents._removeHandler(i);}JSEvents.eventHandlers=[];JSEvents.deferredCalls=[];},registerRemoveEventListeners:function(){if(!JSEvents.removeEventListenersRegistered){JSEvents.removeEventListenersRegistered=true;}},deferredCalls:[],deferCall:function(targetFunction,precedence,argsList){function arraysHaveEqualContent(arrA,arrB){if(arrA.length!=arrB.length)return false;for(var i in arrA){if(arrA[i]!=arrB[i])return false}return true}for(var i in JSEvents.deferredCalls){var call=JSEvents.deferredCalls[i];if(call.targetFunction==targetFunction&&arraysHaveEqualContent(call.argsList,argsList)){return}}JSEvents.deferredCalls.push({targetFunction:targetFunction,precedence:precedence,argsList:argsList});JSEvents.deferredCalls.sort(function(x,y){return x.precedence<y.precedence});},removeDeferredCalls:function(targetFunction){for(var i=0;i<JSEvents.deferredCalls.length;++i){if(JSEvents.deferredCalls[i].targetFunction==targetFunction){JSEvents.deferredCalls.splice(i,1);--i;}}},canPerformEventHandlerRequests:function(){return JSEvents.inEventHandler&&JSEvents.currentEventHandler.allowsDeferredCalls},runDeferredCalls:function(){if(!JSEvents.canPerformEventHandlerRequests()){return}for(var i=0;i<JSEvents.deferredCalls.length;++i){var call=JSEvents.deferredCalls[i];JSEvents.deferredCalls.splice(i,1);--i;call.targetFunction.apply(null,call.argsList);}},eventHandlers:[],removeAllHandlersOnTarget:function(target,eventTypeString){for(var i=0;i<JSEvents.eventHandlers.length;++i){if(JSEvents.eventHandlers[i].target==target&&(!eventTypeString||eventTypeString==JSEvents.eventHandlers[i].eventTypeString)){JSEvents._removeHandler(i--);}}},_removeHandler:function(i){var h=JSEvents.eventHandlers[i];h.target.removeEventListener(h.eventTypeString,h.eventListenerFunc,h.useCapture);JSEvents.eventHandlers.splice(i,1);},registerOrRemoveHandler:function(eventHandler){var jsEventHandler=function jsEventHandler(event){++JSEvents.inEventHandler;JSEvents.currentEventHandler=eventHandler;JSEvents.runDeferredCalls();eventHandler.handlerFunc(event);JSEvents.runDeferredCalls();--JSEvents.inEventHandler;};if(eventHandler.callbackfunc){eventHandler.eventListenerFunc=jsEventHandler;eventHandler.target.addEventListener(eventHandler.eventTypeString,jsEventHandler,eventHandler.useCapture);JSEvents.eventHandlers.push(eventHandler);JSEvents.registerRemoveEventListeners();}else {for(var i=0;i<JSEvents.eventHandlers.length;++i){if(JSEvents.eventHandlers[i].target==eventHandler.target&&JSEvents.eventHandlers[i].eventTypeString==eventHandler.eventTypeString){JSEvents._removeHandler(i--);}}}},queueEventHandlerOnThread_iiii:function(targetThread,eventHandlerFunc,eventTypeId,eventData,userData){var stackTop=stackSave();var varargs=stackAlloc(12);GROWABLE_HEAP_I32()[varargs>>2]=eventTypeId;GROWABLE_HEAP_I32()[varargs+4>>2]=eventData;GROWABLE_HEAP_I32()[varargs+8>>2]=userData;__emscripten_call_on_thread(0,targetThread,637534208,eventHandlerFunc,eventData,varargs);stackRestore(stackTop);},getTargetThreadForEventCallback:function(targetThread){switch(targetThread){case 1:return 0;case 2:return PThread.currentProxiedOperationCallerThread;default:return targetThread}},getNodeNameForTarget:function(target){if(!target)return "";if(target==window)return "#window";if(target==screen)return "#screen";return target&&target.nodeName?target.nodeName:""},fullscreenEnabled:function(){return document.fullscreenEnabled||document.webkitFullscreenEnabled}};function stringToNewUTF8(jsString){var length=lengthBytesUTF8(jsString)+1;var cString=_malloc(length);stringToUTF8(jsString,cString,length);return cString}function _emscripten_set_offscreencanvas_size_on_target_thread_js(targetThread,targetCanvas,width,height){var stackTop=stackSave();var varargs=stackAlloc(12);var targetCanvasPtr=0;if(targetCanvas){targetCanvasPtr=stringToNewUTF8(targetCanvas);}GROWABLE_HEAP_I32()[varargs>>2]=targetCanvasPtr;GROWABLE_HEAP_I32()[varargs+4>>2]=width;GROWABLE_HEAP_I32()[varargs+8>>2]=height;__emscripten_call_on_thread(0,targetThread,657457152,0,targetCanvasPtr,varargs);stackRestore(stackTop);}function _emscripten_set_offscreencanvas_size_on_target_thread(targetThread,targetCanvas,width,height){targetCanvas=targetCanvas?UTF8ToString(targetCanvas):"";_emscripten_set_offscreencanvas_size_on_target_thread_js(targetThread,targetCanvas,width,height);}function maybeCStringToJsString(cString){return cString>2?UTF8ToString(cString):cString}var specialHTMLTargets=[0,typeof document!=="undefined"?document:0,typeof window!=="undefined"?window:0];function findEventTarget(target){target=maybeCStringToJsString(target);var domElement=specialHTMLTargets[target]||(typeof document!=="undefined"?document.querySelector(target):undefined);return domElement}function findCanvasEventTarget(target){return findEventTarget(target)}function _emscripten_set_canvas_element_size_calling_thread(target,width,height){var canvas=findCanvasEventTarget(target);if(!canvas)return -4;if(canvas.canvasSharedPtr){GROWABLE_HEAP_I32()[canvas.canvasSharedPtr>>2]=width;GROWABLE_HEAP_I32()[canvas.canvasSharedPtr+4>>2]=height;}if(canvas.offscreenCanvas||!canvas.controlTransferredOffscreen){if(canvas.offscreenCanvas)canvas=canvas.offscreenCanvas;var autoResizeViewport=false;if(canvas.GLctxObject&&canvas.GLctxObject.GLctx){var prevViewport=canvas.GLctxObject.GLctx.getParameter(2978);autoResizeViewport=prevViewport[0]===0&&prevViewport[1]===0&&prevViewport[2]===canvas.width&&prevViewport[3]===canvas.height;}canvas.width=width;canvas.height=height;if(autoResizeViewport){canvas.GLctxObject.GLctx.viewport(0,0,width,height);}}else if(canvas.canvasSharedPtr){var targetThread=GROWABLE_HEAP_I32()[canvas.canvasSharedPtr+8>>2];_emscripten_set_offscreencanvas_size_on_target_thread(targetThread,target,width,height);return 1}else {return -4}return 0}function _emscripten_set_canvas_element_size_main_thread(target,width,height){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(2,1,target,width,height);return _emscripten_set_canvas_element_size_calling_thread(target,width,height)}function _emscripten_set_canvas_element_size(target,width,height){var canvas=findCanvasEventTarget(target);if(canvas){return _emscripten_set_canvas_element_size_calling_thread(target,width,height)}else {return _emscripten_set_canvas_element_size_main_thread(target,width,height)}}function _emscripten_set_current_thread_status(newStatus){}function __webgl_enable_ANGLE_instanced_arrays(ctx){var ext=ctx.getExtension("ANGLE_instanced_arrays");if(ext){ctx["vertexAttribDivisor"]=function(index,divisor){ext["vertexAttribDivisorANGLE"](index,divisor);};ctx["drawArraysInstanced"]=function(mode,first,count,primcount){ext["drawArraysInstancedANGLE"](mode,first,count,primcount);};ctx["drawElementsInstanced"]=function(mode,count,type,indices,primcount){ext["drawElementsInstancedANGLE"](mode,count,type,indices,primcount);};return 1}}function __webgl_enable_OES_vertex_array_object(ctx){var ext=ctx.getExtension("OES_vertex_array_object");if(ext){ctx["createVertexArray"]=function(){return ext["createVertexArrayOES"]()};ctx["deleteVertexArray"]=function(vao){ext["deleteVertexArrayOES"](vao);};ctx["bindVertexArray"]=function(vao){ext["bindVertexArrayOES"](vao);};ctx["isVertexArray"]=function(vao){return ext["isVertexArrayOES"](vao)};return 1}}function __webgl_enable_WEBGL_draw_buffers(ctx){var ext=ctx.getExtension("WEBGL_draw_buffers");if(ext){ctx["drawBuffers"]=function(n,bufs){ext["drawBuffersWEBGL"](n,bufs);};return 1}}function __webgl_enable_WEBGL_multi_draw(ctx){return !!(ctx.multiDrawWebgl=ctx.getExtension("WEBGL_multi_draw"))}var GL={counter:1,buffers:[],programs:[],framebuffers:[],renderbuffers:[],textures:[],uniforms:[],shaders:[],vaos:[],contexts:{},offscreenCanvases:{},timerQueriesEXT:[],programInfos:{},stringCache:{},unpackAlignment:4,recordError:function recordError(errorCode){if(!GL.lastError){GL.lastError=errorCode;}},getNewId:function(table){var ret=GL.counter++;for(var i=table.length;i<ret;i++){table[i]=null;}return ret},getSource:function(shader,count,string,length){var source="";for(var i=0;i<count;++i){var len=length?GROWABLE_HEAP_I32()[length+i*4>>2]:-1;source+=UTF8ToString(GROWABLE_HEAP_I32()[string+i*4>>2],len<0?undefined:len);}return source},createContext:function(canvas,webGLContextAttributes){var ctx=canvas.getContext("webgl",webGLContextAttributes);if(!ctx)return 0;var handle=GL.registerContext(ctx,webGLContextAttributes);return handle},registerContext:function(ctx,webGLContextAttributes){var handle=_malloc(8);GROWABLE_HEAP_I32()[handle+4>>2]=_pthread_self();var context={handle:handle,attributes:webGLContextAttributes,version:webGLContextAttributes.majorVersion,GLctx:ctx};if(ctx.canvas)ctx.canvas.GLctxObject=context;GL.contexts[handle]=context;if(typeof webGLContextAttributes.enableExtensionsByDefault==="undefined"||webGLContextAttributes.enableExtensionsByDefault){GL.initExtensions(context);}return handle},makeContextCurrent:function(contextHandle){GL.currentContext=GL.contexts[contextHandle];Module.ctx=GLctx=GL.currentContext&&GL.currentContext.GLctx;return !(contextHandle&&!GLctx)},getContext:function(contextHandle){return GL.contexts[contextHandle]},deleteContext:function(contextHandle){if(GL.currentContext===GL.contexts[contextHandle])GL.currentContext=null;if(typeof JSEvents==="object")JSEvents.removeAllHandlersOnTarget(GL.contexts[contextHandle].GLctx.canvas);if(GL.contexts[contextHandle]&&GL.contexts[contextHandle].GLctx.canvas)GL.contexts[contextHandle].GLctx.canvas.GLctxObject=undefined;_free(GL.contexts[contextHandle].handle);GL.contexts[contextHandle]=null;},initExtensions:function(context){if(!context)context=GL.currentContext;if(context.initExtensionsDone)return;context.initExtensionsDone=true;var GLctx=context.GLctx;__webgl_enable_ANGLE_instanced_arrays(GLctx);__webgl_enable_OES_vertex_array_object(GLctx);__webgl_enable_WEBGL_draw_buffers(GLctx);GLctx.disjointTimerQueryExt=GLctx.getExtension("EXT_disjoint_timer_query");__webgl_enable_WEBGL_multi_draw(GLctx);var exts=GLctx.getSupportedExtensions()||[];exts.forEach(function(ext){if(ext.indexOf("lose_context")<0&&ext.indexOf("debug")<0){GLctx.getExtension(ext);}});},populateUniformTable:function(program){var p=GL.programs[program];var ptable=GL.programInfos[program]={uniforms:{},maxUniformLength:0,maxAttributeLength:-1,maxUniformBlockNameLength:-1};var utable=ptable.uniforms;var numUniforms=GLctx.getProgramParameter(p,35718);for(var i=0;i<numUniforms;++i){var u=GLctx.getActiveUniform(p,i);var name=u.name;ptable.maxUniformLength=Math.max(ptable.maxUniformLength,name.length+1);if(name.slice(-1)=="]"){name=name.slice(0,name.lastIndexOf("["));}var loc=GLctx.getUniformLocation(p,name);if(loc){var id=GL.getNewId(GL.uniforms);utable[name]=[u.size,id];GL.uniforms[id]=loc;for(var j=1;j<u.size;++j){var n=name+"["+j+"]";loc=GLctx.getUniformLocation(p,n);id=GL.getNewId(GL.uniforms);GL.uniforms[id]=loc;}}}}};var __emscripten_webgl_power_preferences=["default","low-power","high-performance"];function _emscripten_webgl_do_create_context(target,attributes){var a=attributes>>2;var powerPreference=GROWABLE_HEAP_I32()[a+(24>>2)];var contextAttributes={"alpha":!!GROWABLE_HEAP_I32()[a+(0>>2)],"depth":!!GROWABLE_HEAP_I32()[a+(4>>2)],"stencil":!!GROWABLE_HEAP_I32()[a+(8>>2)],"antialias":!!GROWABLE_HEAP_I32()[a+(12>>2)],"premultipliedAlpha":!!GROWABLE_HEAP_I32()[a+(16>>2)],"preserveDrawingBuffer":!!GROWABLE_HEAP_I32()[a+(20>>2)],"powerPreference":__emscripten_webgl_power_preferences[powerPreference],"failIfMajorPerformanceCaveat":!!GROWABLE_HEAP_I32()[a+(28>>2)],majorVersion:GROWABLE_HEAP_I32()[a+(32>>2)],minorVersion:GROWABLE_HEAP_I32()[a+(36>>2)],enableExtensionsByDefault:GROWABLE_HEAP_I32()[a+(40>>2)],explicitSwapControl:GROWABLE_HEAP_I32()[a+(44>>2)],proxyContextToMainThread:GROWABLE_HEAP_I32()[a+(48>>2)],renderViaOffscreenBackBuffer:GROWABLE_HEAP_I32()[a+(52>>2)]};var canvas=findCanvasEventTarget(target);if(!canvas){return 0}if(contextAttributes.explicitSwapControl){return 0}var contextHandle=GL.createContext(canvas,contextAttributes);return contextHandle}function _emscripten_webgl_create_context(a0,a1){return _emscripten_webgl_do_create_context(a0,a1)}var SYSCALLS={mappings:{},buffers:[null,[],[]],printChar:function(stream,curr){var buffer=SYSCALLS.buffers[stream];if(curr===0||curr===10){(stream===1?out:err)(UTF8ArrayToString(buffer,0));buffer.length=0;}else {buffer.push(curr);}},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=GROWABLE_HEAP_I32()[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},get64:function(low,high){return low}};function _fd_close(fd){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(3,1,fd);return 0}function _fd_seek(fd,offset_low,offset_high,whence,newOffset){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(4,1,fd,offset_low,offset_high,whence,newOffset)}function _fd_write(fd,iov,iovcnt,pnum){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(5,1,fd,iov,iovcnt,pnum);var num=0;for(var i=0;i<iovcnt;i++){var ptr=GROWABLE_HEAP_I32()[iov+i*8>>2];var len=GROWABLE_HEAP_I32()[iov+(i*8+4)>>2];for(var j=0;j<len;j++){SYSCALLS.printChar(fd,GROWABLE_HEAP_U8()[ptr+j]);}num+=len;}GROWABLE_HEAP_I32()[pnum>>2]=num;return 0}function _pthread_cleanup_pop(execute){var routine=PThread.threadExitHandlers.pop();if(execute)routine();}function _pthread_cleanup_push(routine,arg){PThread.threadExitHandlers.push(function(){wasmTable.get(routine)(arg);});}function spawnThread(threadParams){if(ENVIRONMENT_IS_PTHREAD)throw "Internal Error! spawnThread() can only ever be called from main application thread!";var worker=PThread.getNewWorker();if(worker.pthread!==undefined)throw "Internal error!";if(!threadParams.pthread_ptr)throw "Internal error, no pthread ptr!";PThread.runningWorkers.push(worker);var tlsMemory=_malloc(128*4);for(var i=0;i<128;++i){GROWABLE_HEAP_I32()[tlsMemory+i*4>>2]=0;}var stackHigh=threadParams.stackBase+threadParams.stackSize;var pthread=PThread.pthreads[threadParams.pthread_ptr]={worker:worker,stackBase:threadParams.stackBase,stackSize:threadParams.stackSize,allocatedOwnStack:threadParams.allocatedOwnStack,threadInfoStruct:threadParams.pthread_ptr};var tis=pthread.threadInfoStruct>>2;Atomics.store(GROWABLE_HEAP_U32(),tis+(64>>2),threadParams.detached);Atomics.store(GROWABLE_HEAP_U32(),tis+(100>>2),tlsMemory);Atomics.store(GROWABLE_HEAP_U32(),tis+(40>>2),pthread.threadInfoStruct);Atomics.store(GROWABLE_HEAP_U32(),tis+(80>>2),threadParams.stackSize);Atomics.store(GROWABLE_HEAP_U32(),tis+(76>>2),stackHigh);Atomics.store(GROWABLE_HEAP_U32(),tis+(104>>2),threadParams.stackSize);Atomics.store(GROWABLE_HEAP_U32(),tis+(104+8>>2),stackHigh);Atomics.store(GROWABLE_HEAP_U32(),tis+(104+12>>2),threadParams.detached);var global_libc=_emscripten_get_global_libc();var global_locale=global_libc+40;Atomics.store(GROWABLE_HEAP_U32(),tis+(172>>2),global_locale);worker.pthread=pthread;var msg={"cmd":"run","start_routine":threadParams.startRoutine,"arg":threadParams.arg,"threadInfoStruct":threadParams.pthread_ptr,"stackBase":threadParams.stackBase,"stackSize":threadParams.stackSize};worker.runPthread=function(){msg.time=performance.now();worker.postMessage(msg,threadParams.transferList);};if(worker.loaded){worker.runPthread();delete worker.runPthread;}}function _pthread_create(pthread_ptr,attr,start_routine,arg){if(typeof SharedArrayBuffer==="undefined"){err("Current environment does not support SharedArrayBuffer, pthreads are not available!");return 6}if(!pthread_ptr){err("pthread_create called with a null thread pointer!");return 28}var transferList=[];var error=0;if(ENVIRONMENT_IS_PTHREAD&&(transferList.length===0||error)){return _emscripten_sync_run_in_main_thread_4(687865856,pthread_ptr,attr,start_routine,arg)}var stackSize=0;var stackBase=0;var detached=0;if(attr&&attr!=-1){stackSize=GROWABLE_HEAP_I32()[attr>>2];stackSize+=81920;stackBase=GROWABLE_HEAP_I32()[attr+8>>2];detached=GROWABLE_HEAP_I32()[attr+12>>2]!==0;}else {stackSize=2097152;}var allocatedOwnStack=stackBase==0;if(allocatedOwnStack){stackBase=_memalign(16,stackSize);}else {stackBase-=stackSize;assert(stackBase>0);}var threadInfoStruct=_malloc(228);for(var i=0;i<228>>2;++i)GROWABLE_HEAP_U32()[(threadInfoStruct>>2)+i]=0;GROWABLE_HEAP_I32()[pthread_ptr>>2]=threadInfoStruct;GROWABLE_HEAP_I32()[threadInfoStruct+12>>2]=threadInfoStruct;var headPtr=threadInfoStruct+152;GROWABLE_HEAP_I32()[headPtr>>2]=headPtr;var threadParams={stackBase:stackBase,stackSize:stackSize,allocatedOwnStack:allocatedOwnStack,detached:detached,startRoutine:start_routine,pthread_ptr:threadInfoStruct,arg:arg,transferList:transferList};if(ENVIRONMENT_IS_PTHREAD){threadParams.cmd="spawnThread";postMessage(threadParams,transferList);}else {spawnThread(threadParams);}return 0}function _sysconf(name){if(ENVIRONMENT_IS_PTHREAD)return _emscripten_proxy_to_main_thread_js(6,1,name);switch(name){case 30:return 16384;case 85:var maxHeapSize=2147483648;return maxHeapSize/16384;case 132:case 133:case 12:case 137:case 138:case 15:case 235:case 16:case 17:case 18:case 19:case 20:case 149:case 13:case 10:case 236:case 153:case 9:case 21:case 22:case 159:case 154:case 14:case 77:case 78:case 139:case 82:case 68:case 67:case 164:case 11:case 29:case 47:case 48:case 95:case 52:case 51:case 46:return 200809;case 27:case 246:case 127:case 128:case 23:case 24:case 160:case 161:case 181:case 182:case 242:case 183:case 184:case 243:case 244:case 245:case 165:case 178:case 179:case 49:case 50:case 168:case 169:case 175:case 170:case 171:case 172:case 97:case 76:case 32:case 173:case 35:case 80:case 81:case 79:return -1;case 176:case 177:case 7:case 155:case 8:case 157:case 125:case 126:case 92:case 93:case 129:case 130:case 131:case 94:case 91:return 1;case 74:case 60:case 69:case 70:case 4:return 1024;case 31:case 42:case 72:return 32;case 87:case 26:case 33:return 2147483647;case 34:case 1:return 47839;case 38:case 36:return 99;case 43:case 37:return 2048;case 0:return 2097152;case 3:return 65536;case 28:return 32768;case 44:return 32767;case 75:return 16384;case 39:return 1e3;case 89:return 700;case 71:return 256;case 40:return 255;case 2:return 100;case 180:return 64;case 25:return 20;case 5:return 16;case 6:return 6;case 73:return 4;case 84:{if(typeof navigator==="object")return navigator["hardwareConcurrency"]||1;return 1}}setErrNo(28);return -1}if(!ENVIRONMENT_IS_PTHREAD)PThread.initMainThreadBlock();var GLctx;var proxiedFunctionTable=[null,_atexit,_emscripten_set_canvas_element_size_main_thread,_fd_close,_fd_seek,_fd_write,_sysconf];var asmLibraryArg={"e":___assert_fail,"v":__emscripten_notify_thread_queue,"b":_abort,"w":_emscripten_asm_const_int,"j":_emscripten_conditional_set_current_thread_status,"c":_emscripten_futex_wait,"d":_emscripten_futex_wake,"f":_emscripten_get_now,"p":_emscripten_memcpy_big,"x":_emscripten_num_logical_cores,"s":_emscripten_receive_on_main_thread_js,"r":_emscripten_resize_heap,"t":_emscripten_set_canvas_element_size,"i":_emscripten_set_current_thread_status,"u":_emscripten_webgl_create_context,"m":_fd_close,"n":_fd_seek,"g":_fd_write,"o":initPthreadsJS,"a":wasmMemory||Module["wasmMemory"],"k":_pthread_cleanup_pop,"l":_pthread_cleanup_push,"h":_pthread_create,"q":_sysconf};var asm=createWasm();var ___wasm_call_ctors=Module["___wasm_call_ctors"]=function(){return (___wasm_call_ctors=Module["___wasm_call_ctors"]=Module["asm"]["y"]).apply(null,arguments)};var _init=Module["_init"]=function(){return (_init=Module["_init"]=Module["asm"]["z"]).apply(null,arguments)};var _register_tensor=Module["_register_tensor"]=function(){return (_register_tensor=Module["_register_tensor"]=Module["asm"]["A"]).apply(null,arguments)};var _dispose_data=Module["_dispose_data"]=function(){return (_dispose_data=Module["_dispose_data"]=Module["asm"]["B"]).apply(null,arguments)};var _dispose=Module["_dispose"]=function(){return (_dispose=Module["_dispose"]=Module["asm"]["C"]).apply(null,arguments)};var _Abs=Module["_Abs"]=function(){return (_Abs=Module["_Abs"]=Module["asm"]["E"]).apply(null,arguments)};var _Add=Module["_Add"]=function(){return (_Add=Module["_Add"]=Module["asm"]["F"]).apply(null,arguments)};var _AddN=Module["_AddN"]=function(){return (_AddN=Module["_AddN"]=Module["asm"]["G"]).apply(null,arguments)};var _All=Module["_All"]=function(){return (_All=Module["_All"]=Module["asm"]["H"]).apply(null,arguments)};var _Any=Module["_Any"]=function(){return (_Any=Module["_Any"]=Module["asm"]["I"]).apply(null,arguments)};var _ArgMax=Module["_ArgMax"]=function(){return (_ArgMax=Module["_ArgMax"]=Module["asm"]["J"]).apply(null,arguments)};var _AvgPool=Module["_AvgPool"]=function(){return (_AvgPool=Module["_AvgPool"]=Module["asm"]["K"]).apply(null,arguments)};var _BatchMatMul=Module["_BatchMatMul"]=function(){return (_BatchMatMul=Module["_BatchMatMul"]=Module["asm"]["L"]).apply(null,arguments)};var _Ceil=Module["_Ceil"]=function(){return (_Ceil=Module["_Ceil"]=Module["asm"]["M"]).apply(null,arguments)};var _ClipByValue=Module["_ClipByValue"]=function(){return (_ClipByValue=Module["_ClipByValue"]=Module["asm"]["N"]).apply(null,arguments)};var _Conv2D=Module["_Conv2D"]=function(){return (_Conv2D=Module["_Conv2D"]=Module["asm"]["O"]).apply(null,arguments)};var _Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=function(){return (_Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=Module["asm"]["P"]).apply(null,arguments)};var _Cos=Module["_Cos"]=function(){return (_Cos=Module["_Cos"]=Module["asm"]["Q"]).apply(null,arguments)};var _CropAndResize=Module["_CropAndResize"]=function(){return (_CropAndResize=Module["_CropAndResize"]=Module["asm"]["R"]).apply(null,arguments)};var _Cumsum=Module["_Cumsum"]=function(){return (_Cumsum=Module["_Cumsum"]=Module["asm"]["S"]).apply(null,arguments)};var _DepthToSpace=Module["_DepthToSpace"]=function(){return (_DepthToSpace=Module["_DepthToSpace"]=Module["asm"]["T"]).apply(null,arguments)};var _DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=function(){return (_DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=Module["asm"]["U"]).apply(null,arguments)};var _Equal=Module["_Equal"]=function(){return (_Equal=Module["_Equal"]=Module["asm"]["V"]).apply(null,arguments)};var _Exp=Module["_Exp"]=function(){return (_Exp=Module["_Exp"]=Module["asm"]["W"]).apply(null,arguments)};var _FlipLeftRight=Module["_FlipLeftRight"]=function(){return (_FlipLeftRight=Module["_FlipLeftRight"]=Module["asm"]["X"]).apply(null,arguments)};var _Floor=Module["_Floor"]=function(){return (_Floor=Module["_Floor"]=Module["asm"]["Y"]).apply(null,arguments)};var _FloorDiv=Module["_FloorDiv"]=function(){return (_FloorDiv=Module["_FloorDiv"]=Module["asm"]["Z"]).apply(null,arguments)};var _FusedBatchNorm=Module["_FusedBatchNorm"]=function(){return (_FusedBatchNorm=Module["_FusedBatchNorm"]=Module["asm"]["_"]).apply(null,arguments)};var _FusedConv2D=Module["_FusedConv2D"]=function(){return (_FusedConv2D=Module["_FusedConv2D"]=Module["asm"]["$"]).apply(null,arguments)};var _FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=function(){return (_FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=Module["asm"]["aa"]).apply(null,arguments)};var _Gather=Module["_Gather"]=function(){return (_Gather=Module["_Gather"]=Module["asm"]["ba"]).apply(null,arguments)};var _GatherNd=Module["_GatherNd"]=function(){return (_GatherNd=Module["_GatherNd"]=Module["asm"]["ca"]).apply(null,arguments)};var _Greater=Module["_Greater"]=function(){return (_Greater=Module["_Greater"]=Module["asm"]["da"]).apply(null,arguments)};var _GreaterEqual=Module["_GreaterEqual"]=function(){return (_GreaterEqual=Module["_GreaterEqual"]=Module["asm"]["ea"]).apply(null,arguments)};var _LeakyRelu=Module["_LeakyRelu"]=function(){return (_LeakyRelu=Module["_LeakyRelu"]=Module["asm"]["fa"]).apply(null,arguments)};var _Less=Module["_Less"]=function(){return (_Less=Module["_Less"]=Module["asm"]["ga"]).apply(null,arguments)};var _LessEqual=Module["_LessEqual"]=function(){return (_LessEqual=Module["_LessEqual"]=Module["asm"]["ha"]).apply(null,arguments)};var _Log=Module["_Log"]=function(){return (_Log=Module["_Log"]=Module["asm"]["ia"]).apply(null,arguments)};var _LogicalAnd=Module["_LogicalAnd"]=function(){return (_LogicalAnd=Module["_LogicalAnd"]=Module["asm"]["ja"]).apply(null,arguments)};var _Max=Module["_Max"]=function(){return (_Max=Module["_Max"]=Module["asm"]["ka"]).apply(null,arguments)};var _MaxPool=Module["_MaxPool"]=function(){return (_MaxPool=Module["_MaxPool"]=Module["asm"]["la"]).apply(null,arguments)};var _Maximum=Module["_Maximum"]=function(){return (_Maximum=Module["_Maximum"]=Module["asm"]["ma"]).apply(null,arguments)};var _Mean=Module["_Mean"]=function(){return (_Mean=Module["_Mean"]=Module["asm"]["na"]).apply(null,arguments)};var _Min=Module["_Min"]=function(){return (_Min=Module["_Min"]=Module["asm"]["oa"]).apply(null,arguments)};var _Minimum=Module["_Minimum"]=function(){return (_Minimum=Module["_Minimum"]=Module["asm"]["pa"]).apply(null,arguments)};var _MirrorPad=Module["_MirrorPad"]=function(){return (_MirrorPad=Module["_MirrorPad"]=Module["asm"]["qa"]).apply(null,arguments)};var _Multiply=Module["_Multiply"]=function(){return (_Multiply=Module["_Multiply"]=Module["asm"]["ra"]).apply(null,arguments)};var _Neg=Module["_Neg"]=function(){return (_Neg=Module["_Neg"]=Module["asm"]["sa"]).apply(null,arguments)};var _NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=function(){return (_NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=Module["asm"]["ta"]).apply(null,arguments)};var _NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=function(){return (_NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=Module["asm"]["ua"]).apply(null,arguments)};var _NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=function(){return (_NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=Module["asm"]["va"]).apply(null,arguments)};var _NotEqual=Module["_NotEqual"]=function(){return (_NotEqual=Module["_NotEqual"]=Module["asm"]["wa"]).apply(null,arguments)};var _OneHot=Module["_OneHot"]=function(){return (_OneHot=Module["_OneHot"]=Module["asm"]["xa"]).apply(null,arguments)};var _PadV2=Module["_PadV2"]=function(){return (_PadV2=Module["_PadV2"]=Module["asm"]["ya"]).apply(null,arguments)};var _Pow=Module["_Pow"]=function(){return (_Pow=Module["_Pow"]=Module["asm"]["za"]).apply(null,arguments)};var _Prelu=Module["_Prelu"]=function(){return (_Prelu=Module["_Prelu"]=Module["asm"]["Aa"]).apply(null,arguments)};var _Prod=Module["_Prod"]=function(){return (_Prod=Module["_Prod"]=Module["asm"]["Ba"]).apply(null,arguments)};var _RealDiv=Module["_RealDiv"]=function(){return (_RealDiv=Module["_RealDiv"]=Module["asm"]["Ca"]).apply(null,arguments)};var _Relu=Module["_Relu"]=function(){return (_Relu=Module["_Relu"]=Module["asm"]["Da"]).apply(null,arguments)};var _Relu6=Module["_Relu6"]=function(){return (_Relu6=Module["_Relu6"]=Module["asm"]["Ea"]).apply(null,arguments)};var _ResizeBilinear=Module["_ResizeBilinear"]=function(){return (_ResizeBilinear=Module["_ResizeBilinear"]=Module["asm"]["Fa"]).apply(null,arguments)};var _Reverse=Module["_Reverse"]=function(){return (_Reverse=Module["_Reverse"]=Module["asm"]["Ga"]).apply(null,arguments)};var _RotateWithOffset=Module["_RotateWithOffset"]=function(){return (_RotateWithOffset=Module["_RotateWithOffset"]=Module["asm"]["Ha"]).apply(null,arguments)};var _Round=Module["_Round"]=function(){return (_Round=Module["_Round"]=Module["asm"]["Ia"]).apply(null,arguments)};var _Rsqrt=Module["_Rsqrt"]=function(){return (_Rsqrt=Module["_Rsqrt"]=Module["asm"]["Ja"]).apply(null,arguments)};var _ScatterNd=Module["_ScatterNd"]=function(){return (_ScatterNd=Module["_ScatterNd"]=Module["asm"]["Ka"]).apply(null,arguments)};var _SelectV2=Module["_SelectV2"]=function(){return (_SelectV2=Module["_SelectV2"]=Module["asm"]["La"]).apply(null,arguments)};var _Sigmoid=Module["_Sigmoid"]=function(){return (_Sigmoid=Module["_Sigmoid"]=Module["asm"]["Ma"]).apply(null,arguments)};var _Sin=Module["_Sin"]=function(){return (_Sin=Module["_Sin"]=Module["asm"]["Na"]).apply(null,arguments)};var _Softmax=Module["_Softmax"]=function(){return (_Softmax=Module["_Softmax"]=Module["asm"]["Oa"]).apply(null,arguments)};var _Sqrt=Module["_Sqrt"]=function(){return (_Sqrt=Module["_Sqrt"]=Module["asm"]["Pa"]).apply(null,arguments)};var _Square=Module["_Square"]=function(){return (_Square=Module["_Square"]=Module["asm"]["Qa"]).apply(null,arguments)};var _SquaredDifference=Module["_SquaredDifference"]=function(){return (_SquaredDifference=Module["_SquaredDifference"]=Module["asm"]["Ra"]).apply(null,arguments)};var _Step=Module["_Step"]=function(){return (_Step=Module["_Step"]=Module["asm"]["Sa"]).apply(null,arguments)};var _StridedSlice=Module["_StridedSlice"]=function(){return (_StridedSlice=Module["_StridedSlice"]=Module["asm"]["Ta"]).apply(null,arguments)};var _Sub=Module["_Sub"]=function(){return (_Sub=Module["_Sub"]=Module["asm"]["Ua"]).apply(null,arguments)};var _Sum=Module["_Sum"]=function(){return (_Sum=Module["_Sum"]=Module["asm"]["Va"]).apply(null,arguments)};var _Tan=Module["_Tan"]=function(){return (_Tan=Module["_Tan"]=Module["asm"]["Wa"]).apply(null,arguments)};var _Tanh=Module["_Tanh"]=function(){return (_Tanh=Module["_Tanh"]=Module["asm"]["Xa"]).apply(null,arguments)};var _Tile=Module["_Tile"]=function(){return (_Tile=Module["_Tile"]=Module["asm"]["Ya"]).apply(null,arguments)};var _TopK=Module["_TopK"]=function(){return (_TopK=Module["_TopK"]=Module["asm"]["Za"]).apply(null,arguments)};var _Transpose=Module["_Transpose"]=function(){return (_Transpose=Module["_Transpose"]=Module["asm"]["_a"]).apply(null,arguments)};var __FusedMatMul=Module["__FusedMatMul"]=function(){return (__FusedMatMul=Module["__FusedMatMul"]=Module["asm"]["$a"]).apply(null,arguments)};var _malloc=Module["_malloc"]=function(){return (_malloc=Module["_malloc"]=Module["asm"]["ab"]).apply(null,arguments)};var _free=Module["_free"]=function(){return (_free=Module["_free"]=Module["asm"]["bb"]).apply(null,arguments)};var ___errno_location=Module["___errno_location"]=function(){return (___errno_location=Module["___errno_location"]=Module["asm"]["cb"]).apply(null,arguments)};var _emscripten_get_global_libc=Module["_emscripten_get_global_libc"]=function(){return (_emscripten_get_global_libc=Module["_emscripten_get_global_libc"]=Module["asm"]["db"]).apply(null,arguments)};var _pthread_self=Module["_pthread_self"]=function(){return (_pthread_self=Module["_pthread_self"]=Module["asm"]["eb"]).apply(null,arguments)};var ___pthread_tsd_run_dtors=Module["___pthread_tsd_run_dtors"]=function(){return (___pthread_tsd_run_dtors=Module["___pthread_tsd_run_dtors"]=Module["asm"]["fb"]).apply(null,arguments)};var _emscripten_main_thread_process_queued_calls=Module["_emscripten_main_thread_process_queued_calls"]=function(){return (_emscripten_main_thread_process_queued_calls=Module["_emscripten_main_thread_process_queued_calls"]=Module["asm"]["gb"]).apply(null,arguments)};var _emscripten_current_thread_process_queued_calls=Module["_emscripten_current_thread_process_queued_calls"]=function(){return (_emscripten_current_thread_process_queued_calls=Module["_emscripten_current_thread_process_queued_calls"]=Module["asm"]["hb"]).apply(null,arguments)};var _emscripten_register_main_browser_thread_id=Module["_emscripten_register_main_browser_thread_id"]=function(){return (_emscripten_register_main_browser_thread_id=Module["_emscripten_register_main_browser_thread_id"]=Module["asm"]["ib"]).apply(null,arguments)};var __emscripten_do_dispatch_to_thread=Module["__emscripten_do_dispatch_to_thread"]=function(){return (__emscripten_do_dispatch_to_thread=Module["__emscripten_do_dispatch_to_thread"]=Module["asm"]["jb"]).apply(null,arguments)};var _emscripten_sync_run_in_main_thread_4=Module["_emscripten_sync_run_in_main_thread_4"]=function(){return (_emscripten_sync_run_in_main_thread_4=Module["_emscripten_sync_run_in_main_thread_4"]=Module["asm"]["kb"]).apply(null,arguments)};var _emscripten_run_in_main_runtime_thread_js=Module["_emscripten_run_in_main_runtime_thread_js"]=function(){return (_emscripten_run_in_main_runtime_thread_js=Module["_emscripten_run_in_main_runtime_thread_js"]=Module["asm"]["lb"]).apply(null,arguments)};var __emscripten_call_on_thread=Module["__emscripten_call_on_thread"]=function(){return (__emscripten_call_on_thread=Module["__emscripten_call_on_thread"]=Module["asm"]["mb"]).apply(null,arguments)};var _emscripten_tls_init=Module["_emscripten_tls_init"]=function(){return (_emscripten_tls_init=Module["_emscripten_tls_init"]=Module["asm"]["nb"]).apply(null,arguments)};var __emscripten_thread_init=Module["__emscripten_thread_init"]=function(){return (__emscripten_thread_init=Module["__emscripten_thread_init"]=Module["asm"]["ob"]).apply(null,arguments)};var stackSave=Module["stackSave"]=function(){return (stackSave=Module["stackSave"]=Module["asm"]["pb"]).apply(null,arguments)};var stackRestore=Module["stackRestore"]=function(){return (stackRestore=Module["stackRestore"]=Module["asm"]["qb"]).apply(null,arguments)};var stackAlloc=Module["stackAlloc"]=function(){return (stackAlloc=Module["stackAlloc"]=Module["asm"]["rb"]).apply(null,arguments)};var _emscripten_stack_set_limits=Module["_emscripten_stack_set_limits"]=function(){return (_emscripten_stack_set_limits=Module["_emscripten_stack_set_limits"]=Module["asm"]["sb"]).apply(null,arguments)};var _memalign=Module["_memalign"]=function(){return (_memalign=Module["_memalign"]=Module["asm"]["tb"]).apply(null,arguments)};var __emscripten_allow_main_runtime_queued_calls=Module["__emscripten_allow_main_runtime_queued_calls"]=9792;var __emscripten_main_thread_futex=Module["__emscripten_main_thread_futex"]=11408;Module["cwrap"]=cwrap;Module["PThread"]=PThread;Module["PThread"]=PThread;Module["wasmMemory"]=wasmMemory;Module["ExitStatus"]=ExitStatus;var calledRun;function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status;}dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller;};function run(args){if(runDependencies>0){return}if(ENVIRONMENT_IS_PTHREAD){readyPromiseResolve(Module);initRuntime();postMessage({"cmd":"loaded"});return}preRun();if(runDependencies>0){return}function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();readyPromiseResolve(Module);if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();postRun();}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("");},1);doRun();},1);}else {doRun();}}Module["run"]=run;function exit(status,implicit){if(implicit&&noExitRuntime&&status===0){return}if(!implicit){if(ENVIRONMENT_IS_PTHREAD){postMessage({"cmd":"exitProcess","returnCode":status});throw new ExitStatus(status)}}if(noExitRuntime);else {PThread.terminateAllThreads();if(Module["onExit"])Module["onExit"](status);ABORT=true;}quit_(status,new ExitStatus(status));}if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()();}}if(ENVIRONMENT_IS_PTHREAD){noExitRuntime=false;PThread.initWorker();}run();
 
 
-    return WasmBackendModuleThreadedSimd
+    return WasmBackendModule.ready
   }
   );
   })();
-  module.exports = WasmBackendModuleThreadedSimd;
+  module.exports = WasmBackendModule;
   });
 
-  const wasmWorkerContents = 'var threadInfoStruct=0;var selfThreadId=0;var parentThreadId=0;var Module={};function threadPrintErr(){var text=Array.prototype.slice.call(arguments).join(" ");console.error(text)}function threadAlert(){var text=Array.prototype.slice.call(arguments).join(" ");postMessage({cmd:"alert",text:text,threadId:selfThreadId})}var err=threadPrintErr;this.alert=threadAlert;Module["instantiateWasm"]=function(info,receiveInstance){var instance=new WebAssembly.Instance(Module["wasmModule"],info);Module["wasmModule"]=null;receiveInstance(instance);return instance.exports};this.onmessage=function(e){try{if(e.data.cmd==="load"){Module["DYNAMIC_BASE"]=e.data.DYNAMIC_BASE;Module["DYNAMICTOP_PTR"]=e.data.DYNAMICTOP_PTR;Module["wasmModule"]=e.data.wasmModule;Module["wasmMemory"]=e.data.wasmMemory;Module["buffer"]=Module["wasmMemory"].buffer;Module["ENVIRONMENT_IS_PTHREAD"]=true;if(typeof e.data.urlOrBlob==="string"){importScripts(e.data.urlOrBlob)}else{var objectUrl=URL.createObjectURL(e.data.urlOrBlob);importScripts(objectUrl);URL.revokeObjectURL(objectUrl)}Module=WasmBackendModuleThreadedSimd(Module);postMessage({"cmd":"loaded"})}else if(e.data.cmd==="objectTransfer"){Module["PThread"].receiveObjectTransfer(e.data)}else if(e.data.cmd==="run"){Module["__performance_now_clock_drift"]=performance.now()-e.data.time;threadInfoStruct=e.data.threadInfoStruct;Module["__register_pthread_ptr"](threadInfoStruct,0,0);selfThreadId=e.data.selfThreadId;parentThreadId=e.data.parentThreadId;var max=e.data.stackBase;var top=e.data.stackBase+e.data.stackSize;Module["establishStackSpace"](top,max);Module["_emscripten_tls_init"]();Module["PThread"].receiveObjectTransfer(e.data);Module["PThread"].setThreadStatus(Module["_pthread_self"](),1);try{var result=Module["dynCall_ii"](e.data.start_routine,e.data.arg);if(!Module["getNoExitRuntime"]())Module["PThread"].threadExit(result)}catch(ex){if(ex==="Canceled!"){Module["PThread"].threadCancel()}else if(ex!="unwind"){Atomics.store(Module["HEAPU32"],threadInfoStruct+4>>2,ex instanceof Module["ExitStatus"]?ex.status:-2);Atomics.store(Module["HEAPU32"],threadInfoStruct+0>>2,1);Module["_emscripten_futex_wake"](threadInfoStruct+0,2147483647);if(!(ex instanceof Module["ExitStatus"]))throw ex}}}else if(e.data.cmd==="cancel"){if(threadInfoStruct){Module["PThread"].threadCancel()}}else if(e.data.target==="setimmediate"){}else if(e.data.cmd==="processThreadQueue"){if(threadInfoStruct){Module["_emscripten_current_thread_process_queued_calls"]()}}else{err("worker.js received unknown command "+e.data.cmd);err(e.data)}}catch(ex){err("worker.js onmessage() captured an uncaught exception: "+ex);if(ex.stack)err(ex.stack);throw ex}};if(typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string"){self={location:{href:__filename}};var onmessage=this.onmessage;var nodeWorkerThreads=require("worker_threads");Worker=nodeWorkerThreads.Worker;var parentPort=nodeWorkerThreads.parentPort;parentPort.on("message",function(data){onmessage({data:data})});var nodeFS=require("fs");var nodeRead=function(filename){return nodeFS.readFileSync(filename,"utf8")};function globalEval(x){global.require=require;global.Module=Module;eval.call(null,x)}importScripts=function(f){globalEval(nodeRead(f))};postMessage=function(msg){parentPort.postMessage(msg)};if(typeof performance==="undefined"){performance={now:function(){return Date.now()}}}}';
+  const wasmWorkerContents = 'var Module={};function threadPrintErr(){var text=Array.prototype.slice.call(arguments).join(" ");console.error(text)}function threadAlert(){var text=Array.prototype.slice.call(arguments).join(" ");postMessage({cmd:"alert",text:text,threadId:Module["_pthread_self"]()})}var err=threadPrintErr;this.alert=threadAlert;Module["instantiateWasm"]=function(info,receiveInstance){var instance=new WebAssembly.Instance(Module["wasmModule"],info);Module["wasmModule"]=null;receiveInstance(instance);return instance.exports};function moduleLoaded(){}this.onmessage=function(e){try{if(e.data.cmd==="load"){Module["wasmModule"]=e.data.wasmModule;Module["wasmMemory"]=e.data.wasmMemory;Module["buffer"]=Module["wasmMemory"].buffer;Module["ENVIRONMENT_IS_PTHREAD"]=true;if(typeof e.data.urlOrBlob==="string"){importScripts(e.data.urlOrBlob)}else{var objectUrl=URL.createObjectURL(e.data.urlOrBlob);importScripts(objectUrl);URL.revokeObjectURL(objectUrl)}WasmBackendModule(Module).then(function(instance){Module=instance;moduleLoaded()})}else if(e.data.cmd==="objectTransfer"){Module["PThread"].receiveObjectTransfer(e.data)}else if(e.data.cmd==="run"){Module["__performance_now_clock_drift"]=performance.now()-e.data.time;Module["__emscripten_thread_init"](e.data.threadInfoStruct,0,0);var max=e.data.stackBase;var top=e.data.stackBase+e.data.stackSize;Module["establishStackSpace"](top,max);Module["_emscripten_tls_init"]();Module["PThread"].receiveObjectTransfer(e.data);Module["PThread"].setThreadStatus(Module["_pthread_self"](),1);try{var result=Module["invokeEntryPoint"](e.data.start_routine,e.data.arg);if(!Module["getNoExitRuntime"]())Module["PThread"].threadExit(result)}catch(ex){if(ex==="Canceled!"){Module["PThread"].threadCancel()}else if(ex!="unwind"){if(ex instanceof Module["ExitStatus"]){if(Module["getNoExitRuntime"]()){}else{Module["PThread"].threadExit(ex.status)}}else{Module["PThread"].threadExit(-2);throw ex}}}}else if(e.data.cmd==="cancel"){if(Module["_pthread_self"]()){Module["PThread"].threadCancel()}}else if(e.data.target==="setimmediate"){}else if(e.data.cmd==="processThreadQueue"){if(Module["_pthread_self"]()){Module["_emscripten_current_thread_process_queued_calls"]()}}else{err("worker.js received unknown command "+e.data.cmd);err(e.data)}}catch(ex){err("worker.js onmessage() captured an uncaught exception: "+ex);if(ex&&ex.stack)err(ex.stack);throw ex}};if(typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string"){self={location:{href:__filename}};var onmessage=this.onmessage;var nodeWorkerThreads=require("worker_threads");global.Worker=nodeWorkerThreads.Worker;var parentPort=nodeWorkerThreads.parentPort;parentPort.on("message",function(data){onmessage({data:data})});var nodeFS=require("fs");var nodeRead=function(filename){return nodeFS.readFileSync(filename,"utf8")};function globalEval(x){global.require=require;global.Module=Module;eval.call(null,x)}importScripts=function(f){globalEval(nodeRead(f))};postMessage=function(msg){parentPort.postMessage(msg)};if(typeof performance==="undefined"){performance={now:function(){return Date.now()}}}}';
 
   var tfjsBackendWasm = createCommonjsModule(function (module, exports) {
   var WasmBackendModule = (function() {
@@ -3822,18 +4680,16 @@
   function(WasmBackendModule) {
     WasmBackendModule = WasmBackendModule || {};
 
-  var Module=typeof WasmBackendModule!=="undefined"?WasmBackendModule:{};var moduleOverrides={};var key;for(key in Module){if(Module.hasOwnProperty(key)){moduleOverrides[key]=Module[key];}}var arguments_=[];var thisProgram="./this.program";var quit_=function(status,toThrow){throw toThrow};var ENVIRONMENT_IS_WEB=false;var ENVIRONMENT_IS_WORKER=false;var ENVIRONMENT_IS_NODE=false;var ENVIRONMENT_IS_SHELL=false;ENVIRONMENT_IS_WEB=typeof window==="object";ENVIRONMENT_IS_WORKER=typeof importScripts==="function";ENVIRONMENT_IS_NODE=typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string";ENVIRONMENT_IS_SHELL=!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_NODE&&!ENVIRONMENT_IS_WORKER;var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readBinary;var nodeFS;var nodePath;if(ENVIRONMENT_IS_NODE){if(ENVIRONMENT_IS_WORKER){scriptDirectory=path.dirname(scriptDirectory)+"/";}else{scriptDirectory=__dirname+"/";}read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};if(process["argv"].length>1){thisProgram=process["argv"][1].replace(/\\/g,"/");}arguments_=process["argv"].slice(2);process["on"]("uncaughtException",function(ex){if(!(ex instanceof ExitStatus)){throw ex}});process["on"]("unhandledRejection",abort);quit_=function(status){process["exit"](status);};Module["inspect"]=function(){return "[Emscripten Module object]"};}else if(ENVIRONMENT_IS_SHELL){if(typeof read!="undefined"){read_=function shell_read(f){return read(f)};}readBinary=function readBinary(f){var data;if(typeof readbuffer==="function"){return new Uint8Array(readbuffer(f))}data=read(f,"binary");assert(typeof data==="object");return data};if(typeof scriptArgs!="undefined"){arguments_=scriptArgs;}else if(typeof arguments!="undefined"){arguments_=arguments;}if(typeof quit==="function"){quit_=function(status){quit(status);};}if(typeof print!=="undefined"){if(typeof console==="undefined")console={};console.log=print;console.warn=console.error=typeof printErr!=="undefined"?printErr:print;}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href;}else if(document.currentScript){scriptDirectory=document.currentScript.src;}if(_scriptDir){scriptDirectory=_scriptDir;}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.lastIndexOf("/")+1);}else{scriptDirectory="";}{read_=function shell_read(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=function readBinary(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)};}}}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);for(key in moduleOverrides){if(moduleOverrides.hasOwnProperty(key)){Module[key]=moduleOverrides[key];}}moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime;if(Module["noExitRuntime"])noExitRuntime=Module["noExitRuntime"];if(typeof WebAssembly!=="object"){err("no native wasm support detected");}var wasmMemory;var wasmTable=new WebAssembly.Table({"initial":147,"maximum":147+0,"element":"anyfunc"});var ABORT=false;function assert(condition,text){if(!condition){abort("Assertion failed: "+text);}}function getCFunc(ident){var func=Module["_"+ident];assert(func,"Cannot call unknown function "+ident+", make sure it is exported");return func}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":function(str){var ret=0;if(str!==null&&str!==undefined&&str!==0){var len=(str.length<<2)+1;ret=stackAlloc(len);stringToUTF8(str,ret,len);}return ret},"array":function(arr){var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string")return UTF8ToString(ret);if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i]);}else{cArgs[i]=args[i];}}}var ret=func.apply(null,cArgs);ret=convertReturnValue(ret);if(stack!==0)stackRestore(stack);return ret}function cwrap(ident,returnType,argTypes,opts){argTypes=argTypes||[];var numericArgs=argTypes.every(function(type){return type==="number"});var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments)}}var UTF8Decoder=typeof TextDecoder!=="undefined"?new TextDecoder("utf8"):undefined;function UTF8ArrayToString(heap,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var endPtr=idx;while(heap[endPtr]&&!(endPtr>=endIdx))++endPtr;if(endPtr-idx>16&&heap.subarray&&UTF8Decoder){return UTF8Decoder.decode(heap.subarray(idx,endPtr))}else{var str="";while(idx<endPtr){var u0=heap[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heap[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heap[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2;}else{u0=(u0&7)<<18|u1<<12|u2<<6|heap[idx++]&63;}if(u0<65536){str+=String.fromCharCode(u0);}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023);}}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead):""}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023;}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u;}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63;}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}}heap[outIdx]=0;return outIdx-startIdx}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite)}function writeArrayToMemory(array,buffer){HEAP8.set(array,buffer);}var HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64;function updateGlobalBufferAndViews(buf){Module["HEAP8"]=HEAP8=new Int8Array(buf);Module["HEAP16"]=HEAP16=new Int16Array(buf);Module["HEAP32"]=HEAP32=new Int32Array(buf);Module["HEAPU8"]=HEAPU8=new Uint8Array(buf);Module["HEAPU16"]=HEAPU16=new Uint16Array(buf);Module["HEAPU32"]=HEAPU32=new Uint32Array(buf);Module["HEAPF32"]=HEAPF32=new Float32Array(buf);Module["HEAPF64"]=HEAPF64=new Float64Array(buf);}var INITIAL_INITIAL_MEMORY=Module["INITIAL_MEMORY"]||16777216;function callRuntimeCallbacks(callbacks){while(callbacks.length>0){var callback=callbacks.shift();if(typeof callback=="function"){callback(Module);continue}var func=callback.func;if(typeof func==="number"){if(callback.arg===undefined){Module["dynCall_v"](func);}else{Module["dynCall_vi"](func,callback.arg);}}else{func(callback.arg===undefined?null:callback.arg);}}}var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];function preRun(){if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift());}}callRuntimeCallbacks(__ATPRERUN__);}function initRuntime(){callRuntimeCallbacks(__ATINIT__);}function preMain(){callRuntimeCallbacks(__ATMAIN__);}function postRun(){if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift());}}callRuntimeCallbacks(__ATPOSTRUN__);}function addOnPreRun(cb){__ATPRERUN__.unshift(cb);}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb);}var Math_ceil=Math.ceil;var Math_floor=Math.floor;var runDependencies=0;var runDependencyWatcher=null;var dependenciesFulfilled=null;function addRunDependency(id){runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}if(runDependencies==0){if(runDependencyWatcher!==null){clearInterval(runDependencyWatcher);runDependencyWatcher=null;}if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback();}}}Module["preloadedImages"]={};Module["preloadedAudios"]={};function abort(what){if(Module["onAbort"]){Module["onAbort"](what);}what+="";out(what);err(what);ABORT=true;what="abort("+what+"). Build with -s ASSERTIONS=1 for more info.";throw new WebAssembly.RuntimeError(what)}function hasPrefix(str,prefix){return String.prototype.startsWith?str.startsWith(prefix):str.indexOf(prefix)===0}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return hasPrefix(filename,dataURIPrefix)}var fileURIPrefix="file://";function isFileURI(filename){return hasPrefix(filename,fileURIPrefix)}var wasmBinaryFile="tfjs-backend-wasm.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile);}function getBinary(){try{if(wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(wasmBinaryFile)}else{throw "both async and sync fetching of the wasm failed"}}catch(err){abort(err);}}function getBinaryPromise(){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)&&typeof fetch==="function"&&!isFileURI(wasmBinaryFile)){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw "failed to load wasm binary file at '"+wasmBinaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary()})}return new Promise(function(resolve,reject){resolve(getBinary());})}function createWasm(){var info={"env":asmLibraryArg,"wasi_snapshot_preview1":asmLibraryArg};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmMemory=exports["memory"];updateGlobalBufferAndViews(wasmMemory.buffer);removeRunDependency();}addRunDependency();function receiveInstantiatedSource(output){receiveInstance(output["instance"]);}function instantiateArrayBuffer(receiver){return getBinaryPromise().then(function(binary){return WebAssembly.instantiate(binary,info)}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason);})}function instantiateAsync(){if(!wasmBinary&&typeof WebAssembly.instantiateStreaming==="function"&&!isDataURI(wasmBinaryFile)&&!isFileURI(wasmBinaryFile)&&typeof fetch==="function"){fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,info);return result.then(receiveInstantiatedSource,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");instantiateArrayBuffer(receiveInstantiatedSource);})});}else{return instantiateArrayBuffer(receiveInstantiatedSource)}}if(Module["instantiateWasm"]){try{var exports=Module["instantiateWasm"](info,receiveInstance);return exports}catch(e){err("Module.instantiateWasm callback failed with error: "+e);return false}}instantiateAsync();return {}}__ATINIT__.push();function _emscripten_notify_memory_growth(memoryIndex){updateGlobalBufferAndViews(wasmMemory.buffer);}var SYSCALLS={mappings:{},buffers:[null,[],[]],printChar:function(stream,curr){var buffer=SYSCALLS.buffers[stream];if(curr===0||curr===10){(stream===1?out:err)(UTF8ArrayToString(buffer,0));buffer.length=0;}else{buffer.push(curr);}},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=HEAP32[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},get64:function(low,high){return low}};function _fd_close(fd){return 0}function _fd_seek(fd,offset_low,offset_high,whence,newOffset){}function _fd_write(fd,iov,iovcnt,pnum){var num=0;for(var i=0;i<iovcnt;i++){var ptr=HEAP32[iov+i*8>>2];var len=HEAP32[iov+(i*8+4)>>2];for(var j=0;j<len;j++){SYSCALLS.printChar(fd,HEAPU8[ptr+j]);}num+=len;}HEAP32[pnum>>2]=num;return 0}function _exit(status){exit(status);}function _proc_exit(code){_exit(code);}function _roundf(d){d=+d;return d>=+0?+Math_floor(d+ +.5):+Math_ceil(d-+.5)}var asmLibraryArg={"emscripten_notify_memory_growth":_emscripten_notify_memory_growth,"fd_close":_fd_close,"fd_seek":_fd_seek,"fd_write":_fd_write,"proc_exit":_proc_exit,"roundf":_roundf};var asm=createWasm();Module["asm"]=asm;var _init=Module["_init"]=function(){return (_init=Module["_init"]=Module["asm"]["init"]).apply(null,arguments)};var _register_tensor=Module["_register_tensor"]=function(){return (_register_tensor=Module["_register_tensor"]=Module["asm"]["register_tensor"]).apply(null,arguments)};var _dispose_data=Module["_dispose_data"]=function(){return (_dispose_data=Module["_dispose_data"]=Module["asm"]["dispose_data"]).apply(null,arguments)};var _dispose=Module["_dispose"]=function(){return (_dispose=Module["_dispose"]=Module["asm"]["dispose"]).apply(null,arguments)};var _Abs=Module["_Abs"]=function(){return (_Abs=Module["_Abs"]=Module["asm"]["Abs"]).apply(null,arguments)};var _Add=Module["_Add"]=function(){return (_Add=Module["_Add"]=Module["asm"]["Add"]).apply(null,arguments)};var _AddN=Module["_AddN"]=function(){return (_AddN=Module["_AddN"]=Module["asm"]["AddN"]).apply(null,arguments)};var _ArgMax=Module["_ArgMax"]=function(){return (_ArgMax=Module["_ArgMax"]=Module["asm"]["ArgMax"]).apply(null,arguments)};var _AvgPool=Module["_AvgPool"]=function(){return (_AvgPool=Module["_AvgPool"]=Module["asm"]["AvgPool"]).apply(null,arguments)};var _BatchMatMul=Module["_BatchMatMul"]=function(){return (_BatchMatMul=Module["_BatchMatMul"]=Module["asm"]["BatchMatMul"]).apply(null,arguments)};var _ClipByValue=Module["_ClipByValue"]=function(){return (_ClipByValue=Module["_ClipByValue"]=Module["asm"]["ClipByValue"]).apply(null,arguments)};var _Conv2D=Module["_Conv2D"]=function(){return (_Conv2D=Module["_Conv2D"]=Module["asm"]["Conv2D"]).apply(null,arguments)};var _Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=function(){return (_Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=Module["asm"]["Conv2DBackpropInput"]).apply(null,arguments)};var _Cos=Module["_Cos"]=function(){return (_Cos=Module["_Cos"]=Module["asm"]["Cos"]).apply(null,arguments)};var _CropAndResize=Module["_CropAndResize"]=function(){return (_CropAndResize=Module["_CropAndResize"]=Module["asm"]["CropAndResize"]).apply(null,arguments)};var _Cumsum=Module["_Cumsum"]=function(){return (_Cumsum=Module["_Cumsum"]=Module["asm"]["Cumsum"]).apply(null,arguments)};var _DepthToSpace=Module["_DepthToSpace"]=function(){return (_DepthToSpace=Module["_DepthToSpace"]=Module["asm"]["DepthToSpace"]).apply(null,arguments)};var _DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=function(){return (_DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=Module["asm"]["DepthwiseConv2dNative"]).apply(null,arguments)};var _Div=Module["_Div"]=function(){return (_Div=Module["_Div"]=Module["asm"]["Div"]).apply(null,arguments)};var _Equal=Module["_Equal"]=function(){return (_Equal=Module["_Equal"]=Module["asm"]["Equal"]).apply(null,arguments)};var _Exp=Module["_Exp"]=function(){return (_Exp=Module["_Exp"]=Module["asm"]["Exp"]).apply(null,arguments)};var _FlipLeftRight=Module["_FlipLeftRight"]=function(){return (_FlipLeftRight=Module["_FlipLeftRight"]=Module["asm"]["FlipLeftRight"]).apply(null,arguments)};var _FloorDiv=Module["_FloorDiv"]=function(){return (_FloorDiv=Module["_FloorDiv"]=Module["asm"]["FloorDiv"]).apply(null,arguments)};var _FusedBatchNorm=Module["_FusedBatchNorm"]=function(){return (_FusedBatchNorm=Module["_FusedBatchNorm"]=Module["asm"]["FusedBatchNorm"]).apply(null,arguments)};var _FusedConv2D=Module["_FusedConv2D"]=function(){return (_FusedConv2D=Module["_FusedConv2D"]=Module["asm"]["FusedConv2D"]).apply(null,arguments)};var _FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=function(){return (_FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=Module["asm"]["FusedDepthwiseConv2D"]).apply(null,arguments)};var _Gather=Module["_Gather"]=function(){return (_Gather=Module["_Gather"]=Module["asm"]["Gather"]).apply(null,arguments)};var _GatherNd=Module["_GatherNd"]=function(){return (_GatherNd=Module["_GatherNd"]=Module["asm"]["GatherNd"]).apply(null,arguments)};var _Greater=Module["_Greater"]=function(){return (_Greater=Module["_Greater"]=Module["asm"]["Greater"]).apply(null,arguments)};var _GreaterEqual=Module["_GreaterEqual"]=function(){return (_GreaterEqual=Module["_GreaterEqual"]=Module["asm"]["GreaterEqual"]).apply(null,arguments)};var _Less=Module["_Less"]=function(){return (_Less=Module["_Less"]=Module["asm"]["Less"]).apply(null,arguments)};var _LessEqual=Module["_LessEqual"]=function(){return (_LessEqual=Module["_LessEqual"]=Module["asm"]["LessEqual"]).apply(null,arguments)};var _Log=Module["_Log"]=function(){return (_Log=Module["_Log"]=Module["asm"]["Log"]).apply(null,arguments)};var _LogicalAnd=Module["_LogicalAnd"]=function(){return (_LogicalAnd=Module["_LogicalAnd"]=Module["asm"]["LogicalAnd"]).apply(null,arguments)};var _Max=Module["_Max"]=function(){return (_Max=Module["_Max"]=Module["asm"]["Max"]).apply(null,arguments)};var _MaxPool=Module["_MaxPool"]=function(){return (_MaxPool=Module["_MaxPool"]=Module["asm"]["MaxPool"]).apply(null,arguments)};var _Maximum=Module["_Maximum"]=function(){return (_Maximum=Module["_Maximum"]=Module["asm"]["Maximum"]).apply(null,arguments)};var _Min=Module["_Min"]=function(){return (_Min=Module["_Min"]=Module["asm"]["Min"]).apply(null,arguments)};var _Minimum=Module["_Minimum"]=function(){return (_Minimum=Module["_Minimum"]=Module["asm"]["Minimum"]).apply(null,arguments)};var _Multiply=Module["_Multiply"]=function(){return (_Multiply=Module["_Multiply"]=Module["asm"]["Multiply"]).apply(null,arguments)};var _Negate=Module["_Negate"]=function(){return (_Negate=Module["_Negate"]=Module["asm"]["Negate"]).apply(null,arguments)};var _NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=function(){return (_NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=Module["asm"]["NonMaxSuppressionV3"]).apply(null,arguments)};var _NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=function(){return (_NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=Module["asm"]["NonMaxSuppressionV4"]).apply(null,arguments)};var _NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=function(){return (_NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=Module["asm"]["NonMaxSuppressionV5"]).apply(null,arguments)};var _NotEqual=Module["_NotEqual"]=function(){return (_NotEqual=Module["_NotEqual"]=Module["asm"]["NotEqual"]).apply(null,arguments)};var _OneHot=Module["_OneHot"]=function(){return (_OneHot=Module["_OneHot"]=Module["asm"]["OneHot"]).apply(null,arguments)};var _PadV2=Module["_PadV2"]=function(){return (_PadV2=Module["_PadV2"]=Module["asm"]["PadV2"]).apply(null,arguments)};var _Pow=Module["_Pow"]=function(){return (_Pow=Module["_Pow"]=Module["asm"]["Pow"]).apply(null,arguments)};var _Prelu=Module["_Prelu"]=function(){return (_Prelu=Module["_Prelu"]=Module["asm"]["Prelu"]).apply(null,arguments)};var _Relu=Module["_Relu"]=function(){return (_Relu=Module["_Relu"]=Module["asm"]["Relu"]).apply(null,arguments)};var _Relu6=Module["_Relu6"]=function(){return (_Relu6=Module["_Relu6"]=Module["asm"]["Relu6"]).apply(null,arguments)};var _ResizeBilinear=Module["_ResizeBilinear"]=function(){return (_ResizeBilinear=Module["_ResizeBilinear"]=Module["asm"]["ResizeBilinear"]).apply(null,arguments)};var _Reverse=Module["_Reverse"]=function(){return (_Reverse=Module["_Reverse"]=Module["asm"]["Reverse"]).apply(null,arguments)};var _RotateWithOffset=Module["_RotateWithOffset"]=function(){return (_RotateWithOffset=Module["_RotateWithOffset"]=Module["asm"]["RotateWithOffset"]).apply(null,arguments)};var _Rsqrt=Module["_Rsqrt"]=function(){return (_Rsqrt=Module["_Rsqrt"]=Module["asm"]["Rsqrt"]).apply(null,arguments)};var _ScatterNd=Module["_ScatterNd"]=function(){return (_ScatterNd=Module["_ScatterNd"]=Module["asm"]["ScatterNd"]).apply(null,arguments)};var _SelectV2=Module["_SelectV2"]=function(){return (_SelectV2=Module["_SelectV2"]=Module["asm"]["SelectV2"]).apply(null,arguments)};var _Sigmoid=Module["_Sigmoid"]=function(){return (_Sigmoid=Module["_Sigmoid"]=Module["asm"]["Sigmoid"]).apply(null,arguments)};var _Sin=Module["_Sin"]=function(){return (_Sin=Module["_Sin"]=Module["asm"]["Sin"]).apply(null,arguments)};var _Softmax=Module["_Softmax"]=function(){return (_Softmax=Module["_Softmax"]=Module["asm"]["Softmax"]).apply(null,arguments)};var _Sqrt=Module["_Sqrt"]=function(){return (_Sqrt=Module["_Sqrt"]=Module["asm"]["Sqrt"]).apply(null,arguments)};var _Square=Module["_Square"]=function(){return (_Square=Module["_Square"]=Module["asm"]["Square"]).apply(null,arguments)};var _SquaredDifference=Module["_SquaredDifference"]=function(){return (_SquaredDifference=Module["_SquaredDifference"]=Module["asm"]["SquaredDifference"]).apply(null,arguments)};var _StridedSlice=Module["_StridedSlice"]=function(){return (_StridedSlice=Module["_StridedSlice"]=Module["asm"]["StridedSlice"]).apply(null,arguments)};var _Sub=Module["_Sub"]=function(){return (_Sub=Module["_Sub"]=Module["asm"]["Sub"]).apply(null,arguments)};var _Sum=Module["_Sum"]=function(){return (_Sum=Module["_Sum"]=Module["asm"]["Sum"]).apply(null,arguments)};var _Tanh=Module["_Tanh"]=function(){return (_Tanh=Module["_Tanh"]=Module["asm"]["Tanh"]).apply(null,arguments)};var _Tile=Module["_Tile"]=function(){return (_Tile=Module["_Tile"]=Module["asm"]["Tile"]).apply(null,arguments)};var _Transpose=Module["_Transpose"]=function(){return (_Transpose=Module["_Transpose"]=Module["asm"]["Transpose"]).apply(null,arguments)};var __FusedMatMul=Module["__FusedMatMul"]=function(){return (__FusedMatMul=Module["__FusedMatMul"]=Module["asm"]["_FusedMatMul"]).apply(null,arguments)};var _malloc=Module["_malloc"]=function(){return (_malloc=Module["_malloc"]=Module["asm"]["malloc"]).apply(null,arguments)};var _free=Module["_free"]=function(){return (_free=Module["_free"]=Module["asm"]["free"]).apply(null,arguments)};var __start=Module["__start"]=function(){return (__start=Module["__start"]=Module["asm"]["_start"]).apply(null,arguments)};var stackSave=Module["stackSave"]=function(){return (stackSave=Module["stackSave"]=Module["asm"]["stackSave"]).apply(null,arguments)};var stackAlloc=Module["stackAlloc"]=function(){return (stackAlloc=Module["stackAlloc"]=Module["asm"]["stackAlloc"]).apply(null,arguments)};var stackRestore=Module["stackRestore"]=function(){return (stackRestore=Module["stackRestore"]=Module["asm"]["stackRestore"]).apply(null,arguments)};Module["asm"]=asm;Module["cwrap"]=cwrap;var calledRun;Module["then"]=function(func){if(calledRun){func(Module);}else{var old=Module["onRuntimeInitialized"];Module["onRuntimeInitialized"]=function(){if(old)old();func(Module);};}return Module};function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status;}dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller;};function callMain(args){var entryFunction=Module["__start"];try{entryFunction();var ret=0;exit(ret,true);}catch(e){if(e instanceof ExitStatus){return}else if(e=="unwind"){noExitRuntime=true;return}else{var toLog=e;if(e&&typeof e==="object"&&e.stack){toLog=[e,e.stack];}err("exception thrown: "+toLog);quit_(1,e);}}finally{}}function run(args){if(runDependencies>0){return}preRun();if(runDependencies>0)return;function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();if(shouldRunNow)callMain();postRun();}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("");},1);doRun();},1);}else{doRun();}}Module["run"]=run;function exit(status,implicit){if(implicit&&noExitRuntime&&status===0){return}if(noExitRuntime);else{ABORT=true;if(Module["onExit"])Module["onExit"](status);}quit_(status,new ExitStatus(status));}if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()();}}var shouldRunNow=true;if(Module["noInitialRun"])shouldRunNow=false;noExitRuntime=true;run();
+  var Module=typeof WasmBackendModule!=="undefined"?WasmBackendModule:{};var readyPromiseResolve,readyPromiseReject;Module["ready"]=new Promise(function(resolve,reject){readyPromiseResolve=resolve;readyPromiseReject=reject;});var moduleOverrides={};var key;for(key in Module){if(Module.hasOwnProperty(key)){moduleOverrides[key]=Module[key];}}var arguments_=[];var thisProgram="./this.program";var quit_=function(status,toThrow){throw toThrow};var ENVIRONMENT_IS_WEB=false;var ENVIRONMENT_IS_WORKER=false;var ENVIRONMENT_IS_NODE=false;var ENVIRONMENT_IS_SHELL=false;ENVIRONMENT_IS_WEB=typeof window==="object";ENVIRONMENT_IS_WORKER=typeof importScripts==="function";ENVIRONMENT_IS_NODE=typeof process==="object"&&typeof process.versions==="object"&&typeof process.versions.node==="string";ENVIRONMENT_IS_SHELL=!ENVIRONMENT_IS_WEB&&!ENVIRONMENT_IS_NODE&&!ENVIRONMENT_IS_WORKER;var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var read_,readAsync,readBinary;var nodeFS;var nodePath;if(ENVIRONMENT_IS_NODE){if(ENVIRONMENT_IS_WORKER){scriptDirectory=path.dirname(scriptDirectory)+"/";}else {scriptDirectory=__dirname+"/";}read_=function shell_read(filename,binary){if(!nodeFS)nodeFS=fs;if(!nodePath)nodePath=path;filename=nodePath["normalize"](filename);return nodeFS["readFileSync"](filename,binary?null:"utf8")};readBinary=function readBinary(filename){var ret=read_(filename,true);if(!ret.buffer){ret=new Uint8Array(ret);}assert(ret.buffer);return ret};if(process["argv"].length>1){thisProgram=process["argv"][1].replace(/\\/g,"/");}arguments_=process["argv"].slice(2);process["on"]("uncaughtException",function(ex){if(!(ex instanceof ExitStatus)){throw ex}});process["on"]("unhandledRejection",abort);quit_=function(status){process["exit"](status);};Module["inspect"]=function(){return "[Emscripten Module object]"};}else if(ENVIRONMENT_IS_SHELL){if(typeof read!="undefined"){read_=function shell_read(f){return read(f)};}readBinary=function readBinary(f){var data;if(typeof readbuffer==="function"){return new Uint8Array(readbuffer(f))}data=read(f,"binary");assert(typeof data==="object");return data};if(typeof scriptArgs!="undefined"){arguments_=scriptArgs;}else if(typeof arguments!="undefined"){arguments_=arguments;}if(typeof quit==="function"){quit_=function(status){quit(status);};}if(typeof print!=="undefined"){if(typeof console==="undefined")console={};console.log=print;console.warn=console.error=typeof printErr!=="undefined"?printErr:print;}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){if(ENVIRONMENT_IS_WORKER){scriptDirectory=self.location.href;}else if(typeof document!=="undefined"&&document.currentScript){scriptDirectory=document.currentScript.src;}if(_scriptDir){scriptDirectory=_scriptDir;}if(scriptDirectory.indexOf("blob:")!==0){scriptDirectory=scriptDirectory.substr(0,scriptDirectory.lastIndexOf("/")+1);}else {scriptDirectory="";}{read_=function(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.send(null);return xhr.responseText};if(ENVIRONMENT_IS_WORKER){readBinary=function(url){var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)};}readAsync=function(url,onload,onerror){var xhr=new XMLHttpRequest;xhr.open("GET",url,true);xhr.responseType="arraybuffer";xhr.onload=function(){if(xhr.status==200||xhr.status==0&&xhr.response){onload(xhr.response);return}onerror();};xhr.onerror=onerror;xhr.send(null);};}}var out=Module["print"]||console.log.bind(console);var err=Module["printErr"]||console.warn.bind(console);for(key in moduleOverrides){if(moduleOverrides.hasOwnProperty(key)){Module[key]=moduleOverrides[key];}}moduleOverrides=null;if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["quit"])quit_=Module["quit"];var wasmBinary;if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];var noExitRuntime=Module["noExitRuntime"]||true;if(typeof WebAssembly!=="object"){abort("no native wasm support detected");}var wasmMemory;var ABORT=false;function assert(condition,text){if(!condition){abort("Assertion failed: "+text);}}function getCFunc(ident){var func=Module["_"+ident];assert(func,"Cannot call unknown function "+ident+", make sure it is exported");return func}function ccall(ident,returnType,argTypes,args,opts){var toC={"string":function(str){var ret=0;if(str!==null&&str!==undefined&&str!==0){var len=(str.length<<2)+1;ret=stackAlloc(len);stringToUTF8(str,ret,len);}return ret},"array":function(arr){var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string")return UTF8ToString(ret);if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i]);}else {cArgs[i]=args[i];}}}var ret=func.apply(null,cArgs);ret=convertReturnValue(ret);if(stack!==0)stackRestore(stack);return ret}function cwrap(ident,returnType,argTypes,opts){argTypes=argTypes||[];var numericArgs=argTypes.every(function(type){return type==="number"});var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return function(){return ccall(ident,returnType,argTypes,arguments)}}var UTF8Decoder=typeof TextDecoder!=="undefined"?new TextDecoder("utf8"):undefined;function UTF8ArrayToString(heap,idx,maxBytesToRead){var endIdx=idx+maxBytesToRead;var endPtr=idx;while(heap[endPtr]&&!(endPtr>=endIdx))++endPtr;if(endPtr-idx>16&&heap.subarray&&UTF8Decoder){return UTF8Decoder.decode(heap.subarray(idx,endPtr))}else {var str="";while(idx<endPtr){var u0=heap[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heap[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heap[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2;}else {u0=(u0&7)<<18|u1<<12|u2<<6|heap[idx++]&63;}if(u0<65536){str+=String.fromCharCode(u0);}else {var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023);}}}return str}function UTF8ToString(ptr,maxBytesToRead){return ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead):""}function stringToUTF8Array(str,heap,outIdx,maxBytesToWrite){if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.charCodeAt(i);if(u>=55296&&u<=57343){var u1=str.charCodeAt(++i);u=65536+((u&1023)<<10)|u1&1023;}if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u;}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63;}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}else {if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;}}heap[outIdx]=0;return outIdx-startIdx}function stringToUTF8(str,outPtr,maxBytesToWrite){return stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite)}function writeArrayToMemory(array,buffer){HEAP8.set(array,buffer);}function alignUp(x,multiple){if(x%multiple>0){x+=multiple-x%multiple;}return x}var buffer,HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64;function updateGlobalBufferAndViews(buf){buffer=buf;Module["HEAP8"]=HEAP8=new Int8Array(buf);Module["HEAP16"]=HEAP16=new Int16Array(buf);Module["HEAP32"]=HEAP32=new Int32Array(buf);Module["HEAPU8"]=HEAPU8=new Uint8Array(buf);Module["HEAPU16"]=HEAPU16=new Uint16Array(buf);Module["HEAPU32"]=HEAPU32=new Uint32Array(buf);Module["HEAPF32"]=HEAPF32=new Float32Array(buf);Module["HEAPF64"]=HEAPF64=new Float64Array(buf);}var INITIAL_MEMORY=Module["INITIAL_MEMORY"]||16777216;var wasmTable;var __ATPRERUN__=[];var __ATINIT__=[];var __ATMAIN__=[];var __ATPOSTRUN__=[];__ATINIT__.push({func:function(){___wasm_call_ctors();}});function preRun(){if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift());}}callRuntimeCallbacks(__ATPRERUN__);}function initRuntime(){callRuntimeCallbacks(__ATINIT__);}function preMain(){callRuntimeCallbacks(__ATMAIN__);}function postRun(){if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift());}}callRuntimeCallbacks(__ATPOSTRUN__);}function addOnPreRun(cb){__ATPRERUN__.unshift(cb);}function addOnPostRun(cb){__ATPOSTRUN__.unshift(cb);}var runDependencies=0;var dependenciesFulfilled=null;function addRunDependency(id){runDependencies++;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}}function removeRunDependency(id){runDependencies--;if(Module["monitorRunDependencies"]){Module["monitorRunDependencies"](runDependencies);}if(runDependencies==0){if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback();}}}Module["preloadedImages"]={};Module["preloadedAudios"]={};function abort(what){if(Module["onAbort"]){Module["onAbort"](what);}what+="";err(what);ABORT=true;what="abort("+what+"). Build with -s ASSERTIONS=1 for more info.";var e=new WebAssembly.RuntimeError(what);readyPromiseReject(e);throw e}function hasPrefix(str,prefix){return String.prototype.startsWith?str.startsWith(prefix):str.indexOf(prefix)===0}var dataURIPrefix="data:application/octet-stream;base64,";function isDataURI(filename){return hasPrefix(filename,dataURIPrefix)}var fileURIPrefix="file://";function isFileURI(filename){return hasPrefix(filename,fileURIPrefix)}var wasmBinaryFile="tfjs-backend-wasm.wasm";if(!isDataURI(wasmBinaryFile)){wasmBinaryFile=locateFile(wasmBinaryFile);}function getBinary(file){try{if(file==wasmBinaryFile&&wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(file)}else {throw "both async and sync fetching of the wasm failed"}}catch(err){abort(err);}}function getBinaryPromise(){if(!wasmBinary&&(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER)){if(typeof fetch==="function"&&!isFileURI(wasmBinaryFile)){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){if(!response["ok"]){throw "failed to load wasm binary file at '"+wasmBinaryFile+"'"}return response["arrayBuffer"]()}).catch(function(){return getBinary(wasmBinaryFile)})}else {if(readAsync){return new Promise(function(resolve,reject){readAsync(wasmBinaryFile,function(response){resolve(new Uint8Array(response));},reject);})}}}return Promise.resolve().then(function(){return getBinary(wasmBinaryFile)})}function createWasm(){var info={"a":asmLibraryArg};function receiveInstance(instance,module){var exports=instance.exports;Module["asm"]=exports;wasmMemory=Module["asm"]["i"];updateGlobalBufferAndViews(wasmMemory.buffer);wasmTable=Module["asm"]["o"];removeRunDependency();}addRunDependency();function receiveInstantiatedSource(output){receiveInstance(output["instance"]);}function instantiateArrayBuffer(receiver){return getBinaryPromise().then(function(binary){return WebAssembly.instantiate(binary,info)}).then(receiver,function(reason){err("failed to asynchronously prepare wasm: "+reason);abort(reason);})}function instantiateAsync(){if(!wasmBinary&&typeof WebAssembly.instantiateStreaming==="function"&&!isDataURI(wasmBinaryFile)&&!isFileURI(wasmBinaryFile)&&typeof fetch==="function"){return fetch(wasmBinaryFile,{credentials:"same-origin"}).then(function(response){var result=WebAssembly.instantiateStreaming(response,info);return result.then(receiveInstantiatedSource,function(reason){err("wasm streaming compile failed: "+reason);err("falling back to ArrayBuffer instantiation");return instantiateArrayBuffer(receiveInstantiatedSource)})})}else {return instantiateArrayBuffer(receiveInstantiatedSource)}}if(Module["instantiateWasm"]){try{var exports=Module["instantiateWasm"](info,receiveInstance);return exports}catch(e){err("Module.instantiateWasm callback failed with error: "+e);return false}}instantiateAsync().catch(readyPromiseReject);return {}}function callRuntimeCallbacks(callbacks){while(callbacks.length>0){var callback=callbacks.shift();if(typeof callback=="function"){callback(Module);continue}var func=callback.func;if(typeof func==="number"){if(callback.arg===undefined){wasmTable.get(func)();}else {wasmTable.get(func)(callback.arg);}}else {func(callback.arg===undefined?null:callback.arg);}}}function _abort(){abort();}function _emscripten_memcpy_big(dest,src,num){HEAPU8.copyWithin(dest,src,src+num);}function _emscripten_get_heap_size(){return HEAPU8.length}function emscripten_realloc_buffer(size){try{wasmMemory.grow(size-buffer.byteLength+65535>>>16);updateGlobalBufferAndViews(wasmMemory.buffer);return 1}catch(e){}}function _emscripten_resize_heap(requestedSize){var oldSize=_emscripten_get_heap_size();var maxHeapSize=2147483648;if(requestedSize>maxHeapSize){return false}for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignUp(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=emscripten_realloc_buffer(newSize);if(replacement){return true}}return false}var SYSCALLS={mappings:{},buffers:[null,[],[]],printChar:function(stream,curr){var buffer=SYSCALLS.buffers[stream];if(curr===0||curr===10){(stream===1?out:err)(UTF8ArrayToString(buffer,0));buffer.length=0;}else {buffer.push(curr);}},varargs:undefined,get:function(){SYSCALLS.varargs+=4;var ret=HEAP32[SYSCALLS.varargs-4>>2];return ret},getStr:function(ptr){var ret=UTF8ToString(ptr);return ret},get64:function(low,high){return low}};function _fd_close(fd){return 0}function _fd_seek(fd,offset_low,offset_high,whence,newOffset){}function _fd_write(fd,iov,iovcnt,pnum){var num=0;for(var i=0;i<iovcnt;i++){var ptr=HEAP32[iov+i*8>>2];var len=HEAP32[iov+(i*8+4)>>2];for(var j=0;j<len;j++){SYSCALLS.printChar(fd,HEAPU8[ptr+j]);}num+=len;}HEAP32[pnum>>2]=num;return 0}function _pthread_create(){return 6}function setErrNo(value){HEAP32[___errno_location()>>2]=value;return value}function _sysconf(name){switch(name){case 30:return 16384;case 85:var maxHeapSize=2147483648;return maxHeapSize/16384;case 132:case 133:case 12:case 137:case 138:case 15:case 235:case 16:case 17:case 18:case 19:case 20:case 149:case 13:case 10:case 236:case 153:case 9:case 21:case 22:case 159:case 154:case 14:case 77:case 78:case 139:case 82:case 68:case 67:case 164:case 11:case 29:case 47:case 48:case 95:case 52:case 51:case 46:return 200809;case 27:case 246:case 127:case 128:case 23:case 24:case 160:case 161:case 181:case 182:case 242:case 183:case 184:case 243:case 244:case 245:case 165:case 178:case 179:case 49:case 50:case 168:case 169:case 175:case 170:case 171:case 172:case 97:case 76:case 32:case 173:case 35:case 80:case 81:case 79:return -1;case 176:case 177:case 7:case 155:case 8:case 157:case 125:case 126:case 92:case 93:case 129:case 130:case 131:case 94:case 91:return 1;case 74:case 60:case 69:case 70:case 4:return 1024;case 31:case 42:case 72:return 32;case 87:case 26:case 33:return 2147483647;case 34:case 1:return 47839;case 38:case 36:return 99;case 43:case 37:return 2048;case 0:return 2097152;case 3:return 65536;case 28:return 32768;case 44:return 32767;case 75:return 16384;case 39:return 1e3;case 89:return 700;case 71:return 256;case 40:return 255;case 2:return 100;case 180:return 64;case 25:return 20;case 5:return 16;case 6:return 6;case 73:return 4;case 84:{if(typeof navigator==="object")return navigator["hardwareConcurrency"]||1;return 1}}setErrNo(28);return -1}var asmLibraryArg={"a":_abort,"d":_emscripten_memcpy_big,"e":_emscripten_resize_heap,"f":_fd_close,"c":_fd_seek,"b":_fd_write,"g":_pthread_create,"h":_sysconf};var asm=createWasm();var ___wasm_call_ctors=Module["___wasm_call_ctors"]=function(){return (___wasm_call_ctors=Module["___wasm_call_ctors"]=Module["asm"]["j"]).apply(null,arguments)};var _init=Module["_init"]=function(){return (_init=Module["_init"]=Module["asm"]["k"]).apply(null,arguments)};var _register_tensor=Module["_register_tensor"]=function(){return (_register_tensor=Module["_register_tensor"]=Module["asm"]["l"]).apply(null,arguments)};var _dispose_data=Module["_dispose_data"]=function(){return (_dispose_data=Module["_dispose_data"]=Module["asm"]["m"]).apply(null,arguments)};var _dispose=Module["_dispose"]=function(){return (_dispose=Module["_dispose"]=Module["asm"]["n"]).apply(null,arguments)};var _Abs=Module["_Abs"]=function(){return (_Abs=Module["_Abs"]=Module["asm"]["p"]).apply(null,arguments)};var _Add=Module["_Add"]=function(){return (_Add=Module["_Add"]=Module["asm"]["q"]).apply(null,arguments)};var _AddN=Module["_AddN"]=function(){return (_AddN=Module["_AddN"]=Module["asm"]["r"]).apply(null,arguments)};var _All=Module["_All"]=function(){return (_All=Module["_All"]=Module["asm"]["s"]).apply(null,arguments)};var _Any=Module["_Any"]=function(){return (_Any=Module["_Any"]=Module["asm"]["t"]).apply(null,arguments)};var _ArgMax=Module["_ArgMax"]=function(){return (_ArgMax=Module["_ArgMax"]=Module["asm"]["u"]).apply(null,arguments)};var _AvgPool=Module["_AvgPool"]=function(){return (_AvgPool=Module["_AvgPool"]=Module["asm"]["v"]).apply(null,arguments)};var _BatchMatMul=Module["_BatchMatMul"]=function(){return (_BatchMatMul=Module["_BatchMatMul"]=Module["asm"]["w"]).apply(null,arguments)};var _Ceil=Module["_Ceil"]=function(){return (_Ceil=Module["_Ceil"]=Module["asm"]["x"]).apply(null,arguments)};var _ClipByValue=Module["_ClipByValue"]=function(){return (_ClipByValue=Module["_ClipByValue"]=Module["asm"]["y"]).apply(null,arguments)};var _Conv2D=Module["_Conv2D"]=function(){return (_Conv2D=Module["_Conv2D"]=Module["asm"]["z"]).apply(null,arguments)};var _Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=function(){return (_Conv2DBackpropInput=Module["_Conv2DBackpropInput"]=Module["asm"]["A"]).apply(null,arguments)};var _Cos=Module["_Cos"]=function(){return (_Cos=Module["_Cos"]=Module["asm"]["B"]).apply(null,arguments)};var _CropAndResize=Module["_CropAndResize"]=function(){return (_CropAndResize=Module["_CropAndResize"]=Module["asm"]["C"]).apply(null,arguments)};var _Cumsum=Module["_Cumsum"]=function(){return (_Cumsum=Module["_Cumsum"]=Module["asm"]["D"]).apply(null,arguments)};var _DepthToSpace=Module["_DepthToSpace"]=function(){return (_DepthToSpace=Module["_DepthToSpace"]=Module["asm"]["E"]).apply(null,arguments)};var _DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=function(){return (_DepthwiseConv2dNative=Module["_DepthwiseConv2dNative"]=Module["asm"]["F"]).apply(null,arguments)};var _Equal=Module["_Equal"]=function(){return (_Equal=Module["_Equal"]=Module["asm"]["G"]).apply(null,arguments)};var _Exp=Module["_Exp"]=function(){return (_Exp=Module["_Exp"]=Module["asm"]["H"]).apply(null,arguments)};var _FlipLeftRight=Module["_FlipLeftRight"]=function(){return (_FlipLeftRight=Module["_FlipLeftRight"]=Module["asm"]["I"]).apply(null,arguments)};var _Floor=Module["_Floor"]=function(){return (_Floor=Module["_Floor"]=Module["asm"]["J"]).apply(null,arguments)};var _FloorDiv=Module["_FloorDiv"]=function(){return (_FloorDiv=Module["_FloorDiv"]=Module["asm"]["K"]).apply(null,arguments)};var _FusedBatchNorm=Module["_FusedBatchNorm"]=function(){return (_FusedBatchNorm=Module["_FusedBatchNorm"]=Module["asm"]["L"]).apply(null,arguments)};var _FusedConv2D=Module["_FusedConv2D"]=function(){return (_FusedConv2D=Module["_FusedConv2D"]=Module["asm"]["M"]).apply(null,arguments)};var _FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=function(){return (_FusedDepthwiseConv2D=Module["_FusedDepthwiseConv2D"]=Module["asm"]["N"]).apply(null,arguments)};var _Gather=Module["_Gather"]=function(){return (_Gather=Module["_Gather"]=Module["asm"]["O"]).apply(null,arguments)};var _GatherNd=Module["_GatherNd"]=function(){return (_GatherNd=Module["_GatherNd"]=Module["asm"]["P"]).apply(null,arguments)};var _Greater=Module["_Greater"]=function(){return (_Greater=Module["_Greater"]=Module["asm"]["Q"]).apply(null,arguments)};var _GreaterEqual=Module["_GreaterEqual"]=function(){return (_GreaterEqual=Module["_GreaterEqual"]=Module["asm"]["R"]).apply(null,arguments)};var _LeakyRelu=Module["_LeakyRelu"]=function(){return (_LeakyRelu=Module["_LeakyRelu"]=Module["asm"]["S"]).apply(null,arguments)};var _Less=Module["_Less"]=function(){return (_Less=Module["_Less"]=Module["asm"]["T"]).apply(null,arguments)};var _LessEqual=Module["_LessEqual"]=function(){return (_LessEqual=Module["_LessEqual"]=Module["asm"]["U"]).apply(null,arguments)};var _Log=Module["_Log"]=function(){return (_Log=Module["_Log"]=Module["asm"]["V"]).apply(null,arguments)};var _LogicalAnd=Module["_LogicalAnd"]=function(){return (_LogicalAnd=Module["_LogicalAnd"]=Module["asm"]["W"]).apply(null,arguments)};var _Max=Module["_Max"]=function(){return (_Max=Module["_Max"]=Module["asm"]["X"]).apply(null,arguments)};var _MaxPool=Module["_MaxPool"]=function(){return (_MaxPool=Module["_MaxPool"]=Module["asm"]["Y"]).apply(null,arguments)};var _Maximum=Module["_Maximum"]=function(){return (_Maximum=Module["_Maximum"]=Module["asm"]["Z"]).apply(null,arguments)};var _Mean=Module["_Mean"]=function(){return (_Mean=Module["_Mean"]=Module["asm"]["_"]).apply(null,arguments)};var _Min=Module["_Min"]=function(){return (_Min=Module["_Min"]=Module["asm"]["$"]).apply(null,arguments)};var _Minimum=Module["_Minimum"]=function(){return (_Minimum=Module["_Minimum"]=Module["asm"]["aa"]).apply(null,arguments)};var _MirrorPad=Module["_MirrorPad"]=function(){return (_MirrorPad=Module["_MirrorPad"]=Module["asm"]["ba"]).apply(null,arguments)};var _Multiply=Module["_Multiply"]=function(){return (_Multiply=Module["_Multiply"]=Module["asm"]["ca"]).apply(null,arguments)};var _Neg=Module["_Neg"]=function(){return (_Neg=Module["_Neg"]=Module["asm"]["da"]).apply(null,arguments)};var _NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=function(){return (_NonMaxSuppressionV3=Module["_NonMaxSuppressionV3"]=Module["asm"]["ea"]).apply(null,arguments)};var _NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=function(){return (_NonMaxSuppressionV4=Module["_NonMaxSuppressionV4"]=Module["asm"]["fa"]).apply(null,arguments)};var _NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=function(){return (_NonMaxSuppressionV5=Module["_NonMaxSuppressionV5"]=Module["asm"]["ga"]).apply(null,arguments)};var _NotEqual=Module["_NotEqual"]=function(){return (_NotEqual=Module["_NotEqual"]=Module["asm"]["ha"]).apply(null,arguments)};var _OneHot=Module["_OneHot"]=function(){return (_OneHot=Module["_OneHot"]=Module["asm"]["ia"]).apply(null,arguments)};var _PadV2=Module["_PadV2"]=function(){return (_PadV2=Module["_PadV2"]=Module["asm"]["ja"]).apply(null,arguments)};var _Pow=Module["_Pow"]=function(){return (_Pow=Module["_Pow"]=Module["asm"]["ka"]).apply(null,arguments)};var _Prelu=Module["_Prelu"]=function(){return (_Prelu=Module["_Prelu"]=Module["asm"]["la"]).apply(null,arguments)};var _Prod=Module["_Prod"]=function(){return (_Prod=Module["_Prod"]=Module["asm"]["ma"]).apply(null,arguments)};var _RealDiv=Module["_RealDiv"]=function(){return (_RealDiv=Module["_RealDiv"]=Module["asm"]["na"]).apply(null,arguments)};var _Relu=Module["_Relu"]=function(){return (_Relu=Module["_Relu"]=Module["asm"]["oa"]).apply(null,arguments)};var _Relu6=Module["_Relu6"]=function(){return (_Relu6=Module["_Relu6"]=Module["asm"]["pa"]).apply(null,arguments)};var _ResizeBilinear=Module["_ResizeBilinear"]=function(){return (_ResizeBilinear=Module["_ResizeBilinear"]=Module["asm"]["qa"]).apply(null,arguments)};var _Reverse=Module["_Reverse"]=function(){return (_Reverse=Module["_Reverse"]=Module["asm"]["ra"]).apply(null,arguments)};var _RotateWithOffset=Module["_RotateWithOffset"]=function(){return (_RotateWithOffset=Module["_RotateWithOffset"]=Module["asm"]["sa"]).apply(null,arguments)};var _Round=Module["_Round"]=function(){return (_Round=Module["_Round"]=Module["asm"]["ta"]).apply(null,arguments)};var _Rsqrt=Module["_Rsqrt"]=function(){return (_Rsqrt=Module["_Rsqrt"]=Module["asm"]["ua"]).apply(null,arguments)};var _ScatterNd=Module["_ScatterNd"]=function(){return (_ScatterNd=Module["_ScatterNd"]=Module["asm"]["va"]).apply(null,arguments)};var _SelectV2=Module["_SelectV2"]=function(){return (_SelectV2=Module["_SelectV2"]=Module["asm"]["wa"]).apply(null,arguments)};var _Sigmoid=Module["_Sigmoid"]=function(){return (_Sigmoid=Module["_Sigmoid"]=Module["asm"]["xa"]).apply(null,arguments)};var _Sin=Module["_Sin"]=function(){return (_Sin=Module["_Sin"]=Module["asm"]["ya"]).apply(null,arguments)};var _Softmax=Module["_Softmax"]=function(){return (_Softmax=Module["_Softmax"]=Module["asm"]["za"]).apply(null,arguments)};var _Sqrt=Module["_Sqrt"]=function(){return (_Sqrt=Module["_Sqrt"]=Module["asm"]["Aa"]).apply(null,arguments)};var _Square=Module["_Square"]=function(){return (_Square=Module["_Square"]=Module["asm"]["Ba"]).apply(null,arguments)};var _SquaredDifference=Module["_SquaredDifference"]=function(){return (_SquaredDifference=Module["_SquaredDifference"]=Module["asm"]["Ca"]).apply(null,arguments)};var _Step=Module["_Step"]=function(){return (_Step=Module["_Step"]=Module["asm"]["Da"]).apply(null,arguments)};var _StridedSlice=Module["_StridedSlice"]=function(){return (_StridedSlice=Module["_StridedSlice"]=Module["asm"]["Ea"]).apply(null,arguments)};var _Sub=Module["_Sub"]=function(){return (_Sub=Module["_Sub"]=Module["asm"]["Fa"]).apply(null,arguments)};var _Sum=Module["_Sum"]=function(){return (_Sum=Module["_Sum"]=Module["asm"]["Ga"]).apply(null,arguments)};var _Tan=Module["_Tan"]=function(){return (_Tan=Module["_Tan"]=Module["asm"]["Ha"]).apply(null,arguments)};var _Tanh=Module["_Tanh"]=function(){return (_Tanh=Module["_Tanh"]=Module["asm"]["Ia"]).apply(null,arguments)};var _Tile=Module["_Tile"]=function(){return (_Tile=Module["_Tile"]=Module["asm"]["Ja"]).apply(null,arguments)};var _TopK=Module["_TopK"]=function(){return (_TopK=Module["_TopK"]=Module["asm"]["Ka"]).apply(null,arguments)};var _Transpose=Module["_Transpose"]=function(){return (_Transpose=Module["_Transpose"]=Module["asm"]["La"]).apply(null,arguments)};var __FusedMatMul=Module["__FusedMatMul"]=function(){return (__FusedMatMul=Module["__FusedMatMul"]=Module["asm"]["Ma"]).apply(null,arguments)};var _malloc=Module["_malloc"]=function(){return (_malloc=Module["_malloc"]=Module["asm"]["Na"]).apply(null,arguments)};var _free=Module["_free"]=function(){return (_free=Module["_free"]=Module["asm"]["Oa"]).apply(null,arguments)};var ___errno_location=Module["___errno_location"]=function(){return (___errno_location=Module["___errno_location"]=Module["asm"]["Pa"]).apply(null,arguments)};var stackSave=Module["stackSave"]=function(){return (stackSave=Module["stackSave"]=Module["asm"]["Qa"]).apply(null,arguments)};var stackRestore=Module["stackRestore"]=function(){return (stackRestore=Module["stackRestore"]=Module["asm"]["Ra"]).apply(null,arguments)};var stackAlloc=Module["stackAlloc"]=function(){return (stackAlloc=Module["stackAlloc"]=Module["asm"]["Sa"]).apply(null,arguments)};Module["cwrap"]=cwrap;var calledRun;function ExitStatus(status){this.name="ExitStatus";this.message="Program terminated with exit("+status+")";this.status=status;}dependenciesFulfilled=function runCaller(){if(!calledRun)run();if(!calledRun)dependenciesFulfilled=runCaller;};function run(args){if(runDependencies>0){return}preRun();if(runDependencies>0){return}function doRun(){if(calledRun)return;calledRun=true;Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();readyPromiseResolve(Module);if(Module["onRuntimeInitialized"])Module["onRuntimeInitialized"]();postRun();}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(function(){setTimeout(function(){Module["setStatus"]("");},1);doRun();},1);}else {doRun();}}Module["run"]=run;if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].pop()();}}run();
 
 
-    return WasmBackendModule
+    return WasmBackendModule.ready
   }
   );
   })();
   module.exports = WasmBackendModule;
   });
 
-  var _this$1 = undefined;
-  var WASM_PRIORITY = 2;
   var BackendWasm = /** @class */ (function (_super) {
       __extends(BackendWasm, _super);
       function BackendWasm(wasm) {
@@ -3846,8 +4702,8 @@
           return _this;
       }
       BackendWasm.prototype.write = function (values, shape, dtype) {
-          var dataId = {};
-          this.move(dataId, values, shape, dtype);
+          var dataId = { id: this.dataIdNextNumber++ };
+          this.move(dataId, values, shape, dtype, 1);
           return dataId;
       };
       BackendWasm.prototype.numDataIds = function () {
@@ -3864,17 +4720,17 @@
               });
           });
       };
-      BackendWasm.prototype.move = function (dataId, values, shape, dtype) {
+      BackendWasm.prototype.move = function (dataId, values, shape, dtype, refCount) {
           var id = this.dataIdNextNumber++;
           if (dtype === 'string') {
               var stringBytes = values;
-              this.dataIdMap.set(dataId, { id: id, stringBytes: stringBytes, shape: shape, dtype: dtype, memoryOffset: null });
+              this.dataIdMap.set(dataId, { id: id, stringBytes: stringBytes, shape: shape, dtype: dtype, memoryOffset: null, refCount: refCount });
               return;
           }
           var size = tfjsCore.util.sizeFromShape(shape);
           var numBytes = size * tfjsCore.util.bytesPerElement(dtype);
           var memoryOffset = this.wasm._malloc(numBytes);
-          this.dataIdMap.set(dataId, { id: id, memoryOffset: memoryOffset, shape: shape, dtype: dtype });
+          this.dataIdMap.set(dataId, { id: id, memoryOffset: memoryOffset, shape: shape, dtype: dtype, refCount: refCount });
           this.wasm.tfjs.registerTensor(id, size, memoryOffset);
           if (values != null) {
               this.wasm.HEAPU8.set(new Uint8Array(values.buffer, values.byteOffset, numBytes), memoryOffset);
@@ -3895,11 +4751,39 @@
           var bytes = this.wasm.HEAPU8.slice(memoryOffset, memoryOffset + tfjsCore.util.sizeFromShape(shape) * tfjsCore.util.bytesPerElement(dtype));
           return typedArrayFromBuffer(bytes.buffer, dtype);
       };
-      BackendWasm.prototype.disposeData = function (dataId) {
+      /**
+       * Dispose the memory if the dataId has 0 refCount. Return true if the memory
+       * is released, false otherwise.
+       * @param dataId
+       * @oaram force Optional, remove the data regardless of refCount
+       */
+      BackendWasm.prototype.disposeData = function (dataId, force) {
+          if (force === void 0) { force = false; }
+          if (this.dataIdMap.has(dataId)) {
+              var data = this.dataIdMap.get(dataId);
+              data.refCount--;
+              if (!force && data.refCount > 0) {
+                  return false;
+              }
+              this.wasm._free(data.memoryOffset);
+              this.wasm.tfjs.disposeData(data.id);
+              this.dataIdMap.delete(dataId);
+          }
+          return true;
+      };
+      /** Return refCount of a `TensorData`. */
+      BackendWasm.prototype.refCount = function (dataId) {
+          if (this.dataIdMap.has(dataId)) {
+              var tensorData = this.dataIdMap.get(dataId);
+              return tensorData.refCount;
+          }
+          return 0;
+      };
+      BackendWasm.prototype.incRef = function (dataId) {
           var data = this.dataIdMap.get(dataId);
-          this.wasm._free(data.memoryOffset);
-          this.wasm.tfjs.disposeData(data.id);
-          this.dataIdMap.delete(dataId);
+          if (data != null) {
+              data.refCount++;
+          }
       };
       BackendWasm.prototype.floatPrecision = function () {
           return 32;
@@ -3928,9 +4812,9 @@
               dataId = this.write(null /* values */, shape, dtype);
           }
           else {
-              dataId = {};
               var id = this.dataIdNextNumber++;
-              this.dataIdMap.set(dataId, { id: id, memoryOffset: memoryOffset, shape: shape, dtype: dtype });
+              dataId = { id: id };
+              this.dataIdMap.set(dataId, { id: id, memoryOffset: memoryOffset, shape: shape, dtype: dtype, refCount: 1 });
               var size = tfjsCore.util.sizeFromShape(shape);
               this.wasm.tfjs.registerTensor(id, size, memoryOffset);
           }
@@ -3954,17 +4838,6 @@
       };
       return BackendWasm;
   }(tfjsCore.KernelBackend));
-  tfjsCore.registerBackend('wasm', function () { return __awaiter(_this$1, void 0, void 0, function () {
-      var wasm;
-      return __generator(this, function (_a) {
-          switch (_a.label) {
-              case 0: return [4 /*yield*/, init()];
-              case 1:
-                  wasm = (_a.sent()).wasm;
-                  return [2 /*return*/, new BackendWasm(wasm)];
-          }
-      });
-  }); }, WASM_PRIORITY);
   function createInstantiateWasmFunc(path) {
       // tslint:disable-next-line:no-any
       return function (imports, callback) {
@@ -4050,36 +4923,8 @@
                                   factoryConfig.instantiateWasm =
                                       createInstantiateWasmFunc(getPathToWasmBinary(simdSupported, threadsSupported, wasmPathPrefix != null ? wasmPathPrefix : ''));
                               }
-                              var wasm;
-                              // If `wasmPath` has been defined we must initialize the vanilla module.
-                              if (threadsSupported && simdSupported && wasmPath == null) {
-                                  wasm = tfjsBackendWasmThreadedSimd(factoryConfig);
-                                  wasm.mainScriptUrlOrBlob = new Blob(["var _scriptDir = undefined; var WasmBackendModuleThreadedSimd = " +
-                                          tfjsBackendWasmThreadedSimd.toString()], { type: 'text/javascript' });
-                              }
-                              else {
-                                  // The wasmFactory works for both vanilla and SIMD binaries.
-                                  wasm = tfjsBackendWasm(factoryConfig);
-                              }
-                              var voidReturnType = null;
-                              // Using the tfjs namespace to avoid conflict with emscripten's API.
-                              wasm.tfjs = {
-                                  init: wasm.cwrap('init', null, []),
-                                  registerTensor: wasm.cwrap('register_tensor', null, [
-                                      'number',
-                                      'number',
-                                      'number',
-                                  ]),
-                                  disposeData: wasm.cwrap('dispose_data', voidReturnType, ['number']),
-                                  dispose: wasm.cwrap('dispose', voidReturnType, []),
-                              };
                               var initialized = false;
-                              wasm.onRuntimeInitialized = function () {
-                                  initialized = true;
-                                  initAborted = false;
-                                  resolve({ wasm: wasm });
-                              };
-                              wasm.onAbort = function () {
+                              factoryConfig.onAbort = function () {
                                   if (initialized) {
                                       // Emscripten already called console.warn so no need to double log.
                                       return;
@@ -4094,6 +4939,36 @@
                                       'bundled js file. For more details see https://github.com/tensorflow/tfjs/blob/master/tfjs-backend-wasm/README.md#using-bundlers';
                                   reject({ message: rejectMsg });
                               };
+                              var wasm;
+                              // If `wasmPath` has been defined we must initialize the vanilla module.
+                              if (threadsSupported && simdSupported && wasmPath == null) {
+                                  factoryConfig.mainScriptUrlOrBlob = new Blob(["var WasmBackendModuleThreadedSimd = " +
+                                          tfjsBackendWasmThreadedSimd.toString()], { type: 'text/javascript' });
+                                  wasm = tfjsBackendWasmThreadedSimd(factoryConfig);
+                              }
+                              else {
+                                  // The wasmFactory works for both vanilla and SIMD binaries.
+                                  wasm = tfjsBackendWasm(factoryConfig);
+                              }
+                              // The WASM module has been successfully created by the factory.
+                              // Any error will be caught by the onAbort callback defined above.
+                              wasm.then(function (module) {
+                                  initialized = true;
+                                  initAborted = false;
+                                  var voidReturnType = null;
+                                  // Using the tfjs namespace to avoid conflict with emscripten's API.
+                                  module.tfjs = {
+                                      init: module.cwrap('init', null, []),
+                                      registerTensor: module.cwrap('register_tensor', null, [
+                                          'number',
+                                          'number',
+                                          'number',
+                                      ]),
+                                      disposeData: module.cwrap('dispose_data', voidReturnType, ['number']),
+                                      dispose: module.cwrap('dispose', voidReturnType, []),
+                                  };
+                                  resolve({ wasm: module });
+                              });
                           })];
               }
           });
@@ -4193,7 +5068,37 @@
 
   /** @license See the LICENSE file. */
   // This code is auto-generated, do not modify this file!
-  var version = '2.7.0';
+  var version = '3.4.0';
+
+  /**
+   * @license
+   * Copyright 2020 Google LLC. All Rights Reserved.
+   * Licensed under the Apache License, Version 2.0 (the "License");
+   * you may not use this file except in compliance with the License.
+   * You may obtain a copy of the License at
+   *
+   * http://www.apache.org/licenses/LICENSE-2.0
+   *
+   * Unless required by applicable law or agreed to in writing, software
+   * distributed under the License is distributed on an "AS IS" BASIS,
+   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   * See the License for the specific language governing permissions and
+   * limitations under the License.
+   * =============================================================================
+   */
+  var _this$1 = undefined;
+  var WASM_PRIORITY = 2;
+  tfjsCore.registerBackend('wasm', function () { return __awaiter(_this$1, void 0, void 0, function () {
+      var wasm;
+      return __generator(this, function (_a) {
+          switch (_a.label) {
+              case 0: return [4 /*yield*/, init()];
+              case 1:
+                  wasm = (_a.sent()).wasm;
+                  return [2 /*return*/, new BackendWasm(wasm)];
+          }
+      });
+  }); }, WASM_PRIORITY);
 
   exports.BackendWasm = BackendWasm;
   exports.setWasmPath = setWasmPath;
