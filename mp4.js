@@ -238,7 +238,7 @@ function mp4CreateFragmentedMp4(initBuffer) {
     let moovLength = mp4ReadUint32(initBuffer, offset);
     let moovType = mp4ReadType(initBuffer, offset+4);
     if(moovType != 'moov') {
-        throw `Fragmented MP4 expected moov after ftyp, found ${moovType}`;
+        throw `Fragmented MP4 expected moov after ftyp, at index ${ftypLength} found ${moovType}`;
     }
     //Now we have ftyp+moov so we can build the init segment
     let initSegment = initBuffer.slice(0, ftypLength + moovLength);
@@ -247,7 +247,7 @@ function mp4CreateFragmentedMp4(initBuffer) {
     let sidxLength = mp4ReadUint32(initBuffer, offset);
     let sidxType = mp4ReadType(initBuffer, offset+4);
     if(sidxType != 'sidx') {
-        throw `Fragmented MP4 expected sidx after moov, found ${sidxType}`;
+        throw `Fragmented MP4 expected sidx after moov, at index ${ftypLength}+${moovLength} found ${sidxType} with length ${sidxType}`;
     }
     let dataStartIndex = offset + sidxLength;
     let sidx = mp4ParseSIDX(initBuffer, offset);
@@ -270,6 +270,28 @@ function mp4CreateFragmentedMp4(initBuffer) {
     };
     
     return fmp4;
+}
+
+function mp4GetInitSegment(initBuffer) {
+    //This expects the init buffers to have at least (ftyp moov)
+    //and then initial calls to have (moof mdat)+ fragments
+    //This allows (ftyp moov) to be saved as the init segment
+    //and (moof mdat)+ to be appended to create valid fMP4's.
+    let offset = 0;
+    let ftypLength = mp4ReadUint32(initBuffer, offset);
+    let ftypType = mp4ReadType(initBuffer, offset+4);
+    if(ftypType != 'ftyp') {
+        throw `Fragmented MP4 expected to start with ftyp, found ${ftypType}`;
+    }
+    offset = ftypLength;
+    let moovLength = mp4ReadUint32(initBuffer, offset);
+    let moovType = mp4ReadType(initBuffer, offset+4);
+    if(moovType != 'moov') {
+        throw `Fragmented MP4 expected moov after ftyp, at index ${ftypLength} found ${moovType}`;
+    }
+    //Now we have ftyp+moov so we can build the init segment
+    let initSegment = initBuffer.slice(0, ftypLength + moovLength);
+    return initSegment;
 }
 
 function mp4IsLikelyProbe(u8Array) {
