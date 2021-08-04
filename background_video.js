@@ -136,7 +136,6 @@ async function vidRootListener(details) {
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-range") {
-            console.error('DASHVMP4: '+header.value);
             var matches = [...header.value.matchAll(/bytes[ |\t]*([0-9]+)-([0-9]+)(.*)/ig)];
             if(matches.length > 0)
             {
@@ -144,7 +143,6 @@ async function vidRootListener(details) {
                 let end = parseInt(matches[0][2]);
                 //And just chuck whatever was unfulfilled
                 contentRange = { start: start, end: end};
-                console.error('DASHVMP4: '+start+'-'+end+' for '+details.requestId+' which was '+details.url);
                 break;
             }
         }
@@ -418,7 +416,7 @@ function vidCheckCreateDashGroup(url) {
     if(dashGroup === undefined) {
         dashGroup = {
             status: 'unknown',
-            ur: url,
+            url: url,
             fmp4: null,
             webms: [],
             scanCount: 0,
@@ -433,7 +431,7 @@ let VID_DASH_GROUPS = { };
 
 async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     let url = details.url;
-    let videoChainId = 'dash-mp4-'+details.requestId+'url';
+    let videoChainId = 'dash-mp4-'+details.requestId+'-url-'+url;
     console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
 
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -447,6 +445,16 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             if(dashGroupPrecheck.status == 'block') {
                 filter.close();
             }
+            //TODO continue on duplicate range detection......
+            /*else if(dashGroupPrecheck.status == 'unknown') {
+                if(range.start == 0) {
+                    filter.close();
+                    console.warn(`DASHVMP4: Aborting second request with request id ${details.requestId} range ${range.start}-${range.end} made for ongoing request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+                }
+            } else if(dashGroupPrecheck.status == 'pass') {
+                console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+                filter.disconnect();
+            }*/
         }
         statusStartVideoCheck(details.requestId);
     }
@@ -469,13 +477,15 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
         try {
             // 1. Setup the FMP4 stream - tuck away the init segment and create the index
             let fragmentFileOffset = range.start;
+            let checkFragmentsBuffer = null;
             
             if(range.start == 0) {
                 console.debug(`DASHVMP4: New FMP4 for ${details.requestId} at${url}`);
                 let dashGroup = vidCheckCreateDashGroup(url);
+                dashGroup.startRequestId = details.requestId;
 
                 let fullBuffer = vidConcatBuffersToUint8Array(buffers);
-                let initSegment = mp4GetInitSegment(fullBuffer);
+                let initSegment = mp4GetInitSegment(fullBuffer, url);
                 let fmp4 = {
                     initSegment: initSegment,
                     videoChainId: videoChainId,
@@ -483,21 +493,18 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                     blockCount: 0
                 };
                 dashGroup.fmp4 = fmp4;
-                //TODO There is a hole here where more than the init segment could be written and
-                //bad stuff could pass through e.g. the first 10 seconds of video is requested in
-                //the first range
-                buffers.forEach(b=>filter.write(b));
-                filter.close();
-                console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, url ${url}`);
-                return;
+                //Just pick up after the init segment and ignore the fact there may be a SIDX
+                checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
+                fragmentFileOffset += initSegment.length;
+                console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
+            } else {
+                console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
+                checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
-
-            console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
-            let checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
 
             // 2. Append any (moof mdat)+
             console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
-            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset);
+            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true);
             if(fragments.length == 0) {
                 console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
                 buffers.forEach(b=>filter.write(b));
@@ -510,6 +517,13 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             let dashGroup = VID_DASH_GROUPS[url];
             if(dashGroup === undefined) {
                 console.warn(`DASHVMP4: No DASH group found for  ${details.requestId} at range start ${range.start} for url ${url}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                return;
+            }
+            if(dashGroup.status == 'pass') {
+                console.info(`DASHVMP4: DASH group already passed for URL for ${details.requestId} at range start ${range.start} for url ${url}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, 'pass');
@@ -533,7 +547,9 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
 
             let scanStart = 0.5; //seconds
             let scanStep = 1.0;
-            let scanMaxSteps = 10.0;
+            //Increase scan steps if we used the MDAT fallback
+            let maxScanGroupSteps = 15.0;
+            let scanMaxSteps = fragments[0].wasMdatFallback ? maxScanGroupSteps : 10.0;
             let scanBlockBailCount = 4.0;
 
             console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
@@ -563,12 +579,17 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             let isThisGroupBlock = (dashGroup.scanCount >= 20 && dashGroup.blockCount / dashGroup.scanCount >= 0.15);
             console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                 status = 'block';
                 dashGroup.status = 'block';
                 filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
             } else {
                 status = 'pass';
+                if(dashGroup.scanCount >= maxScanGroupSteps) {
+                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+                    dashGroup.status = 'pass';
+                }
                 buffers.forEach(b=>filter.write(b));
                 filter.disconnect();
             }
