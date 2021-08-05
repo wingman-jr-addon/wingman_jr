@@ -431,7 +431,7 @@ let VID_DASH_GROUPS = { };
 
 async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     let url = details.url;
-    let videoChainId = 'dash-mp4-'+details.requestId+'-url-'+url;
+    let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
     console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
 
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -504,7 +504,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
 
             // 2. Append any (moof mdat)+
             console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
-            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true);
+            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true, videoChainId);
             if(fragments.length == 0) {
                 console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
                 buffers.forEach(b=>filter.write(b));

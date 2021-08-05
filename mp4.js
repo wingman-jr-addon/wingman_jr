@@ -54,12 +54,12 @@ function mp4ReadType(buffer, offset) {
 
 const MP4_A_CODE = 'a'.charCodeAt(0);
 const MP4_Z_CODE = 'z'.charCodeAt(0);
-function mp4IsProbableAtom(buffer, offset) {
+function mp4IsProbableAtom(buffer, offset, allowInvalidLength=false) {
     if(offset >= buffer.byteLength-8) {
         return false;
     }
     let length = mp4ReadUint32(buffer, offset);
-    if(offset+length >= buffer.byteLength) {
+    if(offset+length >= buffer.byteLength && !allowInvalidLength) {
         return false;
     }
     //The type should basically be [a-z]
@@ -68,7 +68,6 @@ function mp4IsProbableAtom(buffer, offset) {
         if(buffer[offset+lengthSize+i]<MP4_A_CODE || buffer[offset+lengthSize+i] > MP4_Z_CODE) {
             return false;
         }
-        console.debug(`DEBUGV: Made it to atom char check ${i} at char tag index start ${offset+lengthSize} and computed atom length ${length}`);
     }
     return true;
 }
@@ -104,19 +103,19 @@ function mp4DumpSIDX(buffer, atomOffset) {
     }
 }
 
-function mp4DumpAtoms(buffers) {
+function mp4DumpAtoms(buffers, debugString=null) {
     let fullBuffer = vidConcatBuffersToUint8Array(buffers);
 
-    mp4DumpAtomsFromUint8Array(fullBuffer);
+    mp4DumpAtomsFromUint8Array(fullBuffer, debugString);
 }
 
-function mp4DumpAtomsFromUint8Array(fullBuffer) {
+function mp4DumpAtomsFromUint8Array(fullBuffer, debugString=null) {
     //An atom consists of a 4-byte length followed by a 4 byte ASCII indicator.
-    console.debug(`DEBUGV: Dumping atoms for Uint8Array.byteLength ${fullBuffer.byteLength}`);
+    console.warn(`DEBUGV: Dumping atoms for Uint8Array.byteLength ${fullBuffer.byteLength} for ${debugString}`);
     let offset = 0;
     while(offset < fullBuffer.byteLength-7) {
-        if(mp4IsProbableAtom(fullBuffer, offset)) {
-            console.debug('DEBUGV: Probable Atom start: '+offset);
+        if(mp4IsProbableAtom(fullBuffer, offset, true)) {
+            console.warn(`DEBUGV: Probable Atom start: ${offset} for ${debugString}`);
             break;
         }
         offset++;
@@ -125,7 +124,7 @@ function mp4DumpAtomsFromUint8Array(fullBuffer) {
         let length = mp4ReadUint32(fullBuffer, offset);
         let type = mp4ReadType(fullBuffer, offset+4);
         let isComplete = offset + length <= fullBuffer.byteLength;
-        console.debug(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete}`);
+        console.warn(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete} for ${debugString}`);
         if(type == 'sidx') {
             mp4DumpSIDX(fullBuffer, offset);
         }
@@ -151,12 +150,15 @@ function mp4IsProbableAtomOfType(buffer, offset, type, allowInvalidLength=false)
     return true;
 }
 
-function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=false) {
+function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=false, debugString=null) {
+    if(fullBuffer.length == 0) {
+        return [];
+    }
     let offset = 0;
     let wasProbableStartFound = false;
     while(offset < fullBuffer.byteLength-7) {
         if(mp4IsProbableAtomOfType(fullBuffer, offset, 'moof')) {
-            console.debug('DEBUGV: Probable fMP4 fragment start: '+offset);
+            console.debug(`DEBUGV: Probable fMP4 fragment start: ${offset} for ${debugString}`);
             wasProbableStartFound = true;
             break;
         }
@@ -164,17 +166,17 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
     }
     if(!wasProbableStartFound) {
         if(!allowMdatFallback) {
-            console.warn(`DEBUGV: No probable fMP4 start found for buffer length ${fullBuffer.length}, fallback to mdat not allowed`);
+            console.warn(`DEBUGV: No probable fMP4 start found for buffer length ${fullBuffer.length}, fallback to mdat not allowed for ${debugString}`);
             return [];
         }
         //This fallback is when a range request was made so it looked like DASH but was actually
         //a range request against a normal FTYP/MOOV/MDAT MP4.
-        console.warn(`DEBUGV: No probable fMP4 start found for buffer length ${fullBuffer.length}, checking for mdat instead`);
+        console.warn(`DEBUGV: No probable fMP4 start found for buffer length ${fullBuffer.length}, checking for mdat instead for ${debugString}`);
         wasProbableStartFound = false;
         offset = 0;
         while(offset < fullBuffer.byteLength-7) {
             if(mp4IsProbableAtomOfType(fullBuffer, offset, 'mdat', true)) {
-                console.debug('DEBUGV: Probable MP4 mdat start: '+offset);
+                console.debug(`DEBUGV: Probable MP4 mdat start: ${offset} for ${debugString}`);
                 wasProbableStartFound = true;
                 break;
             }
@@ -186,7 +188,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
             let isMdatComplete = predictedEnd <= fullBuffer.length;
             //It's a hack to use the full buffer but the lack of [free] can mess up the [moov] index references
             //I think; this causes images to go all black if not included
-            console.warn(`DEBUGV: Fallback to mdat looks feasible - start offset was ${offset}, atom length ${mdatLength}, however, using remaining buffer to pick up e.g. [free]`);
+            console.warn(`DEBUGV: Fallback to mdat looks feasible - start offset was ${offset}, atom length ${mdatLength}, however, using remaining buffer to pick up e.g. [free]  (for ${debugString})`);
             let fakeFragment = {
                 fileOffsetMoof: fileStartOffset, //just smash it in there
                 fileOffsetMdat: fileStartOffset,
@@ -196,7 +198,8 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
             }
             return [fakeFragment];
         } else {
-            console.warn(`DEBUGV: No fallback to mdat feasible...`);
+            console.warn(`DEBUGV: No fallback to mdat feasible. ${debugString}`);
+            mp4DumpAtomsFromUint8Array(fullBuffer, debugString);
             return [];
         }
     }
@@ -207,7 +210,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
         let moofLength = mp4ReadUint32(fullBuffer, offset);
         let moofType = mp4ReadType(fullBuffer, offset+4);
         if(moofType != 'moof') {
-            console.warn(`Expected moof, got ${moofType}`);
+            console.warn(`Expected moof, got ${moofType} for ${debugString}`);
             break;
         }
         let isMoofCompleteAndMdatDetectable = offset + moofLength +8 <= fullBuffer.byteLength;
@@ -217,7 +220,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
         let mdatLength = mp4ReadUint32(fullBuffer, offset + moofLength);
         let mdatType = mp4ReadType(fullBuffer, offset + moofLength + 4);
         if(mdatType != 'mdat') {
-            console.warn(`Expected mdat, got ${mdatType}`);
+            console.warn(`Expected mdat, got ${mdatType} for ${debugString}`);
             break;
         }
         let isMdatComplete = offset + moofLength + mdatLength <= fullBuffer.byteLength;
@@ -336,7 +339,7 @@ function mp4GetInitSegment(initBuffer, debugString=null) {
     let ftypLength = mp4ReadUint32(initBuffer, offset);
     let ftypType = mp4ReadType(initBuffer, offset+4);
     if(ftypType != 'ftyp') {
-        throw `Fragmented MP4 expected to start with ftyp, found ${ftypType} buffer length ${initBuffer.length} hex ${hex(initBuffer.slice(0,7))}`;
+        throw `Fragmented MP4 expected to start with ftyp, found ${ftypType} buffer length ${initBuffer.length} hex ${hex(initBuffer.slice(0,7))}, ${debugString}`;
     }
     offset = ftypLength;
 
@@ -348,7 +351,7 @@ function mp4GetInitSegment(initBuffer, debugString=null) {
         let moovOrFreeLength = mp4ReadUint32(initBuffer, offset);
         let moovOrFreeType = mp4ReadType(initBuffer, offset + 4);
         if(moovOrFreeType == 'free' || moovOrFreeType == 'mdat') {
-            console.warn(`DEBUGV: Detected free/mdat of length ${moovOrFreeLength} between ftyp and moov`);
+            console.warn(`DEBUGV: Detected free/mdat of length ${moovOrFreeLength} between ftyp and moov for ${debugString}`);
             totalFreeLength += moovOrFreeLength;
             offset += moovOrFreeLength;
             continue;
