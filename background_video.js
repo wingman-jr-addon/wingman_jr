@@ -417,8 +417,9 @@ function vidCheckCreateDashGroup(url) {
         dashGroup = {
             status: 'unknown',
             url: url,
+            actions: [],
             fmp4: null,
-            webms: [],
+            webm: null,
             scanCount: 0,
             blockCount: 0
         };
@@ -429,21 +430,50 @@ function vidCheckCreateDashGroup(url) {
 
 let VID_DASH_GROUPS = { };
 
+function findSuspectDashGroups() {
+    let suspectGroups = { }
+    for(let [url, group] of Object.entries(VID_DASH_GROUPS)) {
+        if(group.actions.length > 5) {
+            if(group.actions[group.actions.length-2].range.start == group.actions[group.actions.length-1].range.start) {
+                suspectGroups[url] = group;
+            }
+        }
+    }
+    return suspectGroups;
+}
+
 async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     let url = details.url;
     let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
     console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
 
+    let dashGroupPrecheck = VID_DASH_GROUPS[url];
+    if (dashGroupPrecheck !== undefined) {
+        if(dashGroupPrecheck.status == 'pass') {
+            console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+            dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
+            return details;
+        }
+        //TODO continue on duplicate range detection......
+        /*else if(dashGroupPrecheck.status == 'unknown') {
+            if(range.start == 0) {
+                filter.close();
+                console.warn(`DASHVMP4: Aborting second request with request id ${details.requestId} range ${range.start}-${range.end} made for ongoing request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+            }
+        */
+    }
+
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let buffers = [];
   
-    //This is a safety net, already happens in a pre-check mostly
+    //This is a safety net
     filter.onstart = _ => {
         let dashGroupPrecheck = VID_DASH_GROUPS[url];
         if (dashGroupPrecheck !== undefined) {
             if(dashGroupPrecheck.status == 'block') {
                 filter.close();
+                dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
             }
             //TODO continue on duplicate range detection......
             /*else if(dashGroupPrecheck.status == 'unknown') {
@@ -451,10 +481,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                     filter.close();
                     console.warn(`DASHVMP4: Aborting second request with request id ${details.requestId} range ${range.start}-${range.end} made for ongoing request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
                 }
-            } else if(dashGroupPrecheck.status == 'pass') {
-                console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
-                filter.disconnect();
-            }*/
+            */
         }
         statusStartVideoCheck(details.requestId);
     }
@@ -493,6 +520,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                     blockCount: 0
                 };
                 dashGroup.fmp4 = fmp4;
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create'});
                 //Just pick up after the init segment and ignore the fact there may be a SIDX
                 checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
                 fragmentFileOffset += initSegment.length;
@@ -503,17 +531,6 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             }
 
             // 2. Append any (moof mdat)+
-            console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
-            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true, videoChainId);
-            if(fragments.length == 0) {
-                console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
-                buffers.forEach(b=>filter.write(b));
-                filter.close();
-                statusCompleteVideoCheck(details.requestId, 'pass');
-                return;
-            }
-            console.info(`DASHVMP4: Extracted ${fragments.length} fragments for ${details.requestId} at range start ${range.start}`);
-
             let dashGroup = VID_DASH_GROUPS[url];
             if(dashGroup === undefined) {
                 console.warn(`DASHVMP4: No DASH group found for  ${details.requestId} at range start ${range.start} for url ${url}`);
@@ -527,6 +544,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'already-passed'});
                 return;
             }
             console.info(`DASHVMP4: Matching fragments for ${details.requestId} at range start ${range.start}`);
@@ -535,8 +553,22 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'no-fmp4'});
                 return;
             }
+
+            console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
+            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true, videoChainId);
+            if(fragments.length == 0) {
+                console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'no-fragments'});
+                return;
+            }
+            console.info(`DASHVMP4: Extracted ${fragments.length} fragments for ${details.requestId} at range start ${range.start}`);
+
             let fmp4 = dashGroup.fmp4;
 
             // 3. Setup scanning
@@ -584,11 +616,15 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 dashGroup.status = 'block';
                 filter.write(VID_PLACEHOLDER_MP4);
                 filter.close();
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'block'});
             } else {
                 status = 'pass';
                 if(dashGroup.scanCount >= maxScanGroupSteps) {
                     console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                     dashGroup.status = 'pass';
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-total'});
+                } else {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-so-far'});
                 }
                 buffers.forEach(b=>filter.write(b));
                 filter.disconnect();
@@ -599,6 +635,10 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             buffers.forEach(b=>filter.write(b));
             filter.close();
             statusCompleteVideoCheck(details.requestId, 'error');
+            let dashGroup = VID_DASH_GROUPS[url];
+            if(dashGroup !== undefined) {
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'error', exception: e});
+            }
         }
     }
     return details;
