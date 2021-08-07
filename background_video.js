@@ -467,21 +467,29 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
 
     let buffers = [];
   
-    //This is a safety net
     filter.onstart = _ => {
         let dashGroupPrecheck = VID_DASH_GROUPS[url];
         if (dashGroupPrecheck !== undefined) {
             if(dashGroupPrecheck.status == 'block') {
+                filter.write(VID_PLACEHOLDER_MP4);
+                let expectedContentLength = range.end - range.start + 1; //Because end is inclusive
+                //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
+                //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
+                //with random data.
+                if(expectedContentLength > VID_PLACEHOLDER_MP4.byteLength) {
+                    let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
+                    console.log(`DASHVMP4: BLOCK ${details.requestId} stuffing ${remainingLength}`);
+                    let stuffer = new Uint8Array(1024).fill(0);
+                    while(remainingLength > stuffer.length) {
+                        filter.write(stuffer);
+                        remainingLength -= stuffer.length;
+                    }
+                    stuffer = new Uint8Array(remainingLength).fill(0);
+                    filter.write(stuffer);
+                }
                 filter.close();
                 dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
             }
-            //TODO continue on duplicate range detection......
-            /*else if(dashGroupPrecheck.status == 'unknown') {
-                if(range.start == 0) {
-                    filter.close();
-                    console.warn(`DASHVMP4: Aborting second request with request id ${details.requestId} range ${range.start}-${range.end} made for ongoing request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
-                }
-            */
         }
         statusStartVideoCheck(details.requestId);
     }
