@@ -442,6 +442,25 @@ function findSuspectDashGroups() {
     return suspectGroups;
 }
 
+function stuffPlaceholderMp4(filter, expectedContentLength) {
+    //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
+    //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
+    //with random data. However, still others just keep trying anyways.
+    if(expectedContentLength >= VID_PLACEHOLDER_MP4.byteLength) {
+        filter.write(VID_PLACEHOLDER_MP4);
+        let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
+        let stuffer = new Uint8Array(1024).fill(0);
+        while(remainingLength > stuffer.length) {
+            filter.write(stuffer);
+            remainingLength -= stuffer.length;
+        }
+        stuffer = new Uint8Array(remainingLength).fill(0);
+        filter.write(stuffer);
+    } else {
+        filter.write(VID_PLACEHOLDER_MP4.slice(0, expectedContentLength));
+    }
+}
+
 async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     let url = details.url;
     let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
@@ -464,6 +483,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     }
 
     let filter = browser.webRequest.filterResponseData(details.requestId);
+    let expectedContentLength = range.end - range.start + 1; //Because end is inclusive
 
     let buffers = [];
   
@@ -471,24 +491,12 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
         let dashGroupPrecheck = VID_DASH_GROUPS[url];
         if (dashGroupPrecheck !== undefined) {
             if(dashGroupPrecheck.status == 'block') {
-                filter.write(VID_PLACEHOLDER_MP4);
-                let expectedContentLength = range.end - range.start + 1; //Because end is inclusive
-                //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
-                //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
-                //with random data.
-                if(expectedContentLength > VID_PLACEHOLDER_MP4.byteLength) {
-                    let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
-                    console.log(`DASHVMP4: BLOCK ${details.requestId} stuffing ${remainingLength}`);
-                    let stuffer = new Uint8Array(1024).fill(0);
-                    while(remainingLength > stuffer.length) {
-                        filter.write(stuffer);
-                        remainingLength -= stuffer.length;
-                    }
-                    stuffer = new Uint8Array(remainingLength).fill(0);
-                    filter.write(stuffer);
-                }
+                stuffPlaceholderMp4(filter, expectedContentLength);
                 filter.close();
-                dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
+                //Indicate we blocked it ... up to a point; we will keep it so memory growth is not unbounded on retries
+                if(dashGroupPrecheck.actions.length < 200) {
+                    dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
+                }
             }
         }
         statusStartVideoCheck(details.requestId);
@@ -622,7 +630,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                 status = 'block';
                 dashGroup.status = 'block';
-                filter.write(VID_PLACEHOLDER_MP4);
+                stuffPlaceholderMp4(filter, expectedContentLength);
                 filter.close();
                 dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'block'});
             } else {
