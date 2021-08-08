@@ -464,8 +464,11 @@ async function bkBase64ContentListener(details) {
     // Historically, detecting character encoding has been a tricky task
     // taken on by the browser. Here, a simplified approach is taken
     // and the complexity is hidden in a helper method.
-    let decoder, encoder;
-    [decoder, encoder] = bkDetectCharsetAndSetupDecoderEncoder(details);
+    let decoderEncoder = bkDetectCharsetAndSetupDecoderEncoder(details);
+    if(!decoderEncoder) {
+        return;
+    }
+    let [decoder, encoder] = decoderEncoder;
     if(!decoder) {
         return;
     }
