@@ -136,15 +136,25 @@ async function vidRootListener(details) {
     for(let i=0; i<details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
         if(header.name.toLowerCase() == "content-range") {
-            var matches = [...header.value.matchAll(/bytes[ |\t]*([0-9]+)-([0-9]+)(.*)/ig)];
+            //bytes start-end/size
+            var matches = [...header.value.matchAll(/bytes[ |\t]*([0-9]+)-([0-9]+)\/([0-9]+)(.*)/ig)];
             if(matches.length > 0)
             {
                 let start = parseInt(matches[0][1]);
                 let end = parseInt(matches[0][2]);
-                //And just chuck whatever was unfulfilled
-                contentRange = { start: start, end: end};
+                let size = parseInt(matches[0][3]);
+                contentRange = { start: start, end: end, size: size};
                 break;
-            }
+            } else {
+                //bytes */size
+                var starMatches = [...header.value.matchAll(/bytes[ |\t]*\*\/([0-9]+)(.*)/ig)];
+                if(starMatches.length > 0) {
+                    console.warn(`WEBREQV: Content-Range star value with integer size - pretend range doesn't exist: ${header.value}`);
+                } else {
+                    //We don't support other units etc.
+                    console.error(`WEBREQV: Unhandled Content-Range value: ${header.value}`);
+                }
+            } 
         }
     }
 
@@ -165,31 +175,32 @@ async function vidRootListener(details) {
     let parsedUrl = new URL(details.url);
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         if(mimeType.startsWith('video/mp4')) {
-            console.info(`YTVMP4: Starting for request ${details.requestId}`);
+            console.info(`WEBREQV/YTVMP4: Starting for request ${details.requestId}`);
             return await vidYtMp4Listener(details, mimeType, parsedUrl);
         } else if(mimeType.startsWith('video/webm')) {
-            console.info(`YTVWEBM: Starting for request ${details.requestId}`);
+            console.info(`WEBREQV/YTVWEBM: Starting for request ${details.requestId}`);
             return await vidYtWebmListener(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
             let itag = parsedUrl.searchParams.get('itag');
-            console.log(`YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
+            console.log(`WEBREQV/YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
             return;
         }
-    } else if (contentRange !== undefined) {
+    //If range is valid and ONLY a partial request, then consider it to be DASH
+    } else if (contentRange !== undefined && !(contentRange.start == 0 && contentRange.end == contentRange.size - 1)) {
         if(mimeType.startsWith('video/mp4')) {
-            console.info(`DASHVMP4: Starting for request ${details.requestId} for url ${details.url}`);
+            console.info(`WEBREQV/DASHVMP4: Starting for request ${details.requestId} range ${JSON.stringify(contentRange)} for url ${details.url}`);
             return await vidDashMp4Listener(details, mimeType, parsedUrl, contentRange);
         } else if(mimeType.startsWith('video/webm')) {
-            console.warn(`DASHVMP4: Unsupported DASH WEBM request ${details.requestId} for url ${details.url}`);
+            console.warn(`WEBREQV/DASHVMP4: Unsupported DASH WEBM request ${details.requestId} for url ${details.url}`);
             return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
         } else {
-            console.warn(`MLV: Request range for interesting MIME type ${mimeType}`);
+            console.warn(`WEBREQV/MLV: Request range for interesting MIME type ${mimeType}`);
             return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
         }
     } else {
-        console.info(`MLV: Default video listener for url ${details.url}`);
+        console.info(`WEBREQV/MLV: Default video listener for url ${details.url}`);
         return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
     }
 }
