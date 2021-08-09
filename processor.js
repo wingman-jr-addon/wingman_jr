@@ -283,6 +283,7 @@ async function procPerformFiltering(entry) {
                     console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
+                    result.sqrxrScore = sqrxrScore;
                 } else {
                     console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);

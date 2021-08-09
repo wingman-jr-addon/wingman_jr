@@ -1,3 +1,5 @@
+//Ensure browser cache isn't going to cause us problems
+browser.webRequest.handlerBehaviorChanged();
 //User feedback
 browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
     if (temporary) return; // skip during development
@@ -98,11 +100,15 @@ function bkOnProcessorMessage(m) {
     switch(m.type) {
         case 'scan': {
             console.debug('PROC: '+m);
-            let filter = BK_openFilters[m.requestId];
-            filter.write(m.imageBytes);
-            filter.close();
-            delete BK_openFilters[m.requestId];
-            console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
+            if(m.requestId.startsWith('crash')) {
+                bkHandleCrashDetectionResult(m);
+            } else {
+                let filter = BK_openFilters[m.requestId];
+                filter.write(m.imageBytes);
+                filter.close();
+                delete BK_openFilters[m.requestId];
+                console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
+            }
         }
         break;
         case 'b64_data': {
@@ -305,6 +311,68 @@ async function bkWatchdog() {
 
 setInterval(bkWatchdog, 2500);
 
+let CRASH_DETECTION_IMAGE = null;
+fetch('silent_data/zoe-reeve-ijRuGjKpBcg-unsplash.jpg')
+.then(async r => {
+    CRASH_DETECTION_IMAGE = await r.arrayBuffer();
+    setInterval(bkCrashDetectionWatchdog, 7500);
+});
+let CRASH_DETECTION_EXPECTED_RESULT;
+let CRASH_DETECTION_COUNT = 0;
+let CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
+const CRASH_BAD_STATE_RESTART_THRESHOLD = 2;
+const CRASH_IDLE_SECONDS = 3*60;
+
+async function bkCrashDetectionWatchdog() {
+    let idleState = await browser.idle.queryState(CRASH_IDLE_SECONDS)
+    if(idleState != 'active') {
+        console.log('CRASH: User not active, ceasing crash check.');
+        return;
+    }
+    let pseudoRequestId = `crash-detection-${CRASH_DETECTION_COUNT}`;
+    CRASH_DETECTION_COUNT++;
+    let processorReq = bkGetNextProcessor();
+    if(!processorReq) {
+        console.warn(`CRASH: Processors not yet ready.`);
+        return;
+    }
+    let processor = processorReq.port;
+    processor.postMessage({
+        type: 'start',
+        requestId : pseudoRequestId,
+        mimeType: 'image/jpeg',
+        url: pseudoRequestId
+    });
+    processor.postMessage({ 
+        type: 'ondata',
+        requestId: pseudoRequestId,
+        data: CRASH_DETECTION_IMAGE
+    });
+    processor.postMessage({
+        type: 'onstop',
+        requestId: pseudoRequestId
+    });
+}
+
+function bkHandleCrashDetectionResult(m) {
+    if(!CRASH_DETECTION_EXPECTED_RESULT) {
+        CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
+        console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+    } else {
+        let actual = JSON.stringify(m.sqrxrScore);
+        if(actual != CRASH_DETECTION_EXPECTED_RESULT) {
+            console.error(`CRASH: Check actual ${actual} vs. Expected ${CRASH_DETECTION_EXPECTED_RESULT}`);
+            CRASH_BAD_STATE_ENCOUNTERED_COUNT++;
+            if(CRASH_BAD_STATE_ENCOUNTERED_COUNT >= CRASH_BAD_STATE_RESTART_THRESHOLD) {
+                console.error(`CRASH: Bad state threshold exceeded, reloading plugin!!!`);
+                browser.runtime.reload();
+            }
+        } else {
+            console.log(`CRASH: Detection passed`);
+        }
+    }
+}
+
 ///////////////// WATCHDOG END ////////////////////////////
 
 async function bkImageListener(details, shouldBlockSilently=false) {
@@ -464,8 +532,11 @@ async function bkBase64ContentListener(details) {
     // Historically, detecting character encoding has been a tricky task
     // taken on by the browser. Here, a simplified approach is taken
     // and the complexity is hidden in a helper method.
-    let decoder, encoder;
-    [decoder, encoder] = bkDetectCharsetAndSetupDecoderEncoder(details);
+    let decoderEncoder = bkDetectCharsetAndSetupDecoderEncoder(details);
+    if(!decoderEncoder) {
+        return;
+    }
+    let [decoder, encoder] = decoderEncoder;
     if(!decoder) {
         return;
     }
