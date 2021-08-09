@@ -109,7 +109,7 @@ function mp4DumpAtoms(buffers, debugString=null) {
     mp4DumpAtomsFromUint8Array(fullBuffer, debugString);
 }
 
-function mp4DumpAtomsFromUint8Array(fullBuffer, debugString=null) {
+function mp4DumpAtomsFromUint8Array(fullBuffer, debugString=null, recurse=0) {
     //An atom consists of a 4-byte length followed by a 4 byte ASCII indicator.
     console.warn(`DEBUGV: Dumping atoms for Uint8Array.byteLength ${fullBuffer.byteLength} for ${debugString}`);
     let offset = 0;
@@ -127,6 +127,9 @@ function mp4DumpAtomsFromUint8Array(fullBuffer, debugString=null) {
         console.warn(`DEBUGV: Atom ${type} ${offset} ${length} isComplete? ${isComplete} for ${debugString}`);
         if(type == 'sidx') {
             mp4DumpSIDX(fullBuffer, offset);
+        }
+        if(recurse > 0 && isComplete) {
+            mp4DumpAtomsFromUint8Array(fullBuffer.slice(offset+8, offset+8+length), debugString, recurse - 1);
         }
         offset += length;
     }
@@ -364,7 +367,28 @@ function mp4GetInitSegment(initBuffer, debugString=null) {
     }
     //Now we have ftyp+moov so we can build the init segment
     let initSegment = initBuffer.slice(0, ftypLength + totalFreeLength + moovLength);
-    return initSegment;
+    let moovAtom = initBuffer.slice(ftypLength + totalFreeLength, ftypLength + totalFreeLength + moovLength);
+    let isAudioOnly = false;
+    console.debug(`TKHD: Checking detection for moov atom of length ${moovLength}`);
+    //let moovAtomContents = moovAtom.slice(8);
+    //mp4DumpAtomsFromUint8Array(moovAtomContents, debugString, recurse=2);
+    for(let i=0; i<moovLength; i++) {
+        if(mp4IsProbableAtomOfType(moovAtom, i, 'tkhd', true)) {
+            //84 is start of track width
+            let tkhdLength = mp4ReadUint32(moovAtom, i);
+            if(tkhdLength >= 92) {
+                //Note these are actually floats but for zero detection this is enough.
+                let trackWidth = mp4ReadUint32(moovAtom, i+8+76);
+                let trackHeight = mp4ReadUint32(moovAtom, i+8+80);
+                isAudioOnly = (trackWidth == 0 && trackHeight == 0);
+                console.info(`TKHD: Detected size of ${trackWidth}, ${trackHeight} indicating isAudioOnly=${isAudioOnly} for ${debugString}`);
+            } else {
+                console.warn(`TKHD: Detected strange length of ${tkhdLength} for ${debugString}`);
+            }
+        }
+    }
+
+    return [initSegment, isAudioOnly];
 }
 
 function mp4IsLikelyProbe(u8Array) {

@@ -484,13 +484,6 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
             return details;
         }
-        //TODO continue on duplicate range detection......
-        /*else if(dashGroupPrecheck.status == 'unknown') {
-            if(range.start == 0) {
-                filter.close();
-                console.warn(`DASHVMP4: Aborting second request with request id ${details.requestId} range ${range.start}-${range.end} made for ongoing request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
-            }
-        */
     }
 
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -508,6 +501,10 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 if(dashGroupPrecheck.actions.length < 200) {
                     dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
                 }
+            } else if(dashGroupPrecheck.status == 'pass') {
+                console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+                dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
+                return;
             }
         }
         statusStartVideoCheck(details.requestId);
@@ -539,19 +536,30 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 dashGroup.startRequestId = details.requestId;
 
                 let fullBuffer = vidConcatBuffersToUint8Array(buffers);
-                let initSegment = mp4GetInitSegment(fullBuffer, url);
+                let [initSegment, isAudioOnly] = mp4GetInitSegment(fullBuffer, url);
                 let fmp4 = {
                     initSegment: initSegment,
                     videoChainId: videoChainId,
                     scanCount: 0,
-                    blockCount: 0
+                    blockCount: 0,
+                    isAudioOnly: isAudioOnly
                 };
                 dashGroup.fmp4 = fmp4;
-                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create'});
-                //Just pick up after the init segment and ignore the fact there may be a SIDX
-                checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
-                fragmentFileOffset += initSegment.length;
-                console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
+                if(!isAudioOnly) {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create'});
+                    //Just pick up after the init segment and ignore the fact there may be a SIDX
+                    checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
+                    fragmentFileOffset += initSegment.length;
+                    console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
+                } else {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create-audio-only'});
+                    dashGroup.status = 'pass';
+                    buffers.forEach(b=>filter.write(b));
+                    filter.close();
+                    statusCompleteVideoCheck(details.requestId, 'pass');
+                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId} because it is audio-only for url ${url}`);
+                    return;
+                }
             } else {
                 console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
                 checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
