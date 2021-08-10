@@ -36,6 +36,24 @@ function vidDetectType(u8Array) {
     }
 }
 
+async function vidPrerequestListener(details) {
+    if (whtIsWhitelisted(details.url)) {
+        return;
+    }
+    let parsedUrl = new URL(details.url);
+    //Youtube check
+    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
+        let cpn = parsedUrl.searchParams.get('cpn');
+        let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
+        if (youtubeGroupPrecheck !== undefined) {
+            if(youtubeGroupPrecheck.status == 'block') {
+                console.warn(`YTV: Pre-block known CPN ${cpn}`)
+                return { cancel: true };
+            }
+        }
+    }
+}
+
 let VID_OPEN_REQUESTS = { };
 async function vidOnVidScan(m) {
     let openRequest = VID_OPEN_REQUESTS[m.requestId];
@@ -114,7 +132,33 @@ async function vidRootListener(details) {
         console.warn('WEBREQV: Weird error parsing content-length '+e);
     }
 
-    console.debug('WEBREQV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
+    let contentRange = undefined;
+    for(let i=0; i<details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        if(header.name.toLowerCase() == "content-range") {
+            //bytes start-end/size
+            var matches = [...header.value.matchAll(/bytes[ |\t]*([0-9]+)-([0-9]+)\/([0-9]+)(.*)/ig)];
+            if(matches.length > 0)
+            {
+                let start = parseInt(matches[0][1]);
+                let end = parseInt(matches[0][2]);
+                let size = parseInt(matches[0][3]);
+                contentRange = { start: start, end: end, size: size};
+                break;
+            } else {
+                //bytes */size
+                var starMatches = [...header.value.matchAll(/bytes[ |\t]*\*\/([0-9]+)(.*)/ig)];
+                if(starMatches.length > 0) {
+                    console.warn(`WEBREQV: Content-Range star value with integer size - pretend range doesn't exist: ${header.value}`);
+                } else {
+                    //We don't support other units etc.
+                    console.error(`WEBREQV: Unhandled Content-Range value: ${header.value}`);
+                }
+            } 
+        }
+    }
+
+    console.debug('WEBREQV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' content-range '+JSON.stringify(contentRange)+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
         let isImage = mimeType.startsWith('image/');
@@ -131,19 +175,32 @@ async function vidRootListener(details) {
     let parsedUrl = new URL(details.url);
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         if(mimeType.startsWith('video/mp4')) {
-            console.info(`YTVMP4: Starting for request ${details.requestId}`);
+            console.info(`WEBREQV/YTVMP4: Starting for request ${details.requestId}`);
             return await vidYtMp4Listener(details, mimeType, parsedUrl);
         } else if(mimeType.startsWith('video/webm')) {
-            console.info(`YTVWEBM: Starting for request ${details.requestId}`);
+            console.info(`WEBREQV/YTVWEBM: Starting for request ${details.requestId}`);
             return await vidYtWebmListener(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
             let itag = parsedUrl.searchParams.get('itag');
-            console.log(`YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
+            console.log(`WEBREQV/YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
             return;
         }
+    //If range is valid and ONLY a partial request, then consider it to be DASH
+    } else if (contentRange !== undefined && !(contentRange.start == 0 && contentRange.end == contentRange.size - 1)) {
+        if(mimeType.startsWith('video/mp4')) {
+            console.info(`WEBREQV/DASHVMP4: Starting for request ${details.requestId} range ${JSON.stringify(contentRange)} for url ${details.url}`);
+            return await vidDashMp4Listener(details, mimeType, parsedUrl, contentRange);
+        } else if(mimeType.startsWith('video/webm')) {
+            console.warn(`WEBREQV/DASHVMP4: Unsupported DASH WEBM request ${details.requestId} for url ${details.url}`);
+            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
+        } else {
+            console.warn(`WEBREQV/MLV: Request range for interesting MIME type ${mimeType}`);
+            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
+        }
     } else {
+        console.info(`WEBREQV/MLV: Default video listener for url ${details.url}`);
         return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
     }
 }
@@ -364,6 +421,265 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     }
     return details;
 }
+
+function vidCheckCreateDashGroup(url) {
+    let dashGroup = VID_DASH_GROUPS[url];
+    if(dashGroup === undefined) {
+        dashGroup = {
+            status: 'unknown',
+            url: url,
+            actions: [],
+            fmp4: null,
+            webm: null,
+            scanCount: 0,
+            blockCount: 0
+        };
+        VID_DASH_GROUPS[url] = dashGroup;
+    }
+    return dashGroup;
+}
+
+let VID_DASH_GROUPS = { };
+
+function findSuspectDashGroups() {
+    let suspectGroups = { }
+    for(let [url, group] of Object.entries(VID_DASH_GROUPS)) {
+        if(group.actions.length > 5) {
+            if(group.actions[group.actions.length-2].range.start == group.actions[group.actions.length-1].range.start) {
+                suspectGroups[url] = group;
+            }
+        }
+    }
+    return suspectGroups;
+}
+
+function stuffPlaceholderMp4(filter, expectedContentLength) {
+    //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
+    //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
+    //with random data. However, still others just keep trying anyways.
+    if(expectedContentLength >= VID_PLACEHOLDER_MP4.byteLength) {
+        filter.write(VID_PLACEHOLDER_MP4);
+        let remainingLength = expectedContentLength - VID_PLACEHOLDER_MP4.byteLength;
+        let stuffer = new Uint8Array(1024).fill(0);
+        while(remainingLength > stuffer.length) {
+            filter.write(stuffer);
+            remainingLength -= stuffer.length;
+        }
+        stuffer = new Uint8Array(remainingLength).fill(0);
+        filter.write(stuffer);
+    } else {
+        filter.write(VID_PLACEHOLDER_MP4.slice(0, expectedContentLength));
+    }
+}
+
+async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
+    let url = details.url;
+    let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
+    console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
+
+    let dashGroupPrecheck = VID_DASH_GROUPS[url];
+    if (dashGroupPrecheck !== undefined) {
+        if(dashGroupPrecheck.status == 'pass') {
+            console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+            dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
+            return details;
+        }
+    }
+
+    let filter = browser.webRequest.filterResponseData(details.requestId);
+    let expectedContentLength = range.end - range.start + 1; //Because end is inclusive
+
+    let buffers = [];
+  
+    filter.onstart = _ => {
+        let dashGroupPrecheck = VID_DASH_GROUPS[url];
+        if (dashGroupPrecheck !== undefined) {
+            if(dashGroupPrecheck.status == 'block') {
+                stuffPlaceholderMp4(filter, expectedContentLength);
+                filter.close();
+                //Indicate we blocked it ... up to a point; we will keep it so memory growth is not unbounded on retries
+                if(dashGroupPrecheck.actions.length < 200) {
+                    dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'onstart-block'});
+                }
+            } else if(dashGroupPrecheck.status == 'pass') {
+                console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
+                dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
+                return;
+            }
+        }
+        statusStartVideoCheck(details.requestId);
+    }
+
+    filter.ondata = event => {
+        console.debug('DASHVMP4: Data '+details.requestId+', '+range.start+'-'+range.end+' of size '+event.data.byteLength+' for '+url);
+        buffers.push(event.data);
+    }
+
+    filter.onerror = e => {
+        try {
+            filter.disconnect();
+            statusCompleteVideoCheck(details.requestId, 'error');
+        } catch(ex) {
+            console.error('DASHVMP4: Filter video error: '+e+', '+ex);
+        }
+    }
+  
+    filter.onstop = async _ => {
+        try {
+            // 1. Setup the FMP4 stream - tuck away the init segment and create the index
+            let fragmentFileOffset = range.start;
+            let checkFragmentsBuffer = null;
+            
+            if(range.start == 0) {
+                console.debug(`DASHVMP4: New FMP4 for ${details.requestId} at${url}`);
+                let dashGroup = vidCheckCreateDashGroup(url);
+                dashGroup.startRequestId = details.requestId;
+
+                let fullBuffer = vidConcatBuffersToUint8Array(buffers);
+                let [initSegment, isAudioOnly] = mp4GetInitSegment(fullBuffer, url);
+                let fmp4 = {
+                    initSegment: initSegment,
+                    videoChainId: videoChainId,
+                    scanCount: 0,
+                    blockCount: 0,
+                    isAudioOnly: isAudioOnly
+                };
+                dashGroup.fmp4 = fmp4;
+                if(!isAudioOnly) {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create'});
+                    //Just pick up after the init segment and ignore the fact there may be a SIDX
+                    checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
+                    fragmentFileOffset += initSegment.length;
+                    console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
+                } else {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create-audio-only'});
+                    dashGroup.status = 'pass';
+                    buffers.forEach(b=>filter.write(b));
+                    filter.close();
+                    statusCompleteVideoCheck(details.requestId, 'pass');
+                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId} because it is audio-only for url ${url}`);
+                    return;
+                }
+            } else {
+                console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
+                checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
+            }
+
+            // 2. Append any (moof mdat)+
+            let dashGroup = VID_DASH_GROUPS[url];
+            if(dashGroup === undefined) {
+                console.warn(`DASHVMP4: No DASH group found for  ${details.requestId} at range start ${range.start} for url ${url}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                return;
+            }
+            if(dashGroup.status == 'pass') {
+                console.info(`DASHVMP4: DASH group already passed for URL for ${details.requestId} at range start ${range.start} for url ${url}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'already-passed'});
+                return;
+            }
+            console.info(`DASHVMP4: Matching fragments for ${details.requestId} at range start ${range.start}`);
+            if(dashGroup.fmp4 === null) {
+                console.warn(`DASHVMP4: No fMP4 match for ${details.requestId} at range start ${range.start} for url ${url}`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'no-fmp4'});
+                return;
+            }
+
+            console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
+            let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true, videoChainId);
+            if(fragments.length == 0) {
+                console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
+                buffers.forEach(b=>filter.write(b));
+                filter.close();
+                statusCompleteVideoCheck(details.requestId, 'pass');
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'no-fragments'});
+                return;
+            }
+            console.info(`DASHVMP4: Extracted ${fragments.length} fragments for ${details.requestId} at range start ${range.start}`);
+
+            let fmp4 = dashGroup.fmp4;
+
+            // 3. Setup scanning
+            console.debug(`DASHVMP4: Setting up scan buffers for ${details.requestId} at range start ${range.start}`);
+            //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
+            let scanBuffers = [ vidToArrayBuffer(fmp4.initSegment) ];
+            fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.moofMdatData)));
+
+            let scanStart = 0.5; //seconds
+            let scanStep = 1.0;
+            //Increase scan steps if we used the MDAT fallback
+            let maxScanGroupSteps = 15.0;
+            let scanMaxSteps = fragments[0].wasMdatFallback ? maxScanGroupSteps : 10.0;
+            let scanBlockBailCount = 4.0;
+
+            console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
+            let processor = bkGetNextProcessor();
+            let scanResults = await vidPerformVideoScan(
+                processor,
+                videoChainId,
+                details.requestId,
+                mimeType,
+                details.url,
+                details.type,
+                scanBuffers,
+                scanStart,
+                scanStep,
+                scanMaxSteps,
+                scanBlockBailCount
+            );
+            console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  for ${details.requestId} at range start ${range.start} for url ${url}`);
+            statusIndicateVideoProgress(details.requestId);
+            fmp4.scanCount += scanResults.scanCount;
+            fmp4.blockCount += scanResults.blockCount;
+            dashGroup.scanCount += scanResults.scanCount;
+            dashGroup.blockCount += scanResults.blockCount;
+            let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
+                                    || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
+            let isThisStreamBlock = (fmp4.scanCount >= 20 && fmp4.blockCount / fmp4.scanCount >= 0.15);
+            let isThisGroupBlock = (dashGroup.scanCount >= 20 && dashGroup.blockCount / dashGroup.scanCount >= 0.15);
+            console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+            if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+                status = 'block';
+                dashGroup.status = 'block';
+                stuffPlaceholderMp4(filter, expectedContentLength);
+                filter.close();
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'block'});
+            } else {
+                status = 'pass';
+                if(dashGroup.scanCount >= maxScanGroupSteps) {
+                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+                    dashGroup.status = 'pass';
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-total'});
+                } else {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-so-far'});
+                }
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+            }
+            statusCompleteVideoCheck(details.requestId, status);
+        } catch(e) {
+            console.error(`DASHVMP4: Error for ${details.requestId} ${e} ${e.stack}`);
+            buffers.forEach(b=>filter.write(b));
+            filter.close();
+            statusCompleteVideoCheck(details.requestId, 'error');
+            let dashGroup = VID_DASH_GROUPS[url];
+            if(dashGroup !== undefined) {
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'error', exception: e});
+            }
+        }
+    }
+    return details;
+}
+
+
 
 function vidCheckCreateYtGroup(cpn) {
     let youtubeGroup = VID_YT_GROUPS[cpn];
@@ -705,22 +1021,4 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
         }
     }
     return details;
-}
-
-async function vidPrerequestListener(details) {
-    if (whtIsWhitelisted(details.url)) {
-        return;
-    }
-    let parsedUrl = new URL(details.url);
-    //Youtube check
-    if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
-        let cpn = parsedUrl.searchParams.get('cpn');
-        let youtubeGroupPrecheck = VID_YT_GROUPS[cpn];
-        if (youtubeGroupPrecheck !== undefined) {
-            if(youtubeGroupPrecheck.status == 'block') {
-                console.warn(`YTV: Pre-block known CPN ${cpn}`)
-                return { cancel: true };
-            }
-        }
-    }
 }
