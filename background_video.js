@@ -706,6 +706,10 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-mp4-'+cpn+'-'+details.requestId;
     let rangeRaw = parsedUrl.searchParams.get('range');
+    if(rangeRaw === undefined || rangeRaw === null) {
+        console.warn(`YTFMP4: For request ${details.requestId} ${cpn}, failed to get the range, aborting. URL: ${details.url}`);
+        return details;
+    }
     console.info('YTVMP4: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
     let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
     let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
