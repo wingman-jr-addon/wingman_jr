@@ -558,13 +558,29 @@ function procGetBufferedRangesString(video) {
     return result;
 }
 
+const VIDEO_LOAD_TIMEOUT_MS = 5000;
 const procVideoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
+    let isResolved = false;
     video.addEventListener('error', ()=>reject(video.error), {once: true});
     video.addEventListener('seeked',  () => {
         video.width = video.videoWidth;
         video.height = video.videoHeight;
+        isResolved = true;
         resolve();
     } , {once:true});
+    //Note that the URL is in memory, not remote
+    //making a small timeout a reasonable choice
+    //Without the below, there was at least one URL
+    //that simply didn't fire the expected events,
+    //so this acts as a safeguard
+    let timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId);
+        if(isResolved) {
+            return;
+        }
+        console.warn(`MLV: Timed out`);
+        reject(`MLV: Timed out in ${VIDEO_LOAD_TIMEOUT_MS} ms`);
+      }, VIDEO_LOAD_TIMEOUT_MS);
     video.src = url;
     video.currentTime = seekTime;
 });
