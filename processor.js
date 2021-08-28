@@ -135,6 +135,47 @@ async function procPredict(imgElement) {
     }
 }
 
+async function procPredictCenterCrop(imgElement) {
+    let c = procGetCtx();
+    try {
+        let ctx = c.ctx;
+        const drawStartTime = performance.now();
+        ctx.drawImage(imgElement, imgElement.width/3, imgElement.height/5, imgElement.width/3, (imgElement.height*4)/5, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
+        const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
+        const totalDrawTime = performance.now() - drawStartTime;
+        console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
+
+        const startTime = performance.now();
+        const logits = tf.tidy(() => {
+            const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
+            const floatImg = rightSizeImageDataTF.toFloat();
+            //EfficientNet
+            //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
+            //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
+            //MobileNet V2
+            const scaled = floatImg.div(tf.scalar(127.5));
+            const normalized = scaled.sub(tf.scalar(1));
+            // Reshape to a single-element batch so we can pass it to predict.
+            const batched = tf.stack([normalized]);
+            const result = PROC_wingman.predict(batched, {batchSize: 1});
+
+            return result;
+        });
+
+        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        const totalTime = performance.now() - startTime;
+        PROC_inferenceTimeTotal += totalTime;
+        PROC_inferenceCountTotal++;
+        const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
+        console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
+
+        console.debug('ML: Prediction: '+syncedResult[0]);
+        return syncedResult;
+    } finally {
+        procReturnCtx(c);
+    }
+}
+
 async function procReadFileAsDataURL (inputFile) {
     const temporaryFileReader = new FileReader();
   
@@ -281,11 +322,30 @@ async function procPerformFiltering(entry) {
                 }
                 if(procIsSafe(sqrxrScore)) {
                     console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    result.result = 'pass';
-                    result.imageBytes = await blob.arrayBuffer();
-                    result.sqrxrScore = sqrxrScore;
+                    let shouldDoCenterCrop = true;
+                    if(shouldDoCenterCrop) {
+                        let centerCropSqrxScore = await procPredictCenterCrop(img);
+                        if(procIsSafe(centerCropSqrxScore)) {
+                            console.log('ML: Passed center crop: '+procScoreToStr(centerCropSqrxScore)+' '+entry.requestId);
+                            result.result = 'pass';
+                            result.imageBytes = await blob.arrayBuffer();
+                            result.sqrxrScore = sqrxrScore;
+                        } else {
+                            console.warn('ML: Blocked center crop: '+procScoreToStr(centerCropSqrxScore)+' '+entry.requestId);
+                            let svgText = await procCommonCreateSvgFromBlob(img, centerCropSqrxScore, blob);
+                            procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(centerCropSqrxScore));
+                            let encoder = new TextEncoder();
+                            let encodedTypedBuffer = encoder.encode(svgText);
+                            result.result = 'block';
+                            result.imageBytes = encodedTypedBuffer.buffer;
+                        }
+                    } else {
+                        result.result = 'pass';
+                        result.imageBytes = await blob.arrayBuffer();
+                        result.sqrxrScore = sqrxrScore;
+                    }
                 } else {
-                    console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+                    console.warn('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
                     procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
