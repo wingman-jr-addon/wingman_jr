@@ -105,7 +105,7 @@ async function vidRootListener(details) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
-        console.log('WEBREQV: Video whitelist '+details.url);
+        WJR_DEBUG && console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
 
@@ -158,15 +158,15 @@ async function vidRootListener(details) {
         }
     }
 
-    console.debug('WEBREQV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' content-range '+JSON.stringify(contentRange)+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
+    WJR_DEBUG && console.debug('WEBREQV: VIDEO mime type check for '+details.requestId+' '+mimeType+': '+length+', webrequest type '+details.type+', expected content-length '+expectedContentLength+' content-range '+JSON.stringify(contentRange)+' originUrl '+details.originUrl+' documentUrl '+ details.documentUrl +' url '+details.url);
     let isVideo =  mimeType.startsWith('video/');
     if(!isVideo) {
         let isImage = mimeType.startsWith('image/');
         if(isImage) {
-            console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
+            WJR_DEBUG && console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
             return bkImageListener(details);
         } else {
-            console.debug('WEBREQV: VIDEO rejected '+details.requestId+' because MIME type was '+mimeType);
+            WJR_DEBUG && console.debug('WEBREQV: VIDEO rejected '+details.requestId+' because MIME type was '+mimeType);
             return;
         }
     }
@@ -175,22 +175,22 @@ async function vidRootListener(details) {
     let parsedUrl = new URL(details.url);
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         if(mimeType.startsWith('video/mp4')) {
-            console.info(`WEBREQV/YTVMP4: Starting for request ${details.requestId}`);
+            WJR_DEBUG && console.info(`WEBREQV/YTVMP4: Starting for request ${details.requestId}`);
             return await vidYtMp4Listener(details, mimeType, parsedUrl);
         } else if(mimeType.startsWith('video/webm')) {
-            console.info(`WEBREQV/YTVWEBM: Starting for request ${details.requestId}`);
+            WJR_DEBUG && console.info(`WEBREQV/YTVWEBM: Starting for request ${details.requestId}`);
             return await vidYtWebmListener(details, mimeType, parsedUrl);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
             let itag = parsedUrl.searchParams.get('itag');
-            console.log(`WEBREQV/YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
+            WJR_DEBUG && console.log(`WEBREQV/YTV: Unsupported Youtube video for ${details.requestId} of type ${mimeType} (${cpn} ${range} ${itag})`);
             return;
         }
     //If range is valid and ONLY a partial request, then consider it to be DASH
     } else if (contentRange !== undefined && !(contentRange.start == 0 && contentRange.end == contentRange.size - 1)) {
         if(mimeType.startsWith('video/mp4')) {
-            console.info(`WEBREQV/DASHVMP4: Starting for request ${details.requestId} range ${JSON.stringify(contentRange)} for url ${details.url}`);
+            WJR_DEBUG && console.info(`WEBREQV/DASHVMP4: Starting for request ${details.requestId} range ${JSON.stringify(contentRange)} for url ${details.url}`);
             return await vidDashMp4Listener(details, mimeType, parsedUrl, contentRange);
         } else if(mimeType.startsWith('video/webm')) {
             console.warn(`WEBREQV/DASHVMP4: Unsupported DASH WEBM request ${details.requestId} for url ${details.url}`);
@@ -200,13 +200,13 @@ async function vidRootListener(details) {
             return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
         }
     } else {
-        console.info(`WEBREQV/MLV: Default video listener for url ${details.url}`);
+        WJR_DEBUG && console.info(`WEBREQV/MLV: Default video listener for url ${details.url}`);
         return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
     }
 }
 
 async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength) {
-    console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
+    WJR_DEBUG && console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let videoChainId = 'default-'+details.requestId;
@@ -242,7 +242,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
         try
         {
             //Ensure this top section remains synchronous
-            console.debug(`DEFV: Data for ${details.requestId} of size ${newData.byteLength}`);
+            WJR_DEBUG && console.debug(`DEFV: Data for ${details.requestId} of size ${newData.byteLength}`);
             allBuffers.push(newData);
             totalSize += newData.byteLength;
 
@@ -266,13 +266,13 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 let scanBuffers = allBuffers.slice(0, flushIndexEnd); //to load for scanning
                 let flushBuffers = allBuffers.slice(flushIndexStart, flushIndexEnd); //to flush if pass
 
-                console.info(`DEFV: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}`);
+                WJR_DEBUG && console.info(`DEFV: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}`);
                 let processor = bkGetNextProcessor();
                 //End synchronous only setup
 
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
-                    console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                    WJR_DEBUG && console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                     let scanPerfStartTime = performance.now();
                     let scanResults = await vidPerformVideoScan(
                         processor,
@@ -288,7 +288,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         scanBlockBailCount
                     );
                     let scanPerfTotalTime = performance.now() - scanPerfStartTime;
-                    console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}/${scanResults.scanCount}=${(scanPerfTotalTime/scanResults.scanCount).toFixed(1)} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
+                    WJR_DEBUG && console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}/${scanResults.scanCount}=${(scanPerfTotalTime/scanResults.scanCount).toFixed(1)} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
                     totalScanCount += scanResults.scanCount;
                     totalBlockCount += scanResults.blockCount;
                     let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
@@ -320,7 +320,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         //with random data.
                         if(expectedContentLength > 0) {
                             let remainingLength = expectedContentLength - placeholder.byteLength;
-                            console.log(`DEFV: BLOCK ${details.requestId} stuffing ${remainingLength}`);
+                            WJR_DEBUG && console.log(`DEFV: BLOCK ${details.requestId} stuffing ${remainingLength}`);
                             let stuffer = new Uint8Array(1024).fill(0);
                             while(remainingLength > stuffer.length) {
                                 filter.write(stuffer);
@@ -344,14 +344,14 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             flushScanStartTime = lastFrame.time + scanStep;
                         }
                         if(flushScanStartTime >= fullPassScanDuration || flushScanStartSize >= fullPassScanBytes) {
-                            console.log(`DEFV: Full PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                            WJR_DEBUG && console.log(`DEFV: Full PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass';
                             let disconnectBuffers = allBuffers.slice(flushIndexStart);
                             disconnectBuffers.forEach(b=>filter.write(b));
                             filter.disconnect();
                             statusCompleteVideoCheck(details.requestId, status);
                         } else {
-                            console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                            WJR_DEBUG && console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
                             flushBuffers.forEach(b=>filter.write(b));
 
@@ -367,7 +367,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                                     }
                                 } else if(timePerFrameSecs < scanStepDecreaseThreshold*scanStep) {
                                     if(scanStep <= scanStepMin) {
-                                        console.info(`DEFV: RATCHET minned ${details.requestId}: ${timePerFrameSecs}`);
+                                        WJR_DEBUG && console.info(`DEFV: RATCHET minned ${details.requestId}: ${timePerFrameSecs}`);
                                     } else {
                                         scanStep -= scanStepRatchet;
                                         console.warn(`DEFV: RATCHET decreased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.scanCount} frames`);
@@ -380,13 +380,13 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 await scanAndTransitionPromise();
                 statusIndicateVideoProgress(details.requestId);
             } else {
-                console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
+                WJR_DEBUG && console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
             }
         } catch(e) {
             console.error(`DEFV: Error scanning for ${details.requestId} status ${status} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}: ${e}`);
         } finally {
             if(isComplete) {
-                console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
+                WJR_DEBUG && console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, status);
             }
@@ -405,7 +405,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
             filter.disconnect();
             statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
-            console.log('WEBREQ: Filter video error: '+ex);
+            WJR_DEBUG && console.log('WEBREQ: Filter video error: '+ex);
         }
     }
   
@@ -475,7 +475,7 @@ function stuffPlaceholderMp4(filter, expectedContentLength) {
 async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     let url = details.url;
     let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
-    console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
+    WJR_DEBUG && console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
 
     let dashGroupPrecheck = VID_DASH_GROUPS[url];
     if (dashGroupPrecheck !== undefined) {
@@ -511,7 +511,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
     }
 
     filter.ondata = event => {
-        console.debug('DASHVMP4: Data '+details.requestId+', '+range.start+'-'+range.end+' of size '+event.data.byteLength+' for '+url);
+        WJR_DEBUG && console.debug('DASHVMP4: Data '+details.requestId+', '+range.start+'-'+range.end+' of size '+event.data.byteLength+' for '+url);
         buffers.push(event.data);
     }
 
@@ -531,7 +531,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             let checkFragmentsBuffer = null;
             
             if(range.start == 0) {
-                console.debug(`DASHVMP4: New FMP4 for ${details.requestId} at${url}`);
+                WJR_DEBUG && console.debug(`DASHVMP4: New FMP4 for ${details.requestId} at${url}`);
                 let dashGroup = vidCheckCreateDashGroup(url);
                 dashGroup.startRequestId = details.requestId;
 
@@ -550,18 +550,18 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                     //Just pick up after the init segment and ignore the fact there may be a SIDX
                     checkFragmentsBuffer = fullBuffer.slice(initSegment.length);
                     fragmentFileOffset += initSegment.length;
-                    console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
+                    WJR_DEBUG && console.info(`DASHVMP4: Completed creating new FMP4 for ${details.requestId}, check fragments remaining size ${checkFragmentsBuffer.length} for range ${range.start}-${range.end} init seg length ${initSegment.length}, url ${url}`);
                 } else {
                     dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'create-audio-only'});
                     dashGroup.status = 'pass';
                     buffers.forEach(b=>filter.write(b));
                     filter.close();
                     statusCompleteVideoCheck(details.requestId, 'pass');
-                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId} because it is audio-only for url ${url}`);
+                    WJR_DEBUG && console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId} because it is audio-only for url ${url}`);
                     return;
                 }
             } else {
-                console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
+                WJR_DEBUG && console.info(`DASHVMP4: Will look for existing FMP4 for ${details.requestId}, range start ${range.start}`);
                 checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
 
@@ -575,14 +575,14 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 return;
             }
             if(dashGroup.status == 'pass') {
-                console.info(`DASHVMP4: DASH group already passed for URL for ${details.requestId} at range start ${range.start} for url ${url}`);
+                WJR_DEBUG && console.info(`DASHVMP4: DASH group already passed for URL for ${details.requestId} at range start ${range.start} for url ${url}`);
                 buffers.forEach(b=>filter.write(b));
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, 'pass');
                 dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'already-passed'});
                 return;
             }
-            console.info(`DASHVMP4: Matching fragments for ${details.requestId} at range start ${range.start}`);
+            WJR_DEBUG && console.info(`DASHVMP4: Matching fragments for ${details.requestId} at range start ${range.start}`);
             if(dashGroup.fmp4 === null) {
                 console.warn(`DASHVMP4: No fMP4 match for ${details.requestId} at range start ${range.start} for url ${url}`);
                 buffers.forEach(b=>filter.write(b));
@@ -592,7 +592,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 return;
             }
 
-            console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
+            WJR_DEBUG && console.info(`DASHVMP4: Extract fragments for ${details.requestId} at range start ${range.start}`);
             let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset, true, videoChainId);
             if(fragments.length == 0) {
                 console.warn(`DASHVMP4: No fragments for ${details.requestId} at range start ${range.start}, continuing...`);
@@ -602,12 +602,12 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'no-fragments'});
                 return;
             }
-            console.info(`DASHVMP4: Extracted ${fragments.length} fragments for ${details.requestId} at range start ${range.start}`);
+            WJR_DEBUG && console.info(`DASHVMP4: Extracted ${fragments.length} fragments for ${details.requestId} at range start ${range.start}`);
 
             let fmp4 = dashGroup.fmp4;
 
             // 3. Setup scanning
-            console.debug(`DASHVMP4: Setting up scan buffers for ${details.requestId} at range start ${range.start}`);
+            WJR_DEBUG && console.debug(`DASHVMP4: Setting up scan buffers for ${details.requestId} at range start ${range.start}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
             let scanBuffers = [ vidToArrayBuffer(fmp4.initSegment) ];
             fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.moofMdatData)));
@@ -619,7 +619,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             let scanMaxSteps = fragments[0].wasMdatFallback ? maxScanGroupSteps : 10.0;
             let scanBlockBailCount = 4.0;
 
-            console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
+            WJR_DEBUG && console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
             let processor = bkGetNextProcessor();
             let scanResults = await vidPerformVideoScan(
                 processor,
@@ -634,7 +634,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 scanMaxSteps,
                 scanBlockBailCount
             );
-            console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  for ${details.requestId} at range start ${range.start} for url ${url}`);
+            WJR_DEBUG && console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  for ${details.requestId} at range start ${range.start} for url ${url}`);
             statusIndicateVideoProgress(details.requestId);
             fmp4.scanCount += scanResults.scanCount;
             fmp4.blockCount += scanResults.blockCount;
@@ -644,7 +644,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                                     || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
             let isThisStreamBlock = (fmp4.scanCount >= 20 && fmp4.blockCount / fmp4.scanCount >= 0.15);
             let isThisGroupBlock = (dashGroup.scanCount >= 20 && dashGroup.blockCount / dashGroup.scanCount >= 0.15);
-            console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+            WJR_DEBUG && console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                 status = 'block';
@@ -655,7 +655,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
             } else {
                 status = 'pass';
                 if(dashGroup.scanCount >= maxScanGroupSteps) {
-                    console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
+                    WJR_DEBUG && console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                     dashGroup.status = 'pass';
                     dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-total'});
                 } else {
@@ -710,7 +710,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
         console.warn(`YTFMP4: For request ${details.requestId} ${cpn}, failed to get the range, aborting. URL: ${details.url}`);
         return details;
     }
-    console.info('YTVMP4: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
+    WJR_DEBUG && console.info('YTVMP4: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
     let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
     let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
     let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
@@ -732,7 +732,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
     }
 
     filter.ondata = event => {
-        console.debug('YTVMP4: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
+        WJR_DEBUG && console.debug('YTVMP4: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
         buffers.push(event.data);
     }
 
@@ -753,7 +753,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
             let fragmentFileOffset = rangeStart;
             
             if(rangeStart == 0) {
-                console.debug(`YTVMP4: New FMP4 ${cpn} for ${details.requestId} at quality ${itag}`);
+                WJR_DEBUG && console.debug(`YTVMP4: New FMP4 ${cpn} for ${details.requestId} at quality ${itag}`);
                 let youtubeGroup = vidCheckCreateYtGroup(cpn);
 
                 let fullBuffer = vidConcatBuffersToUint8Array(buffers);
@@ -764,14 +764,14 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 youtubeGroup.fmp4s.push(fmp4);
                 checkFragmentsBuffer = fullBuffer.slice(fmp4.dataStartIndex);
                 fragmentFileOffset += fmp4.dataStartIndex;
-                console.info(`YTVMP4: Completed creating new FMP4 ${cpn} for ${details.requestId} at quality ${itag}, index count ${fmp4.sidx.entries.length}`);
+                WJR_DEBUG && console.info(`YTVMP4: Completed creating new FMP4 ${cpn} for ${details.requestId} at quality ${itag}, index count ${fmp4.sidx.entries.length}`);
             } else {
-                console.info(`YTVMP4: Will look for existing FMP4 ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
+                WJR_DEBUG && console.info(`YTVMP4: Will look for existing FMP4 ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
                 checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
 
             // 2. Append any (moof mdat)+
-            console.info(`YTVMP4: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVMP4: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let fragments = mp4ExtractFragments(checkFragmentsBuffer, fragmentFileOffset);
             if(fragments.length == 0) {
                 console.warn(`YTVMP4: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
@@ -780,7 +780,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
-            console.info(`YTVMP4: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVMP4: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
 
             let youtubeGroup = VID_YT_GROUPS[cpn];
             if(youtubeGroup === undefined) {
@@ -790,10 +790,10 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
-            console.info(`YTVMP4: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVMP4: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             for(let stream of youtubeGroup.fmp4s) {
                 if(stream.doFragmentsMatch(fragments)) {
-                    console.info(`YTVMP4: Found existing fMP4 match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+                    WJR_DEBUG && console.info(`YTVMP4: Found existing fMP4 match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                     fmp4 = stream;
                     break;
                 }
@@ -807,7 +807,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
             }
 
             // 3. Setup scanning
-            console.debug(`YTVMP4: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVMP4: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
             let scanBuffers = [ vidToArrayBuffer(fmp4.initSegment) ];
             fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.moofMdatData)));
@@ -817,7 +817,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
             let scanMaxSteps = 10.0;
             let scanBlockBailCount = 4.0;
 
-            console.debug(`YTVMP4: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVMP4: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let processor = bkGetNextProcessor();
             let scanResults = await vidPerformVideoScan(
                 processor,
@@ -832,7 +832,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 scanMaxSteps,
                 scanBlockBailCount
             );
-            console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             statusIndicateVideoProgress(details.requestId);
             fmp4.scanCount += scanResults.scanCount;
             fmp4.blockCount += scanResults.blockCount;
@@ -842,7 +842,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                                     || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
             let isThisStreamBlock = (fmp4.scanCount >= 20 && fmp4.blockCount / fmp4.scanCount >= 0.15);
             let isThisGroupBlock = (youtubeGroup.scanCount >= 20 && youtubeGroup.blockCount / youtubeGroup.scanCount >= 0.15);
-            console.log(`YTVMP4/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
+            WJR_DEBUG && console.log(`YTVMP4/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 status = 'block';
                 youtubeGroup.status = 'block';
@@ -872,7 +872,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
     let rangeRaw = parsedUrl.searchParams.get('range');
-    console.info('YTVWEBM: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
+    WJR_DEBUG && console.info('YTVWEBM: Starting request '+details.requestId+' '+cpn+', '+rangeRaw);
     let splitIndex = rangeRaw.indexOf('-'); //e.g. range=0-3200
     let rangeStart = parseInt(rangeRaw.substr(0, splitIndex));
     let rangeEnd = parseInt(rangeRaw.substr(splitIndex+1));
@@ -894,7 +894,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
     }
 
     filter.ondata = event => {
-        console.debug('YTVWEBM: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
+        WJR_DEBUG && console.debug('YTVWEBM: Data '+details.requestId+' '+cpn+', '+rangeRaw+' of size '+event.data.byteLength);
         buffers.push(event.data);
     }
 
@@ -903,7 +903,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             filter.disconnect();
             statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
-            console.log('YTVWEBM: Filter video error: '+e+', '+ex);
+            WJR_DEBUG && console.log('YTVWEBM: Filter video error: '+e+', '+ex);
         }
     }
   
@@ -915,7 +915,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             let fragmentFileOffset = rangeStart;
             
             if(rangeStart == 0) {
-                console.debug(`YTVWEBM: New WebM ${cpn} for ${details.requestId} at quality ${itag}`);
+                WJR_DEBUG && console.debug(`YTVWEBM: New WebM ${cpn} for ${details.requestId} at quality ${itag}`);
                 let youtubeGroup = vidCheckCreateYtGroup(cpn);
 
                 let fullBuffer = vidConcatBuffersToUint8Array(buffers);
@@ -926,14 +926,14 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 youtubeGroup.webms.push(webm);
                 checkFragmentsBuffer = fullBuffer.slice(webm.clusterStartIndex);
                 fragmentFileOffset += webm.clusterStartIndex;
-                console.info(`YTVWEBM: Completed creating new WebM ${cpn} for ${details.requestId} at quality ${itag}`);
+                WJR_DEBUG && console.info(`YTVWEBM: Completed creating new WebM ${cpn} for ${details.requestId} at quality ${itag}`);
             } else {
-                console.info(`YTVWEBM: Will look for existing WebM ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
+                WJR_DEBUG && console.info(`YTVWEBM: Will look for existing WebM ${cpn} for ${details.requestId} at quality ${itag}, range start ${rangeStart}`);
                 checkFragmentsBuffer = vidConcatBuffersToUint8Array(buffers);
             }
 
             // 2. Append any Cluster
-            console.debug(`YTVWEBM: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVWEBM: Extract fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let fragments = ebmlExtractFragments(checkFragmentsBuffer, fragmentFileOffset);
             if(fragments.length == 0) {
                 console.warn(`YTVWEBM: No fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}, continuing...`);
@@ -942,7 +942,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
-            console.info(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVWEBM: Extracted ${fragments.length} fragments for CPN ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
 
             let youtubeGroup = VID_YT_GROUPS[cpn];
             if(youtubeGroup === undefined) {
@@ -952,10 +952,10 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 statusCompleteVideoCheck(details.requestId, 'pass');
                 return;
             }
-            console.info(`YTVWEBM: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.info(`YTVWEBM: Matching fragments  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             for(let stream of youtubeGroup.webms) {
                 if(stream.doFragmentsMatch(fragments)) {
-                    console.info(`YTVWEBM: Found existing WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+                    WJR_DEBUG && console.info(`YTVWEBM: Found existing WebM match  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
                     webm = stream;
                     break;
                 }
@@ -969,7 +969,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             }
 
             // 3. Setup scanning
-            console.debug(`YTVWEBM: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVWEBM: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
             let scanBuffers = [ vidToArrayBuffer(webm.initSegment) ];
             fragments.forEach(f=>scanBuffers.push(vidToArrayBuffer(f.clusterData)));
@@ -979,7 +979,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
             let scanMaxSteps = 10.0;
             let scanBlockBailCount = 4.0;
 
-            console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             let processor = bkGetNextProcessor();
             let scanResults = await vidPerformVideoScan(
                 processor,
@@ -994,7 +994,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 scanMaxSteps,
                 scanBlockBailCount
             );
-            console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
+            WJR_DEBUG && console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             statusIndicateVideoProgress(details.requestId);
             webm.scanCount += scanResults.scanCount;
             webm.blockCount += scanResults.blockCount;
@@ -1004,7 +1004,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                                     || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
             let isThisStreamBlock = (webm.scanCount >= 20 && webm.blockCount / webm.scanCount >= 0.15);
             let isThisGroupBlock = (youtubeGroup.scanCount >= 20 && youtubeGroup.blockCount / youtubeGroup.scanCount >= 0.15);
-            console.log(`YTVWEBM/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${webm.blockCount}/${webm.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
+            WJR_DEBUG && console.log(`YTVWEBM/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${webm.blockCount}/${webm.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
             if(isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
                 status = 'block';
                 youtubeGroup.status = 'block';
