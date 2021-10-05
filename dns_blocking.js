@@ -13,7 +13,7 @@ async function dnsIsDomainOk(urlString) {
     if (cacheResult !== undefined) {
         dnsCacheHitCount++;
         if(dnsShouldShowDebugMessages) {
-            console.log('DNS cache hit (result: '+cacheResult+') for: '+url.hostname);
+            WJR_DEBUG && console.log('DNS cache hit (result: '+cacheResult+') for: '+url.hostname);
         }
         return cacheResult;
     }
@@ -28,7 +28,7 @@ async function dnsIsDomainOk(urlString) {
         p = dnsInFlightRequests[url.hostname];
         dnsInFlightRequestsCounter[url.hostname]++;
         if(dnsShouldShowDebugMessages) {
-            console.log('DNS in flight: multiple lookups ('+dnsInFlightRequestsCounter[url.hostname]+') occurring on '+url.hostname);
+            WJR_DEBUG && console.log('DNS in flight: multiple lookups ('+dnsInFlightRequestsCounter[url.hostname]+') occurring on '+url.hostname);
         }
     } else {
         p = dnsMakeRequest(url);
@@ -39,16 +39,16 @@ async function dnsIsDomainOk(urlString) {
     let result = await p;
     dnsInFlightRequestsCounter[url.hostname]--;
     if(dnsShouldShowDebugMessages) {
-        console.log('DNS in flight: '+dnsInFlightRequestsCounter[url.hostname]+' remaining requests for '+url.hostname);
+        WJR_DEBUG && console.log('DNS in flight: '+dnsInFlightRequestsCounter[url.hostname]+' remaining requests for '+url.hostname);
     }
     if (dnsInFlightRequestsCounter[url.hostname]<=0) {
         if(dnsShouldShowDebugMessages) {
-            console.log('DNS in flight: cleaning up for '+url.hostname);
+            WJR_DEBUG && console.log('DNS in flight: cleaning up for '+url.hostname);
         }
         delete dnsInFlightRequests[url.hostname];
         delete dnsInFlightRequestsCounter[url.hostname];
     }
-    console.log('DNS cache '+(wasTrueMiss ? 'miss' : 'hold')+' (result: '+result+') for hostname: '+url.hostname);
+    WJR_DEBUG && console.log('DNS cache '+(wasTrueMiss ? 'miss' : 'hold')+' (result: '+result+') for hostname: '+url.hostname);
     return result;
 }
 
@@ -70,7 +70,7 @@ async function dnsMakeRequest(url) {
             console.warn('DNS resolution lookup failures are occurring.');
         }
         if(dnsShouldShowDebugMessages) {
-            console.log('DNS resolution failure for '+url.hostname);
+            WJR_DEBUG && console.log('DNS resolution failure for '+url.hostname);
         }
         dnsErrorCount++;
         return true; //Can't do anything about it, but not going to block everything!

@@ -90,7 +90,7 @@ function mp4DumpSIDX(buffer, atomOffset) {
     let __reserved = mp4ReadUint16(b,i); i+=2;
     let entryCount = mp4ReadUint16(b,i); i+=2;
 
-    console.debug('DEBUGV:           SIDX Entry Count '+entryCount);
+    WJR_DEBUG && console.debug('DEBUGV:           SIDX Entry Count '+entryCount);
 
     //Note here that fileOffset seems to refer to the offset relative to the end of the SIDX atom
     let fileOffset = firstOffset;
@@ -98,7 +98,7 @@ function mp4DumpSIDX(buffer, atomOffset) {
         let referencedSize = mp4ReadUint32(b,i); i+=4;
         let subSegmentDuration = mp4ReadUint32(b,i); i+=4;
         i+=4; //unused
-        console.debug(`DEBUGV:          SIDX Current offset ${fileOffset}, size ${referencedSize}, duration ${subSegmentDuration}`);
+        WJR_DEBUG && console.debug(`DEBUGV:          SIDX Current offset ${fileOffset}, size ${referencedSize}, duration ${subSegmentDuration}`);
         fileOffset += referencedSize;
     }
 }
@@ -161,7 +161,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
     let wasProbableStartFound = false;
     while(offset < fullBuffer.byteLength-7) {
         if(mp4IsProbableAtomOfType(fullBuffer, offset, 'moof')) {
-            console.debug(`DEBUGV: Probable fMP4 fragment start: ${offset} for ${debugString}`);
+            WJR_DEBUG && console.debug(`DEBUGV: Probable fMP4 fragment start: ${offset} for ${debugString}`);
             wasProbableStartFound = true;
             break;
         }
@@ -179,7 +179,7 @@ function mp4ExtractFragments(fullBuffer, fileStartOffset, allowMdatFallback=fals
         offset = 0;
         while(offset < fullBuffer.byteLength-7) {
             if(mp4IsProbableAtomOfType(fullBuffer, offset, 'mdat', true)) {
-                console.debug(`DEBUGV: Probable MP4 mdat start: ${offset} for ${debugString}`);
+                WJR_DEBUG && console.debug(`DEBUGV: Probable MP4 mdat start: ${offset} for ${debugString}`);
                 wasProbableStartFound = true;
                 break;
             }
@@ -320,7 +320,7 @@ function mp4CreateFragmentedMp4(initBuffer) {
         doFragmentsMatch: function(fragments) { //as produced by extractFragments
             let matches = fragments.filter(f=>this.sidx.entries[f.fileOffsetMoof]!==undefined);
             let shouldQualify = matches.length == fragments.length;
-            console.info(`YTVMP4: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
+            WJR_DEBUG && console.info(`YTVMP4: Fragment match count ${matches.length}/${fragments.length}, should qualify? ${shouldQualify}`);
             return shouldQualify;
         },
         markFragments: function(fragments, status) {
@@ -369,7 +369,7 @@ function mp4GetInitSegment(initBuffer, debugString=null) {
     let initSegment = initBuffer.slice(0, ftypLength + totalFreeLength + moovLength);
     let moovAtom = initBuffer.slice(ftypLength + totalFreeLength, ftypLength + totalFreeLength + moovLength);
     let isAudioOnly = false;
-    console.debug(`TKHD: Checking detection for moov atom of length ${moovLength}`);
+    WJR_DEBUG && console.debug(`TKHD: Checking detection for moov atom of length ${moovLength}`);
     //let moovAtomContents = moovAtom.slice(8);
     //mp4DumpAtomsFromUint8Array(moovAtomContents, debugString, recurse=2);
     for(let i=0; i<moovLength; i++) {
@@ -381,7 +381,7 @@ function mp4GetInitSegment(initBuffer, debugString=null) {
                 let trackWidth = mp4ReadUint32(moovAtom, i+8+76);
                 let trackHeight = mp4ReadUint32(moovAtom, i+8+80);
                 isAudioOnly = (trackWidth == 0 && trackHeight == 0);
-                console.info(`TKHD: Detected size of ${trackWidth}, ${trackHeight} indicating isAudioOnly=${isAudioOnly} for ${debugString}`);
+                WJR_DEBUG && console.info(`TKHD: Detected size of ${trackWidth}, ${trackHeight} indicating isAudioOnly=${isAudioOnly} for ${debugString}`);
             } else {
                 console.warn(`TKHD: Detected strange length of ${tkhdLength} for ${debugString}`);
             }

@@ -3,44 +3,46 @@ const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
 
+let WJR_DEBUG = false;
+
 function procOnModelLoadProgress(percentage) {
-    console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
+    WJR_DEBUG && console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
 
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
 const procWingmanStartup = async () => {
-    console.log('LIFECYCLE: Launching TF.js!');
+    WJR_DEBUG && console.log('LIFECYCLE: Launching TF.js!');
     let params = (new URL(document.location)).searchParams;
     let backendRequested = params.get('backend');
-    console.log('LIFECYCLE: Backend requested '+backendRequested);
+    WJR_DEBUG && console.log('LIFECYCLE: Backend requested '+backendRequested);
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
     }
-    console.log(tf.env().getFlags());
+    WJR_DEBUG && console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
     PROC_loadedBackend = tf.getBackend();
-    console.log('LIFECYCLE: TensorflowJS backend is: '+PROC_loadedBackend);
+    WJR_DEBUG && console.log('LIFECYCLE: TensorflowJS backend is: '+PROC_loadedBackend);
     if(PROC_loadedBackend == 'cpu') {
-        console.log('LIFECYCLE: WARNING! Exiting because no fast predictor can be loaded!');
+        WJR_DEBUG && console.log('LIFECYCLE: WARNING! Exiting because no fast predictor can be loaded!');
         PROC_wingman = null;
         return;
     }
-    console.log('LIFECYCLE: Loading model...');
+    WJR_DEBUG && console.log('LIFECYCLE: Loading model...');
     PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
-    console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
+    WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
 
-    console.log('LIFECYCLE: Warming up...');
+    WJR_DEBUG && console.log('LIFECYCLE: Warming up...');
     let dummy_data = tf.zeros([1, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE, 3]);
     let warmup_result = null;
     let timingInfo = await tf.time(()=>warmup_result = PROC_wingman.predict(dummy_data));
-    console.log(warmup_result);
-    console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
+    WJR_DEBUG && console.log(warmup_result);
+    WJR_DEBUG && console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
     warmup_result[0].dispose();
     warmup_result[1].dispose();
-    console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
+    WJR_DEBUG && console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
 };
 
 
@@ -56,7 +58,7 @@ function procCreateInferenceContext() {
     canvas.width = PROC_IMAGE_SIZE;
     canvas.height = PROC_IMAGE_SIZE;
     let ctx = canvas.getContext('2d', { alpha: false});//, powerPreference: 'high-performance'});
-    console.log('LIFECYCLE: Inference context: '+ctx);
+    WJR_DEBUG && console.log('LIFECYCLE: Inference context: '+ctx);
     ctx.imageSmoothingEnabled = true;
 
     return { canvas: canvas, ctx: ctx };
@@ -102,7 +104,7 @@ async function procPredict(imgElement) {
         ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
         const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
         const totalDrawTime = performance.now() - drawStartTime;
-        console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
+        WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
         const startTime = performance.now();
         const logits = tf.tidy(() => {
@@ -126,9 +128,9 @@ async function procPredict(imgElement) {
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
         const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
-        console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
+        WJR_DEBUG && console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
 
-        console.debug('ML: Prediction: '+syncedResult[0]);
+        WJR_DEBUG && console.debug('ML: Prediction: '+syncedResult[0]);
         return syncedResult;
     } finally {
         procReturnCtx(c);
@@ -161,6 +163,9 @@ PROC_logCanvas.imageSmoothingEnabled = true;
 
 async function procCommonLogImg(img, message)
 {
+    if(!WJR_DEBUG) {
+        return;
+    }
     return await procCommonLogImgGeneric(img, message, console.log);
 }
 
@@ -249,7 +254,7 @@ let PROC_timingInfoDumpCount = 0;
 
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
-    console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
+    WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
     let result = {
         type: 'scan',
         requestId: entry.requestId,
@@ -267,25 +272,25 @@ async function procPerformFiltering(entry) {
         if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
             url = URL.createObjectURL(blob);
             let img = await procLoadImagePromise(url);
-            console.debug('img loaded '+entry.requestId)
+            WJR_DEBUG && console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore;
                 if(PROC_timingInfoDumpCount<10) {
                     PROC_timingInfoDumpCount++;
                     let timingInfo = await tf.time(async ()=>sqrxrScore=await procPredict(img));
-                    console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
+                    WJR_DEBUG && console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
                 } else {
                     sqrxrScore = await procPredict(img);
                 }
                 if(procIsSafe(sqrxrScore)) {
-                    console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+                    WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
                     result.sqrxrScore = sqrxrScore;
                 } else {
-                    console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+                    WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
                     procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
@@ -301,14 +306,14 @@ async function procPerformFiltering(entry) {
                 PROC_processingSinceDataEndTimeTotal += totalSinceDataEndTime;
                 PROC_processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
                 PROC_processingCountTotal++;
-                console.debug('PERF: Processed in '+totalTime
+                WJR_DEBUG && console.debug('PERF: Processed in '+totalTime
                     +' (' +totalSinceDataEndTime+' data end, '
                     +totalSinceImageLoadTime+' img load) with an avg of '
                     +Math.round(PROC_processingTimeTotal/PROC_processingCountTotal)
                     +' ('+Math.round(PROC_processingSinceDataEndTimeTotal/PROC_processingCountTotal)
                     +' data end, ' + Math.round(PROC_processingSinceImageLoadTimeTotal/PROC_processingCountTotal)
                     +' img load) at a count of '+PROC_processingCountTotal);
-                console.debug('WEBREQ: Finishing '+entry.requestId);
+                WJR_DEBUG && console.debug('WEBREQ: Finishing '+entry.requestId);
             } else {
                 result.result = 'tiny';
                 result.imageBytes = await blob.arrayBuffer();
@@ -322,7 +327,7 @@ async function procPerformFiltering(entry) {
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
-        console.debug('WEBREQP: Finishing '+entry.requestId);
+        WJR_DEBUG && console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
             URL.revokeObjectURL(url);
         }
@@ -337,7 +342,7 @@ async function procAdvanceB64Filtering(dataStr, b64Filter, outputPort) {
 async function procCompleteB64Filtering(b64Filter, outputPort) {
     let startTime = performance.now();
     let fullStr = b64Filter.fullStr;
-    console.info('WEBREQ: base64 stop '+fullStr.length);
+    WJR_DEBUG && console.info('WEBREQ: base64 stop '+fullStr.length);
 
     //Unfortunately, str.replace cannot accept a promise as a function,
     //so we simply set 'em up and knock 'em down.
@@ -368,25 +373,25 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
         if(wasJSEncoded) {
             imageDataURI = imageDataURI.replace(/\\/g,''); //Unencoded, \ -> ''
             let newPrefixId = imageDataURI.slice(0,20);
-            console.debug('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
+            WJR_DEBUG && console.debug('WEBREQ: base64 image JS encoding detected: '+prefixId+'->'+newPrefixId);
         } else {
-            console.debug('WEBREQ: base64 image no extra encoding detected: '+prefixId);
+            WJR_DEBUG && console.debug('WEBREQ: base64 image no extra encoding detected: '+prefixId);
         }
         imageDataURI = imageDataURI.replace(/\\x3[dD]/g,'=');
         let imageToOutput = imageDataURI;
         let imageId = imageDataURI.slice(-20);
-        console.debug('WEBREQ: base64 image loading: '+imageId);
+        WJR_DEBUG && console.debug('WEBREQ: base64 image loading: '+imageId);
         let byteCount = imageDataURI.length*3/4;
 
         if(byteCount >= PROC_MIN_IMAGE_BYTES) {
-            console.info('WEBREQ: base64 image loaded: '+imageId);
+            WJR_DEBUG && console.info('WEBREQ: base64 image loaded: '+imageId);
             try
             {
                 let img = await procLoadImagePromise(imageDataURI);
                 if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                    console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+                    WJR_DEBUG && console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await procPredict(img);
-                    console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
+                    WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(procIsSafe(sqrxrScore)) {
                         outputPort.postMessage({
@@ -394,7 +399,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
+                        WJR_DEBUG && console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
                         outputPort.postMessage({
                             type:'stat',
@@ -403,16 +408,16 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                         });
                         let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
-                        console.log('ML: base64 filter Blocked: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
+                        WJR_DEBUG && console.log('ML: base64 filter Blocked: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                         procCommonWarnImg(img, 'BLOCKED IMG BASE64 '+procScoreToStr(sqrxrScore));
                         replacement = svgURI;
                     }
 
                     const totalTime = performance.now() - startTime;
-                    console.log(`PERF: Total processing in ${Math.floor(totalTime)}ms`);
+                    WJR_DEBUG && console.log(`PERF: Total processing in ${Math.floor(totalTime)}ms`);
                     if(replacement !== null) {
                         if(wasJSEncoded) {
-                            console.log('WEBREQ: base64 JS encoding replacement fixup for '+imageId);
+                            WJR_DEBUG && console.log('WEBREQ: base64 JS encoding replacement fixup for '+imageId);
                             replacement = replacement.replace(/\//g,'\\/'); //Unencoded / -> \/
                         }
                         imageToOutput = replacement;
@@ -423,7 +428,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                         result:'tiny',
                         requestId: b64Filter.requestId+'_'+imageId
                     });
-                    console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
+                    WJR_DEBUG && console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
                 }
             }
             catch(e)
@@ -466,13 +471,13 @@ let PROC_inFlight = 0;
 let PROC_scanStartCount = 0;
 let PROC_throttleRejectionCount = 0;
 async function procCheckProcess() {
-    console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
+    WJR_DEBUG && console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
         return;
     }
     if(PROC_inFlight > PROC_CTX_POOL_DEFAULT_SIZE) {
         PROC_throttleRejectionCount++;
-        console.log('QUEUE: Throttling ('+PROC_inFlight+')');
+        WJR_DEBUG && console.log('QUEUE: Throttling ('+PROC_inFlight+')');
         return;
     }
     //It is critical that PROC_inFlight always goes up AND DOWN, hence all the try/catch action.
@@ -483,7 +488,7 @@ async function procCheckProcess() {
         PROC_throttleRejectionCount = 0;
         let result;
         try {
-            console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
+            WJR_DEBUG && console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
             result = await procPerformFiltering(toProcess);
             
         } catch(ex) {
@@ -505,7 +510,7 @@ async function procCheckProcess() {
             console.error('ERROR: Processor failed to communicate to background: '+e);
         }
     } else {
-        console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
+        WJR_DEBUG && console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
     }
     await procCheckProcess();
 }
@@ -515,7 +520,7 @@ let PROC_watchdogThrottleRejectionCount = 0;
 let PROC_watchdogKickCount = 0;
 async function procWatchdog() {
     //Has the throttle count increased and scan start count stayed stuck?
-    console.info(`WATCHDOG: Processor queue check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
+    WJR_DEBUG && console.info(`WATCHDOG: Processor queue check - Current in flight ${PROC_inFlight}, queue length ${PROC_processingQueue.length}, throttle rejection count ${PROC_throttleRejectionCount}, scan start count ${PROC_scanStartCount}, kick count ${PROC_watchdogKickCount}`);
     if(PROC_watchdogThrottleRejectionCount > PROC_throttleRejectionCount
         && PROC_watchdogScanStartCount == PROC_scanStartCount) {
         try {
@@ -578,7 +583,7 @@ const procVideoLoadedData = (video,url,seekTime) => new Promise( (resolve, rejec
         if(isResolved) {
             return;
         }
-        console.warn(`MLV: Timed out`);
+        WJR_DEBUG && console.warn(`MLV: Timed out`);
         reject(`MLV: Timed out in ${VIDEO_LOAD_TIMEOUT_MS} ms`);
       }, VIDEO_LOAD_TIMEOUT_MS);
     video.src = url;
@@ -599,7 +604,7 @@ function procGetMp4Parsed(buffers) {
 
 function procGetVideoUrl(requestId, mimeType, buffers) {
     if(mimeType.toLowerCase().startsWith('video/mp2t')) {
-        console.info('MLV: URL MP2T detected for '+requestId+', mime '+mimeType);
+        WJR_DEBUG && console.info('MLV: URL MP2T detected for '+requestId+', mime '+mimeType);
         //remux that sucker to MP4 quick
         let transmuxer = new muxjs.mp4.Transmuxer();
         let tBuffers = [];
@@ -614,7 +619,7 @@ function procGetVideoUrl(requestId, mimeType, buffers) {
         let blob = new Blob(tBuffers, {type: 'video/mp4'});
         return URL.createObjectURL(blob);
     } else {
-        console.debug('MLV: URL default detected for '+requestId+', mime '+mimeType);
+        WJR_DEBUG && console.debug('MLV: URL default detected for '+requestId+', mime '+mimeType);
         let blob = new Blob(buffers, {type: mimeType});
         return URL.createObjectURL(blob);
     }
@@ -645,10 +650,10 @@ async function procGetVideoScanStatus(
         frames: []
     };
     try {
-        console.info('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        WJR_DEBUG && console.info('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
         inferenceVideo = document.createElement('video');
         inferenceVideo.onencrypted = function() {
-            console.log('MLV: encrypted: '+requestId); //This will fail :(
+            WJR_DEBUG && console.log('MLV: encrypted: '+requestId); //This will fail :(
         };
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
@@ -658,37 +663,37 @@ async function procGetVideoScanStatus(
             let seekTime = scanStart+scanStep*i;
             await procVideoLoadedData(inferenceVideo, videoUrl, seekTime);
             let maxTime = procGetMaxVideoTime(inferenceVideo); //important to do this AFTER loading
-            console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+procGetBufferedRangesString(inferenceVideo)+' vs readyState '+inferenceVideo.readyState+' vs seeking='+inferenceVideo.seeking+' for '+videoChainId+' at request '+requestId);
+            WJR_DEBUG && console.log('MLV: SCAN max time '+maxTime+' vs seek time '+seekTime+' vs current time '+inferenceVideo.currentTime+' vs ranges '+procGetBufferedRangesString(inferenceVideo)+' vs readyState '+inferenceVideo.readyState+' vs seeking='+inferenceVideo.seeking+' for '+videoChainId+' at request '+requestId);
             if(maxTime < seekTime) {
                 break; //invalid even though it tried to seek!
             }
 
-            console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
+            WJR_DEBUG && console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
             
             sqrxrScore = await procPredict(inferenceVideo);
             scanResults.scanCount++;
             let frameStatus;
             if(procIsSafe(sqrxrScore))
             {
-                console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                WJR_DEBUG && console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
                 await procCommonLogImg(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
                 frameStatus = 'pass';
             }
             else
             {
-                console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                WJR_DEBUG && console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
                 await procCommonWarnImg(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
                 frameStatus = 'block';
                 scanResults.blockCount++;
             }
             scanResults.frames.push({ 'time': seekTime, 'status': frameStatus});
             if(scanResults.blockCount >= scanBlockBailCount) {
-                console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId+' because of block count '+scanResults.blockCount);
+                WJR_DEBUG && console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId+' because of block count '+scanResults.blockCount);
                 break;
             }
         }
     } catch(e) {
-        console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
+        WJR_DEBUG && console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
         scanResults.error = e;
     } finally {
         URL.revokeObjectURL(videoUrl);
@@ -697,10 +702,14 @@ async function procGetVideoScanStatus(
 }
 
 async function procOnPortMessage(m) {
-    console.debug(`PROCV: Received message of type ${m.type}`);
+    WJR_DEBUG && console.debug(`PROCV: Received message of type ${m.type}`);
     switch(m.type) {
+        case 'set_all_logging': {
+            WJR_DEBUG = m.value;
+        }
+        break;
         case 'settings' : {
-            console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
+            WJR_DEBUG && console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
             PROC_isSilentModeEnabled = m.isSilentModeEnabled;
         }
         break;
@@ -712,11 +721,11 @@ async function procOnPortMessage(m) {
                 startTime: performance.now(),
                 buffers: []
             };
-            console.debug('PERF: '+PROC_processorId+' has open requests queue size '+Object.keys(PROC_openRequests).length);
+            WJR_DEBUG && console.debug('PERF: '+PROC_processorId+' has open requests queue size '+Object.keys(PROC_openRequests).length);
         }
         break;
         case 'ondata': {
-            console.debug('DATA: '+m.requestId);
+            WJR_DEBUG && console.debug('DATA: '+m.requestId);
             PROC_openRequests[m.requestId].buffers.push(m.data);
         }
         break;
@@ -754,7 +763,7 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'vid_chunk': {
-            console.log('DATAV: vid_start '+m.requestId+' with buffers length '+m.buffers.length+' for video chain '+m.videoChainId);
+            WJR_DEBUG && console.log('DATAV: vid_start '+m.requestId+' with buffers length '+m.buffers.length+' for video chain '+m.videoChainId);
             let scanResults = await procGetVideoScanStatus(
                 m.videoChainId,
                 m.requestId,
@@ -772,7 +781,7 @@ async function procOnPortMessage(m) {
             } catch(e) {
                 //Sometimes we can get a DataCloneError, presumably if the native exception can't be cloned
                 if(scanResults.error) {
-                    console.warn(`DATAV: Failed to post video result for ${m.requestId} because ${e}, try to avoid DataCloneError`);
+                    WJR_DEBUG && console.warn(`DATAV: Failed to post video result for ${m.requestId} because ${e}, try to avoid DataCloneError`);
                     scanResults.error = scanResults.error.message;
                     PROC_port.postMessage(scanResults);
                 } else {
@@ -782,7 +791,7 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'thresholdChange': {
-            console.log('PROC: Setting threshold '+m.threshold);
+            WJR_DEBUG && console.log('PROC: Setting threshold '+m.threshold);
             procSetThreshold(m.threshold);
         }
         break;
