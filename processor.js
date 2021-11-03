@@ -39,10 +39,10 @@ const procWingmanStartup = async () => {
     let warmup_result = null;
     let timingInfo = await tf.time(()=>warmup_result = PROC_wingman.predict(dummy_data));
     WJR_DEBUG && console.log(warmup_result);
-    WJR_DEBUG && console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
+    console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
     warmup_result[0].dispose();
     warmup_result[1].dispose();
-    WJR_DEBUG && console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
+    console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
 };
 
 
