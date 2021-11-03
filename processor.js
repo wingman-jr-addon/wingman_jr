@@ -198,7 +198,7 @@ let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCA
 let PROC_isSilentModeEnabled = true;
 async function procCommonCreateSvg(img, sqrxrScore, dataURL)
 {
-    let threshold = sqrxrScore[1][0];
+    let threshold = sqrxrScore[0][0];
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     if(PROC_isSilentModeEnabled) {
@@ -231,15 +231,15 @@ function procSetThreshold(threshold) {
 }
 
 function procScoreToStr(sqrxrScore) {
-    return sqrxrScore[1][0].toFixed(5) + ' ('+
-        sqrxrScore[0][0].toFixed(2)+', '+
-        sqrxrScore[0][1].toFixed(2)+', '+
-        sqrxrScore[0][2].toFixed(2)+', '+
-        sqrxrScore[0][3].toFixed(2)+')';
+    return sqrxrScore[0][0].toFixed(5) + ' ('+
+        sqrxrScore[1][0].toFixed(2)+', '+
+        sqrxrScore[1][1].toFixed(2)+', '+
+        sqrxrScore[1][2].toFixed(2)+', '+
+        sqrxrScore[1][3].toFixed(2)+')';
 }
 
 function procIsSafe(sqrxrScore) {
-    return sqrxrScore[1][0] < PROC_checkThreshold;
+    return sqrxrScore[0][0] < PROC_checkThreshold;
 }
 
 const procLoadImagePromise = url => new Promise( (resolve, reject) => {
