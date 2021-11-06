@@ -20,6 +20,7 @@ const procWingmanStartup = async () => {
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
     }
+    tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
     WJR_DEBUG && console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
