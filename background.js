@@ -1,3 +1,5 @@
+let WJR_DEBUG = false;
+
 //Ensure browser cache isn't going to cause us problems
 browser.webRequest.handlerBehaviorChanged();
 //User feedback
@@ -28,10 +30,10 @@ function bkInitialize() {
 }
 
 function bkOnClientConnected(port) {
-    console.log(`LIFECYCLE: Processor ${port.name} connected.`);
+    WJR_DEBUG && console.log(`LIFECYCLE: Processor ${port.name} connected.`);
     let registration = { port: port, tabId: null, processorId: port.name, backend: 'unknown' };
     BK_connectedClients[registration.processorId] = registration;
-    console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
+    WJR_DEBUG && console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
     bkNotifyThreshold();
     bkBroadcastProcessorSettings();
@@ -47,9 +49,9 @@ function bkGetNextProcessor() {
         return null;
     }
     //TODO Right now we only use primary.
-    for (let key of Object.keys(BK_connectedClients)) {
-        if (BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
-            console.debug(`BACKEND: Selecting client ${key}`);
+    for(let key of Object.keys(BK_connectedClients)) {
+        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
+            WJR_DEBUG && console.debug(`BACKEND: Selecting client ${key}`);
             return BK_connectedClients[key];
         }
     }
@@ -77,7 +79,7 @@ browser.runtime.onConnect.addListener(bkOnClientConnected);
 let BK_processorBackendPreference = [];
 
 function bkReloadProcessors() {
-    console.log('LIFECYCLE: Cleaning up old processors.');
+    WJR_DEBUG && console.log('LIFECYCLE: Cleaning up old processors.');
     let keys = Object.keys(BK_connectedClients);
     for (let key of keys) {
         let client = BK_connectedClients[key];
@@ -85,29 +87,30 @@ function bkReloadProcessors() {
         delete BK_connectedClients[key];
     }
 
-    console.log('LIFECYCLE: Spawning new processors.');
-    for (let i = 0; i < BK_processorBackendPreference.length; i++) {
+
+    WJR_DEBUG && console.log('LIFECYCLE: Spawning new processors.');
+    for(let i=0; i<BK_processorBackendPreference.length; i++) {
         let backend = BK_processorBackendPreference[i];
-        console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
-        browser.tabs.create({ url: `/processor.html?backend=${backend}&id=${backend}-1`, active: false })
-            .then(async tab => await browser.tabs.hide(tab.id));
+        WJR_DEBUG && console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
+        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+            .then(async tab=>await browser.tabs.hide(tab.id));
     }
-    console.log('LIFECYCLE: New processors are launching!');
+    WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
 
 
 function bkOnProcessorMessage(m) {
     switch (m.type) {
         case 'scan': {
-            console.debug('PROC: ' + m);
-            if (m.requestId.startsWith('crash')) {
+            WJR_DEBUG && console.debug('PROC: '+m);
+            if(m.requestId.startsWith('crash')) {
                 bkHandleCrashDetectionResult(m);
             } else {
                 let filter = BK_openFilters[m.requestId];
                 filter.write(m.imageBytes);
                 filter.close();
                 delete BK_openFilters[m.requestId];
-                console.debug('OPEN FILTERS: ' + Object.keys(BK_openFilters).length);
+                WJR_DEBUG && console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
             }
         }
             break;
@@ -128,7 +131,7 @@ function bkOnProcessorMessage(m) {
         }
             break;
         case 'stat': {
-            console.debug('STAT: ' + m.requestId + ' ' + m.result);
+            WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
             statusCompleteImageCheck(m.requestId, m.result);
             switch (m.result) {
                 case 'pass': {
@@ -143,8 +146,8 @@ function bkOnProcessorMessage(m) {
         }
             break;
         case 'registration': {
-            console.dir(BK_connectedClients);
-            console.log(`LIFECYCLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
+            WJR_DEBUG && console.dir(BK_connectedClients);
+            WJR_DEBUG && console.log(`LIFECYCLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
             BK_connectedClients[m.processorId].backend = m.backend;
             BK_connectedClients[m.processorId].tabId = m.tabId;
         }
@@ -234,10 +237,11 @@ function bkCheckZone() {
 
 var BK_zoneThreshold = ROC_neutralRoc.threshold;
 var BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
-console.log("Zone precision is: " + BK_zonePrecision);
+WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
 var BK_zone = 'neutral';
-function bkSetZone(newZone) {
-    console.log('Zone request to: ' + newZone);
+function bkSetZone(newZone)
+{
+    WJR_DEBUG && console.log('Zone request to: '+newZone);
     let didZoneChange = false;
     switch (newZone) {
         case 'trusted':
@@ -246,7 +250,7 @@ function bkSetZone(newZone) {
             statusSetImageZoneTrusted();
             BK_zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now trusted!');
+            WJR_DEBUG && console.log('Zone is now trusted!');
             break;
         case 'neutral':
             BK_zoneThreshold = ROC_neutralRoc.threshold;
@@ -254,7 +258,7 @@ function bkSetZone(newZone) {
             statusSetImageZoneNeutral();
             BK_zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now neutral!');
+            WJR_DEBUG && console.log('Zone is now neutral!');
             break;
         case 'untrusted':
             BK_zoneThreshold = ROC_untrustedRoc.threshold;
@@ -262,11 +266,11 @@ function bkSetZone(newZone) {
             statusSetImageZoneUntrusted();
             BK_zone = newZone;
             didZoneChange = true;
-            console.log('Zone is now untrusted!')
+            WJR_DEBUG && console.log('Zone is now untrusted!')
             break;
     }
-    if (didZoneChange) {
-        console.log("Zone precision is: " + BK_zonePrecision);
+    if(didZoneChange) {
+        WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
         bkClearPredictionBuffer();
         bkNotifyThreshold();
     }
@@ -292,8 +296,8 @@ async function bkWatchdogGeneric(watchdogName, whichFilters, cleanupAction) {
     let nowish = performance.now();
     let cleaned = [];
     let watchList = [];
-    console.info(`WATCHDOG: Stuck ${watchdogName} check - Current open filters count: ${keysSnapshot.length} Watchdog kick: ${BK_watchdogKickCount} Total cleaned up: ${BK_watchdogCleanupCount}`);
-    for (let key of keysSnapshot) {
+    WJR_DEBUG && console.info(`WATCHDOG: Stuck ${watchdogName} check - Current open filters count: ${keysSnapshot.length} Watchdog kick: ${BK_watchdogKickCount} Total cleaned up: ${BK_watchdogCleanupCount}`);
+    for(let key of keysSnapshot) {
         let ageMs = whichFilters[key] ? nowish - whichFilters[key].stopTime : 0;
         if (ageMs >= 45000) {
             BK_watchdogCleanupCount++;
@@ -335,8 +339,8 @@ const CRASH_IDLE_SECONDS = 3 * 60;
 
 async function bkCrashDetectionWatchdog() {
     let idleState = await browser.idle.queryState(CRASH_IDLE_SECONDS)
-    if (idleState != 'active') {
-        console.log('CRASH: User not active, ceasing crash check.');
+    if(idleState != 'active') {
+        WJR_DEBUG && console.log('CRASH: User not active, ceasing crash check.');
         return;
     }
     let pseudoRequestId = `crash-detection-${CRASH_DETECTION_COUNT}`;
@@ -367,7 +371,7 @@ async function bkCrashDetectionWatchdog() {
 function bkHandleCrashDetectionResult(m) {
     if (!CRASH_DETECTION_EXPECTED_RESULT) {
         CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
-        console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        WJR_DEBUG && console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
     } else {
         let actual = JSON.stringify(m.sqrxrScore);
         if (actual != CRASH_DETECTION_EXPECTED_RESULT) {
@@ -378,7 +382,7 @@ function bkHandleCrashDetectionResult(m) {
                 browser.runtime.reload();
             }
         } else {
-            console.log(`CRASH: Detection passed`);
+            WJR_DEBUG && console.log(`CRASH: Detection passed`);
         }
     }
 }
@@ -390,7 +394,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
-        console.log('WEBREQ: Normal whitelist ' + details.url);
+        WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -404,7 +408,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
             break;
         }
     }
-    console.debug('WEBREQ: start headers ' + details.requestId);
+    WJR_DEBUG && console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -421,8 +425,8 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         if (dataStartTime == null) {
             dataStartTime = performance.now();
         }
-        console.debug('WEBREQ: data ' + details.requestId);
-        processor.postMessage({
+        WJR_DEBUG && console.debug('WEBREQ: data '+details.requestId);
+        processor.postMessage({ 
             type: 'ondata',
             requestId: details.requestId,
             data: event.data
@@ -430,8 +434,9 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     }
 
     filter.onerror = e => {
-        try {
-            console.debug('WEBREQ: error ' + details.requestId);
+        try
+        {
+            WJR_DEBUG && console.debug('WEBREQ: error '+details.requestId);
             processor.postMessage({
                 type: 'onerror',
                 requestId: details.requestId
@@ -444,7 +449,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     }
 
     filter.onstop = async event => {
-        console.debug('WEBREQ: onstop ' + details.requestId);
+        WJR_DEBUG && console.debug('WEBREQ: onstop '+details.requestId);
         filter.stopTime = performance.now();
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
@@ -460,7 +465,7 @@ async function bkDirectTypedUrlListener(details) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
-        console.log('WEBREQ: Direct typed whitelist ' + details.url);
+        WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
     //Try to see if there is an image MIME type
@@ -468,9 +473,9 @@ async function bkDirectTypedUrlListener(details) {
         let header = details.responseHeaders[i];
         if (header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
-            if (mimeType.startsWith('image/')) {
-                console.log('WEBREQ: Direct URL: Forwarding based on mime type: ' + mimeType + ' for ' + details.url);
-                return bkImageListener(details, true);
+            if(mimeType.startsWith('image/')) {
+                WJR_DEBUG && console.log('WEBREQ: Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
+                return bkImageListener(details,true);
             }
         }
     }
@@ -484,8 +489,8 @@ BK_shouldUseDnsBlocking = false;
 
 async function bkDnsBlockListener(details) {
     let dnsResult = await dnsIsDomainOk(details.url);
-    if (!dnsResult) {
-        console.log('DNS: DNS Blocked ' + details.url);
+    if(!dnsResult) {
+        WJR_DEBUG && console.log('DNS: DNS Blocked '+details.url);
         return { cancel: true };
     }
     return details;
@@ -493,24 +498,24 @@ async function bkDnsBlockListener(details) {
 
 function bkSetDnsBlocking(onOrOff) {
     let effectiveOnOrOff = onOrOff && BK_isEnabled;
-    console.log('CONFIG: DNS blocking set request: ' + onOrOff + ', effective value ' + effectiveOnOrOff);
+    WJR_DEBUG && console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
     let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(bkDnsBlockListener);
     if (effectiveOnOrOff != isCurrentlyOn) {
         BK_shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
-        if (effectiveOnOrOff && !isCurrentlyOn) {
-            console.log('CONFIG: DNS Adding DNS block listener')
+        if(effectiveOnOrOff && !isCurrentlyOn) {
+            WJR_DEBUG && console.log('CONFIG: DNS Adding DNS block listener')
             browser.webRequest.onBeforeRequest.addListener(
                 bkDnsBlockListener,
                 { urls: ["<all_urls>"], types: ["image", "imageset", "media"] },
                 ["blocking"]
             );
         } else if (!effectiveOnOrOff && isCurrentlyOn) {
-            console.log('CONFIG: DNS Removing DNS block listener')
+            WJR_DEBUG && console.log('CONFIG: DNS Removing DNS block listener')
             browser.webRequest.onBeforeRequest.removeListener(bkDnsBlockListener);
         }
-        console.log('CONFIG: DNS blocking is now: ' + onOrOff);
+        WJR_DEBUG && console.log('CONFIG: DNS blocking is now: '+onOrOff);
     } else {
-        console.log('CONFIG: DNS blocking is already correctly set.');
+        WJR_DEBUG && console.log('CONFIG: DNS blocking is already correctly set.');
     }
 }
 
@@ -529,10 +534,10 @@ async function bkBase64ContentListener(details) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
-        console.log('WEBREQ: Base64 whitelist ' + details.url);
+        WJR_DEBUG && console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
-    console.debug('WEBREQ: base64 headers ' + details.requestId + ' ' + details.url);
+    WJR_DEBUG && console.debug('WEBREQ: base64 headers '+details.requestId+' '+details.url);
     // The received data is a stream of bytes. In order to do text-based
     // modifications, it is necessary to decode the bytes into a string
     // using the proper character encoding, do any modifications, then
@@ -617,31 +622,31 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         }
     }
     if (headerIndex == -1) {
-        console.debug('CHARSET: No Content-Type header detected for ' + details.url + ', adding one.');
-        headerIndex = details.responseHeaders.length;
-        contentType = 'text/html';
-        details.responseHeaders.push(
-            {
-                "name": "Content-Type",
-                "value": "text/html"
-            }
-        );
+      WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
+      headerIndex = details.responseHeaders.length;
+      contentType = 'text/html';
+      details.responseHeaders.push(
+        {
+          "name": "Content-Type",
+          "value":"text/html"
+        }
+      );
     }
 
     let baseType;
-    if (contentType.trim().startsWith('text/html')) {
-        baseType = 'text/html';
-        console.debug('CHARSET: Detected base type was ' + baseType);
-    } else if (contentType.trim().startsWith('application/xhtml+xml')) {
-        baseType = 'application/xhtml+xml';
-        console.debug('CHARSET: Detected base type was ' + baseType);
-    } else if (contentType.trim().startsWith('image/')) {
-        console.debug('CHARSET: Base64 listener is ignoring ' + details.requestId + ' because it is an image/ MIME type');
-        return;
+    if(contentType.trim().startsWith('text/html')) {
+      baseType = 'text/html';
+      WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
+    } else if(contentType.trim().startsWith('application/xhtml+xml')) {
+      baseType = 'application/xhtml+xml';
+      WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
+    } else if(contentType.trim().startsWith('image/')) {
+      WJR_DEBUG && console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      return;
     } else {
-        baseType = 'text/html';
-        console.debug('CHARSET: The Content-Type was ' + contentType + ', not text/html or application/xhtml+xml.');
-        return;
+      baseType = 'text/html';
+      WJR_DEBUG && console.debug('CHARSET: The Content-Type was '+contentType+', not text/html or application/xhtml+xml.');
+      return;
     }
 
     // It is important to detect the charset to correctly initialize TextDecoder or
@@ -657,7 +662,7 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
 
     if (detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
-        console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+        WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
     }
     details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
 
@@ -765,42 +770,42 @@ function bkUnregisterAllCallbacks() {
 }
 
 function bkRefreshCallbackRegistration() {
-    console.log('CONFIG: Callback wireup refresh start.');
+    WJR_DEBUG && console.log('CONFIG: Callback wireup refresh start.');
     bkUnregisterAllCallbacks();
     if (BK_isEnabled) {
         bkRegisterAllCallbacks();
     }
     bkRefreshDnsBlocking();
-    console.log('CONFIG: Callback wireup refresh complete!');
+    WJR_DEBUG && console.log('CONFIG: Callback wireup refresh complete!');
 }
 
 let BK_isEnabled = false;
 function bkSetEnabled(isOn) {
-    console.log('CONFIG: Setting enabled to ' + isOn);
-    if (isOn == BK_isEnabled) {
+    WJR_DEBUG && console.log('CONFIG: Setting enabled to '+isOn);
+    if(isOn == BK_isEnabled) {
         return;
     }
-    console.log('CONFIG: Handling callback wireup change.');
-    if (isOn) {
+    WJR_DEBUG && console.log('CONFIG: Handling callback wireup change.');
+    if(isOn) {
         bkRegisterAllCallbacks();
     } else {
         bkUnregisterAllCallbacks();
     }
     BK_isEnabled = isOn;
     bkRefreshDnsBlocking();
-    console.log('CONFIG: Callback wireups changed!');
+    WJR_DEBUG && console.log('CONFIG: Callback wireups changed!');
 }
 
 let BK_isVideoEnabled = true;
 function bkSetVideoEnabled(isOn) {
-    console.log('CONFIG: Setting video enabled to ' + isOn);
-    if (isOn == BK_isVideoEnabled) {
+    WJR_DEBUG && console.log('CONFIG: Setting video enabled to '+isOn);
+    if(isOn == BK_isVideoEnabled) {
         return;
     }
-    console.log('CONFIG: Handling video callback wireup change.');
+    WJR_DEBUG && console.log('CONFIG: Handling video callback wireup change.');
     BK_isVideoEnabled = isOn;
     bkRefreshCallbackRegistration();
-    console.log('CONFIG: Video callback wireups changed!');
+    WJR_DEBUG && console.log('CONFIG: Video callback wireups changed!');
 }
 
 let BK_isOnOffSwitchShown = false;
@@ -827,14 +832,19 @@ function bkLoadBackendSettings() {
         for (let i = 0; i < backends.length && !hasChanged; i++) {
             hasChanged = backends[i] != BK_processorBackendPreference[i];
         }
-        if (hasChanged) {
-            console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
+        if(hasChanged) {
+            WJR_DEBUG && console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
             BK_processorBackendPreference = backends;
             bkReloadProcessors();
         } else {
-            console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
+            WJR_DEBUG && console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
         }
     });
+}
+
+function bkSetAllLogging(onOrOff) {
+    WJR_DEBUG = onOrOff;
+    bkBroadcastMessageToProcessors({ "type": "set_all_logging", "value" : onOrOff});
 }
 
 function bkHandleMessage(request, sender, sendResponse) {

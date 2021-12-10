@@ -85,7 +85,7 @@ async function SM_findBestMatchImage(img) {
     }
 
     let totalTimeMs = performance.now()-startTime;
-    console.debug(`SILENT: Found best match in ${totalTimeMs}ms for image ${img.width}x${img.height} using best match ${bestMatch.w}x${bestMatch.h} of name ${bestMatch.file}`);
+    WJR_DEBUG && console.debug(`SILENT: Found best match in ${totalTimeMs}ms for image ${img.width}x${img.height} using best match ${bestMatch.w}x${bestMatch.h} of name ${bestMatch.file}`);
 
     return bestMatch;
 }
@@ -113,11 +113,11 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
         let srcTargetHeight = srcImg.height * scale;
         //Source height is greater
         if(srcImg.height > targetSrcHeight) {
-            console.debug(`SILENT: Format Landscape, src height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
+            WJR_DEBUG && console.debug(`SILENT: Format Landscape, src height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
             let srcHeightDiff = srcImg.height - targetSrcHeight;
             targetCtx.drawImage(srcImg, 0, srcHeightDiff/2.0, srcImg.width, srcImg.height-srcHeightDiff, 0, 0, targetWidth, targetHeight);
         } else {
-            console.debug(`SILENT: Format Landscape, target height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
+            WJR_DEBUG && console.debug(`SILENT: Format Landscape, target height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
             let targetHeightDiff = targetHeight - srcTargetHeight;
             targetCtx.drawImage(srcImg, 0, targetHeightDiff/2.0, targetWidth, targetHeight - targetHeightDiff); 
         }
@@ -126,11 +126,11 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
         let targetSrcWidth = targetWidth / scale;
         let srcTargetWidth = srcImg.width * scale;
         if(srcImg.width > targetSrcWidth) {
-            console.debug(`SILENT: Format portrait, src width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
+            WJR_DEBUG && console.debug(`SILENT: Format portrait, src width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
             let srcWidthDiff = srcImg.width - targetSrcWidth;
             targetCtx.drawImage(srcImg, srcWidthDiff/2.0, 0, srcImg.width-srcWidthDiff, srcImg.height, 0, 0, targetWidth, targetHeight);
         } else {
-            console.debug(`SILENT: Format portrait, target width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
+            WJR_DEBUG && console.debug(`SILENT: Format portrait, target width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
             let targetWidthDiff = targetWidth - srcTargetWidth;
             targetCtx.drawImage(srcImg, targetWidthDiff/2.0, 0, targetWidth-targetWidthDiff, targetHeight);
         }
@@ -140,7 +140,7 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
 }
 
 async function SM_getReplacementSVG(img, visibleScore) {
-    console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
+    WJR_DEBUG && console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
 
     let bestMatch = await SM_findBestMatchImage(img);
     let replacementRawImage = await smLoadImagePromise(bestMatch.file);
