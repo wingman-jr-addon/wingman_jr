@@ -116,7 +116,6 @@ function statusInitialize() {
 
 function statusOnLoaded() {
     browser.browserAction.setTitle({title: "Wingman Jr."});
-    statusSetImageZoneNeutral();
 }
 
 function statusSetImageZoneTrusted() {
