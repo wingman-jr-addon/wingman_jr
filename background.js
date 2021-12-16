@@ -333,7 +333,9 @@ fetch('silent_data/zoe-reeve-ijRuGjKpBcg-unsplash.jpg')
     });
 let CRASH_DETECTION_EXPECTED_RESULT;
 let CRASH_DETECTION_COUNT = 0;
+let CRASH_NO_PROCESSOR_COUNT = 0;
 let CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
+const CRASH_NO_PROCESSOR_RESTART_THRESHOLD = 3;
 const CRASH_BAD_STATE_RESTART_THRESHOLD = 2;
 const CRASH_IDLE_SECONDS = 3 * 60;
 
@@ -347,25 +349,39 @@ async function bkCrashDetectionWatchdog() {
     CRASH_DETECTION_COUNT++;
     let processorReq = bkGetNextProcessor();
     if (!processorReq) {
+        CRASH_NO_PROCESSOR_COUNT++;
+        if(CRASH_NO_PROCESSOR_COUNT >= CRASH_NO_PROCESSOR_RESTART_THRESHOLD) {
+            console.error(`CRASH: No processors found after extended time - reloading.`);
+            browser.runtime.reload();
+        }
         console.warn(`CRASH: Processors not yet ready.`);
         return;
     }
-    let processor = processorReq.port;
-    processor.postMessage({
-        type: 'start',
-        requestId: pseudoRequestId,
-        mimeType: 'image/jpeg',
-        url: pseudoRequestId
-    });
-    processor.postMessage({
-        type: 'ondata',
-        requestId: pseudoRequestId,
-        data: CRASH_DETECTION_IMAGE
-    });
-    processor.postMessage({
-        type: 'onstop',
-        requestId: pseudoRequestId
-    });
+    try {
+        let processor = processorReq.port;
+        processor.postMessage({
+            type: 'start',
+            requestId: pseudoRequestId,
+            mimeType: 'image/jpeg',
+            url: pseudoRequestId
+        });
+        processor.postMessage({
+            type: 'ondata',
+            requestId: pseudoRequestId,
+            data: CRASH_DETECTION_IMAGE
+        });
+        processor.postMessage({
+            type: 'onstop',
+            requestId: pseudoRequestId
+        });
+    } catch(e) {
+        CRASH_NO_PROCESSOR_COUNT++;
+        if(CRASH_NO_PROCESSOR_COUNT >= CRASH_NO_PROCESSOR_RESTART_THRESHOLD) {
+            console.error(`CRASH: Failure to post to processor after extended time - reloading.`);
+            browser.runtime.reload();
+        }
+        console.error(`CRASH: Failure to post to processor.`);
+    }
 }
 
 function bkHandleCrashDetectionResult(m) {
