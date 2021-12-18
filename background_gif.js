@@ -1,3 +1,7 @@
+let GIF_PLACEHOLDER = null;
+fetch('wingman_placeholder.gif')
+.then(async r => GIF_PLACEHOLDER = await r.arrayBuffer());
+
 function gifHex(arrayBuffer) {
     return Array.prototype.map.call(
         new Uint8Array(arrayBuffer),
@@ -306,8 +310,6 @@ async function gifListener(details) {
     let totalErrorCount = 0;
 
     let status = 'pass_so_far'; //pass_so_far, scanning, pass, block, error
-    let flushIndexStart, flushIndexEnd = 0; //end exclusive
-    let flushScanStartSize = 0;
     let parsedGif = null;
     let scanAndTransitionPromise;
 
@@ -375,11 +377,9 @@ async function gifListener(details) {
                         console.warn(`DEFG: BLOCK ${details.requestId} for buffers ${parseRange} with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
 
-                        let placeholder = new Uint8Array(1); //TODO
+                        let placeholder = GIF_PLACEHOLDER ?? new Uint8Array();
+                        filter.write(placeholder);
                         
-                        if(flushIndexStart == 0) {
-                            filter.write(placeholder);
-                        }
                         //Ideally you would close the filter here, BUT... some systems will keep retrying by picking up
                         //at the last location. So, we will be sneaky and if there are bytes left we will just stuff
                         //with random data.
