@@ -1,5 +1,4 @@
-function gifHex(arrayBuffer)
-{
+function gifHex(arrayBuffer) {
     return Array.prototype.map.call(
         new Uint8Array(arrayBuffer),
         n => n.toString(16).padStart(2, "0")
@@ -55,13 +54,13 @@ function gifTryGetDataSubblocksLength(parsedGif, si) {
     }
     let i = si;
     while(b[i] != 0) {
-        i += b[i];
+        i += b[i] + 1;
         //Couldn't read the full block of data
         if( i >= b.byteLength) {
             return -1;
         }
     }
-    return (si - i) + 1; //Even if the very first byte is 0, it is still length 1
+    return (i - si) + 1; //Even if the very first byte is 0, it is still length 1
 }
 
 function gifTryGetLIDLength(parsedGif, si) {
@@ -94,8 +93,9 @@ function gifTryGetLIDLength(parsedGif, si) {
         return -1;
     }
     let bitWidth = b[i];                i+=1;
+    console.log(`DEFG: Trying subblocks at ${i}`);
     let subBlockSize = gifTryGetDataSubblocksLength(parsedGif, i);
-    if (i + subBlockSize >= b.byteLength) {
+    if (subBlockSize == -1 || i + subBlockSize >= b.byteLength) {
         return -1;
     }
     return (i + subBlockSize) - si;
@@ -134,83 +134,102 @@ function parseGifFrames(allBuffers, parsedGif) {
         };
     }
 
-    // Check if we need to update our data array
-    let offset = 0;
-    for(let buffer of allBuffers) {
-        offset += buffer.byteLength;
-    }
-    if(offset > data.byteLength) {
-        parsedGif.data = vidConcatBuffersToUint8Array(allBuffers);
-    }
+    try {
 
-    let i = parsedGif.parsedIndex;
-    let b = parsedGif.data;
-
-    //If not yet created, extract GIF init frame
-    if(parsedGif.parsedIndex == 0) {
-        let signature = gifReadUint24(b, i);        i+=3;
-        let version = gifReadUint24(b, i);          i+=3;
-        parsedGif.screenWidth = gifReadUint16(b,i); i+=2;
-        parsedGif.screenHeight = gifReadUint16(b,i);i+=2;
-        let packed = b[i];                          i+=1;
-        let bgColor = b[i];                         i+=1;
-        let aspectRatio = b[i];                     i+=1;
-
-        let isGlobalColorTablePresent = (packed & 0x80) > 0;
-        if (isGlobalColorTablePresent) {
-            let sizeOfGlobalColorTable = packed & 0x7;
-            let numberOfGlobalColorTableEntries = 1 << (sizeOfGlobalColorTable + 1);
-            i += numberOfGlobalColorTableEntries * 3; //RGB pixel
+        // Check if we need to update our data array
+        let offset = 0;
+        for(let buffer of allBuffers) {
+            offset += buffer.byteLength;
         }
-        parsedGif.header = b.slice(0, i);
-        parsedGif.parsedIndex = i;
-    }
-
-    const PEEK_TRAILER = 0x3B;
-    const PEEK_LID = 0x2C;
-    const PEEK_EXT = 0x21;
-
-    while(i < b.byteLength && b[i] != PEEK_TRAILER) {
-        let peekByte = b[i]; i+=1;
-        switch(peekByte) {
-            // Local Image Descriptor + Data Blocks
-            case PEEK_LID:
-                let lidLength = gifTryGetLIDLength(parsedGif, i);
-                if(lidLength > -1) {
-                    //Create a standalone GIF by placing the local
-                    //image into a file with header + frame + trailer
-                    //Note this doesn't cover the case where a frame
-                    //is smaller than the whole image, but the vast
-                    //majority of GIFs now are just full images
-                    //separated by Graphics Control Extensions
-                    let standaloneGif = gifConcatBuffersToUint8Array(
-                                parsedGif.header.buffer,
-                                b.slice(i, i+lidLength),
-                                Uint8Array.from([PEEK_TRAILER])
-                            );
-                    parsedGif.unscannedFrames.push(standaloneGif);
-                    i += lidLength;
-                    parsedGif.parsedIndex = i;
-                }
-                break;
-            // Extension - just skip
-            case PEEK_EXT:
-                let extLength = gifTryGetExtLength(parsedGif, i);
-                if(extLength > -1) {
-                    i += extLength;
-                    parsedGif.parsedIndex = i;
-                }
-                break;
+        if(offset > parsedGif.data.byteLength) {
+            console.log(`DEFG: rebuilding array for length ${offset} and allBuffers count ${allBuffers.length} and parsed index ${parsedGif.parsedIndex}`);
+            parsedGif.data = vidConcatBuffersToUint8Array(allBuffers);
         }
+
+        let i = parsedGif.parsedIndex;
+        let b = parsedGif.data;
+
+        //If not yet created, extract GIF init frame
+        if(parsedGif.parsedIndex == 0) {
+            let signature = gifReadUint24(b, i);        i+=3;
+            let version = gifReadUint24(b, i);          i+=3;
+            parsedGif.screenWidth = gifReadUint16(b,i); i+=2;
+            parsedGif.screenHeight = gifReadUint16(b,i);i+=2;
+            let packed = b[i];                          i+=1;
+            let bgColor = b[i];                         i+=1;
+            let aspectRatio = b[i];                     i+=1;
+
+            let isGlobalColorTablePresent = (packed & 0x80) > 0;
+            if (isGlobalColorTablePresent) {
+                let sizeOfGlobalColorTable = packed & 0x7;
+                let numberOfGlobalColorTableEntries = 1 << (sizeOfGlobalColorTable + 1);
+                i += numberOfGlobalColorTableEntries * 3; //RGB pixel
+            }
+            parsedGif.header = b.slice(0, i);
+            parsedGif.parsedIndex = i;
+        }
+
+        const PEEK_TRAILER = 0x3B;
+        const PEEK_LID = 0x2C;
+        const PEEK_EXT = 0x21;
+
+        let wasParseFailure = false;
+
+        while(!wasParseFailure && i < b.byteLength && b[i] != PEEK_TRAILER) {
+            let peekByte = b[i]; i+=1;
+            switch(peekByte) {
+                // Local Image Descriptor + Data Blocks
+                case PEEK_LID:
+                    console.debug(`DEFG: Found LID at ${i-1}!`);
+                    let lidLength = gifTryGetLIDLength(parsedGif, i);
+                    if(lidLength > -1) {
+                        //Create a standalone GIF by placing the local
+                        //image into a file with header + frame + trailer
+                        //Note this doesn't cover the case where a frame
+                        //is smaller than the whole image, but the vast
+                        //majority of GIFs now are just full images
+                        //separated by Graphics Control Extensions
+                        let standaloneGif = gifConcatBuffersToUint8Array([
+                                    parsedGif.header.buffer,
+                                    b.slice(i-1, i+lidLength).buffer,
+                                    Uint8Array.from([PEEK_TRAILER]).buffer
+                                ]);
+                        console.log(`DEFG: GIF standalone `+gifHex(standaloneGif));
+                        parsedGif.unscannedFrames.push(standaloneGif);
+                        i += lidLength;
+                        parsedGif.parsedIndex = i;
+                        console.debug(`DEFG: Parsed LID - results now ${parsedGif.unscannedFrames.length} and parsed index ${parsedGif.parsedIndex}`);
+                    } else {
+                        console.debug(`DEFG: Could not fully parse LID - results now ${parsedGif.unscannedFrames.length}`);
+                        wasParseFailure = true;
+                    }
+                    break;
+                // Extension - just skip
+                case PEEK_EXT:
+                    console.debug('DEFG: Found Extension!');
+                    let extLength = gifTryGetExtLength(parsedGif, i);
+                    if(extLength > -1) {
+                        i += extLength;
+                        parsedGif.parsedIndex = i;
+                    } else {
+                        wasParseFailure = true;
+                    }
+                    break;
+            }
+        }
+    } catch(e) {
+        console.error('DEFG: Error parsing gif '+e);
     }
+
+    return parsedGif;
 }
 
 
 let GIF_OPEN_REQUESTS = { };
-async function gifOnGifFrame(m) {
-    let openRequest = GIF_OPEN_REQUESTS[m.gifRequestId];
+function gifOnGifFrame(m) {
+    let openRequest = GIF_OPEN_REQUESTS[m.requestId];
     if(openRequest !== undefined) {
-        delete GIF_OPEN_REQUESTS[m.gifRequestId];
+        delete GIF_OPEN_REQUESTS[m.requestId];
         openRequest.resolve(m);
     } //TODO reject based on error handling
 }
@@ -219,20 +238,22 @@ async function gifOnGifFrame(m) {
 async function gifPerformGifFrameScan(
     processor,
     gifRequestId,
+    gifFrame,
     url /* informational */
 ) {
     let p = new Promise(function(resolve, reject) {
         GIF_OPEN_REQUESTS[gifRequestId] = {
-            gifRequestId: gifRequestId, 
+            requestId: gifRequestId, 
             resolve: resolve,
             reject: reject
         };
     });
     processor.port.postMessage({
         type: 'gif_frame',
-        requestId: requestId,
+        requestId: gifRequestId,
         url: url,
-        buffer: buffer,
+        buffers: [gifFrame.buffer],
+        mimeType: 'image/gif'
     })
     return p;
 }
@@ -249,15 +270,16 @@ async function gifListener(details) {
         }
     }
     catch(e) {
-        console.warn('WEBREQV: Weird error parsing content-length '+e);
+        console.warn('WEBREQG: Weird error parsing content-length '+e);
     }
 
-    WJR_DEBUG && console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
+    let mimeType = 'image/gif';
+    WJR_DEBUG && console.log(`DEFG: Starting request ${details.requestId} of type ${mimeType} of expected content-length ${expectedContentLength}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
-    let videoChainId = 'default-'+details.requestId;
+    let gifChainId = 'gif-'+details.requestId;
+    let gifFrameCount = 0;
     let allBuffers = [];
-    
 
     let totalSize = 0;
     const fullPassScanBytes = 100*1024*1024;
@@ -279,7 +301,7 @@ async function gifListener(details) {
         try
         {
             //Ensure this top section remains synchronous
-            WJR_DEBUG && console.debug(`DEFV: Data for ${details.requestId} of size ${newData.byteLength}`);
+            WJR_DEBUG && console.debug(`DEFG: Data for ${details.requestId} of size ${newData.byteLength}`);
             allBuffers.push(newData);
             totalSize += newData.byteLength;
 
@@ -298,47 +320,51 @@ async function gifListener(details) {
                 let scanBuffers = allBuffers.slice(0, flushIndexEnd); //to load for scanning
                 let flushBuffers = allBuffers.slice(flushIndexStart, flushIndexEnd); //to flush if pass
 
-                parsedGif = parseGifFrames(allBuffers, parsedGif);
-                //TODO get unscanned frames here and store in local variable in case parsedGif
-                //gets mutated after synchronous setup
-                //TODO clear unscanned frames
+                parsedGif = parseGifFrames(scanBuffers, parsedGif);
+                let unscannedFrames = parsedGif.unscannedFrames;
+                parsedGif.unscannedFrames = [];
 
-                WJR_DEBUG && console.info(`DEFV: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}`);
+                WJR_DEBUG && console.info(`DEFG: Setting up scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) and ${unscannedFrames.length} frames, isComplete=${isComplete}, totalScanCount ${totalScanCount}`);
                 let processor = bkGetNextProcessor();
                 //End synchronous only setup
 
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
-                    WJR_DEBUG && console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                    WJR_DEBUG && console.info(`DEFG: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                     let scanPerfStartTime = performance.now();
-                    //TODO instead of a single one as below, actually loop over all newly available GIF frames
-                    let scanResults = await gifPerformGifFrameScan(
-                        processor,
-                        //TODO
-                        scanBuffers
-                    );
-                    let scanPerfTotalTime = performance.now() - scanPerfStartTime;
-                    WJR_DEBUG && console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}/${scanResults.scanCount}=${(scanPerfTotalTime/scanResults.scanCount).toFixed(1)} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
-                    totalScanCount += scanResults.scanCount;
-                    totalBlockCount += scanResults.blockCount;
-
-
-                    let shouldBlock = true; //TODO fix this up
-                    if(scanResults.error) {
-                        console.warn(`DEFV: Scan error ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}): ${scanResults.error}`);
-                        totalErrorCount++;
+                    let thisScanCount = 0;
+                    let thisBlockCount = 0;
+                    for(let unscannedFrame of unscannedFrames) {
+                        let gifScan = await gifPerformGifFrameScan(
+                            processor,
+                            gifChainId+'-'+gifFrameCount,
+                            unscannedFrame,
+                            details.url
+                        );
+                        gifFrameCount++;
+                        thisScanCount++;
+                        if(gifScan.result == 'block') {
+                            thisBlockCount++;
+                        }
                     }
-                    let shouldError = totalErrorCount >= 5;
+                    
+                    let scanPerfTotalTime = performance.now() - scanPerfStartTime;
+                    WJR_DEBUG && console.log(`DEFG: Scan results ${details.requestId} timing ${scanPerfTotalTime} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${thisBlockCount}/${thisScanCount}`);
+                    totalScanCount += thisScanCount;
+                    totalBlockCount += thisBlockCount;
+
+                    let shouldBlock = totalBlockCount > 0;
+                    let shouldError = false;
 
                     // Note that due the wonders of async, buffers may have data beyond
                     // what is in flushBuffers, so we need to flush everything so that
                     // for any condition where we disconnect we don't have any stragglers
                     // causing "holes"
                     if(shouldBlock) {
-                        console.warn(`DEFV: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
+                        console.warn(`DEFG: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
 
-                        let placeholder = null; //TODO SOME PLACEHOLDER STUFF
+                        let placeholder = new Uint8Array(1); //TODO
                         
                         if(flushIndexStart == 0) {
                             filter.write(placeholder);
@@ -348,7 +374,7 @@ async function gifListener(details) {
                         //with random data.
                         if(expectedContentLength > 0) {
                             let remainingLength = expectedContentLength - placeholder.byteLength;
-                            WJR_DEBUG && console.log(`DEFV: BLOCK ${details.requestId} stuffing ${remainingLength}`);
+                            WJR_DEBUG && console.log(`DEFG: BLOCK ${details.requestId} stuffing ${remainingLength}`);
                             let stuffer = new Uint8Array(1024).fill(0);
                             while(remainingLength > stuffer.length) {
                                 filter.write(stuffer);
@@ -360,22 +386,22 @@ async function gifListener(details) {
                         filter.close();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else if(shouldError) {
-                        console.warn(`DEFV: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                        console.warn(`DEFG: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'error';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
                         filter.disconnect();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else {
-                        if(/*TODO ENOUGH FRAMES || */ flushScanStartSize >= fullPassScanBytes) {
-                            WJR_DEBUG && console.log(`DEFV: Full PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                        if(totalScanCount > 10 || flushScanStartSize >= fullPassScanBytes) {
+                            WJR_DEBUG && console.log(`DEFG: Full PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass';
                             let disconnectBuffers = allBuffers.slice(flushIndexStart);
                             disconnectBuffers.forEach(b=>filter.write(b));
                             filter.disconnect();
                             statusCompleteVideoCheck(details.requestId, status);
                         } else {
-                            WJR_DEBUG && console.info(`DEFV: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                            WJR_DEBUG && console.info(`DEFG: PASS so far ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                             status = 'pass_so_far';
                             flushBuffers.forEach(b=>filter.write(b));
                         }
@@ -384,13 +410,13 @@ async function gifListener(details) {
                 await scanAndTransitionPromise();
                 statusIndicateVideoProgress(details.requestId);
             } else {
-                WJR_DEBUG && console.debug(`DEFV: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
+                WJR_DEBUG && console.debug(`DEFG: Skipping scan for ${details.requestId} isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}`);
             }
         } catch(e) {
-            console.error(`DEFV: Error scanning for ${details.requestId} status ${status} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}: ${e}`);
+            console.error(`DEFG: Error scanning for ${details.requestId} status ${status} for buffers [${flushIndexStart}-${flushIndexEnd}) isComplete=${isComplete}, totalSize=${totalSize}, buffers ${allBuffers.length}: ${e}`);
         } finally {
             if(isComplete) {
-                WJR_DEBUG && console.log(`DEFV: Filter close for ${details.requestId} final status ${status}`);
+                WJR_DEBUG && console.log(`DEFG: Filter close for ${details.requestId} final status ${status} allBuffers count ${allBuffers.length}`);
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, status);
             }
@@ -409,7 +435,7 @@ async function gifListener(details) {
             filter.disconnect();
             statusCompleteVideoCheck(details.requestId, 'error');
         } catch(ex) {
-            WJR_DEBUG && console.log('WEBREQ: Filter video error: '+ex);
+            WJR_DEBUG && console.log('WEBREQG: Filter video error: '+ex);
         }
     }
   
