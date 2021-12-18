@@ -115,7 +115,6 @@ function bkOnProcessorMessage(m) {
         }
             break;
         case 'gif_scan': {
-            console.debug('GIF RESPONSE '+m.requestId);
             gifOnGifFrame(m);
         }
             break;

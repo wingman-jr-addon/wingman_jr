@@ -175,7 +175,7 @@ function parseGifFrames(nextBuffer, parsedGif) {
             }
             parsedGif.header = b.slice(0, i);
             parsedGif.parsedIndex = i;
-            console.log(`DEFG: Found Header up to ${parsedGif.parsedIndex}`);
+            WJR_DEBUG && console.log(`DEFG: Found Header up to ${parsedGif.parsedIndex}`);
         }
 
         const PEEK_TRAILER = 0x3B;
@@ -190,7 +190,7 @@ function parseGifFrames(nextBuffer, parsedGif) {
             switch(peekByte) {
                 // Local Image Descriptor + Data Blocks
                 case PEEK_LID:
-                    console.debug(`DEFG: Found LID at ${i-1}!`);
+                    WJR_DEBUG && console.debug(`DEFG: Found LID at ${i-1}!`);
                     let lidLength = gifTryGetLIDLength(parsedGif, i);
                     if(lidLength > -1) {
                         //Create a standalone GIF by placing the local
@@ -207,26 +207,26 @@ function parseGifFrames(nextBuffer, parsedGif) {
                         parsedGif.unscannedFrames.push(standaloneGif);
                         i += lidLength;
                         parsedGif.parsedIndex = i;
-                        console.debug(`DEFG: Parsed LID - results now ${parsedGif.unscannedFrames.length} and parsed index ${parsedGif.parsedIndex}`);
+                        WJR_DEBUG && console.debug(`DEFG: Parsed LID - results now ${parsedGif.unscannedFrames.length} and parsed index ${parsedGif.parsedIndex}`);
                     } else {
-                        console.debug(`DEFG: Could not fully parse LID - results now ${parsedGif.unscannedFrames.length}`);
+                        WJR_DEBUG && console.debug(`DEFG: Could not fully parse LID - results now ${parsedGif.unscannedFrames.length}`);
                         wasParseFailure = true;
                     }
                     break;
                 // Extension - just skip
                 case PEEK_EXT:
-                    console.debug('DEFG: Found Extension!');
+                    WJR_DEBUG && console.debug('DEFG: Found Extension!');
                     let extLength = gifTryGetExtLength(parsedGif, i);
                     if(extLength > -1) {
                         i += extLength;
                         parsedGif.parsedIndex = i;
                     } else {
-                        console.debug(`DEFG: Could not fully parse Extension - results now ${parsedGif.unscannedFrames.length}`);
+                        WJR_DEBUG && console.debug(`DEFG: Could not fully parse Extension - results now ${parsedGif.unscannedFrames.length}`);
                         wasParseFailure = true;
                     }
                     break;
                 case PEEK_TRAILER:
-                    console.debug('DEFG: Found Trailer!');
+                    WJR_DEBUG && console.debug('DEFG: Found Trailer!');
                     parsedGif.parsedIndex = i;
                     isComplete = true;
                     break;
@@ -241,6 +241,10 @@ function parseGifFrames(nextBuffer, parsedGif) {
         parsedGif.newParsedData = parsedGif.data.slice(parsedGif.lastParsedIndex, parsedGif.parsedIndex);
     } catch(e) {
         console.error('DEFG: Error parsing gif '+e);
+        //Don't set an error if we don't have the header yet
+        if(parsedGif.header != null) {
+            parsedGif.errorIndex = parsedGif.parsedIndex; //Best guess
+        }
     }
 
     return parsedGif;
@@ -253,7 +257,7 @@ function gifOnGifFrame(m) {
     if(openRequest !== undefined) {
         delete GIF_OPEN_REQUESTS[m.requestId];
         openRequest.resolve(m);
-    } //TODO reject based on error handling
+    }
 }
 
 //GIF request ID should be unique
@@ -303,6 +307,7 @@ async function gifListener(details) {
     let gifFrameCount = 0;
 
     let totalSize = 0;
+    const fullPassScanFrames = 100;
     const fullPassScanBytes = 100*1024*1024;
 
     let totalScanCount = 0;
@@ -374,7 +379,7 @@ async function gifListener(details) {
                     let shouldError = false;
 
                     if(shouldBlock) {
-                        console.warn(`DEFG: BLOCK ${details.requestId} for buffers ${parseRange} with global stats ${totalBlockCount}/${totalScanCount}`);
+                        console.warn(`DEFG: BLOCK ${details.requestId} for ${parseRange} with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
 
                         let placeholder = GIF_PLACEHOLDER ?? new Uint8Array();
@@ -404,7 +409,7 @@ async function gifListener(details) {
                         filter.disconnect();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else {
-                        if(totalScanCount > 100 || capturedParsedIndex >= fullPassScanBytes) {
+                        if(totalScanCount > fullPassScanFrames || capturedParsedIndex >= fullPassScanBytes) {
                             WJR_DEBUG && console.log(`DEFG: PASS Full ${details.requestId} for ${parseRange}`);
                             status = 'pass';
                             filter.write(captureNewParsedData);
