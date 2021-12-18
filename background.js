@@ -424,6 +424,16 @@ async function bkImageListener(details, shouldBlockSilently = false) {
             break;
         }
     }
+
+    let isGif = mimeType.startsWith('image/gif');
+    if(isGif) {
+        return gifListener(details);
+    }
+    
+    return bkImageListenerNormal(details, mimeType);
+}
+
+async function bkImageListenerNormal(details, mimeType) {
     WJR_DEBUG && console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);

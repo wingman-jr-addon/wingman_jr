@@ -30,6 +30,7 @@
           "status.js",
           "background.js",
           "background_video.js",
+          "background_gif.js",
           "whitelist.js"
         ]
     },
