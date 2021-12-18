@@ -320,19 +320,21 @@ async function gifListener(details) {
             //Ensure this top section remains synchronous
             WJR_DEBUG && console.debug(`DEFG: Data for ${details.requestId} of size ${newData.byteLength}`);
             parsedGif = parseGifFrames(newData, parsedGif);
+            let capturedParsedIndex = parsedGif.parsedIndex;
             let capturedLastParsedIndex = parsedGif.lastParsedIndex;
             let unscannedFrames = parsedGif.unscannedFrames;
             parsedGif.unscannedFrames = [];
+            let capturedNewParsedData = parsedGif.newParsedData;
             parseRange = `[${parsedGif.lastParsedIndex}-${parsedGif.parsedIndex})/${expectedContentLength}`;
 
             totalSize += newData.byteLength;
 
-            let shouldScan = isComplete || parsedGif.newParsedData.byteLength > 0;
+            let shouldScan = isComplete || capturedNewParsedData.byteLength > 0;
 
             //Now transition to scanning and create a promise for next chunk of work
             if (status == 'pass' || status == 'error') {
                 //This is really a warning condition because it shouldn't happen
-                filter.write(parsedGif.newParsedData);
+                filter.write(capturedNewParsedData);
             } else if(status == 'pass_so_far' && shouldScan) {
                 //Begin synchronous only setup
                 status = 'scanning';
@@ -397,24 +399,24 @@ async function gifListener(details) {
                     } else if(shouldError) {
                         console.warn(`DEFG: ERROR ${details.requestId} for ${parseRange}`);
                         status = 'error';
-                        let disconnectBuffer = parsedGif.data.slice(parsedGif.lastParsedIndex);
+                        let disconnectBuffer = parsedGif.data.slice(capturedLastParsedIndex);
                         filter.write(disconnectBuffer);
                         filter.disconnect();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else {
-                        if(totalScanCount > 100 || parsedGif.parsedIndex >= fullPassScanBytes) {
+                        if(totalScanCount > 100 || capturedParsedIndex >= fullPassScanBytes) {
                             WJR_DEBUG && console.log(`DEFG: PASS Full ${details.requestId} for ${parseRange}`);
                             status = 'pass';
-                            filter.write(parsedGif.newParsedData);
-                            let disconnectBuffer = parsedGif.data.slice(parsedGif.parsedIndex);
+                            filter.write(captureNewParsedData);
+                            let disconnectBuffer = parsedGif.data.slice(capturedParsedIndex);
                             filter.write(disconnectBuffer);
                             filter.disconnect();
                             statusCompleteVideoCheck(details.requestId, status);
                         } else {
                             WJR_DEBUG && console.info(`DEFG: PASS so far ${details.requestId} for ${parseRange}`);
                             status = 'pass_so_far';
-                            if(parsedGif.newParsedData.byteLength > 0) {
-                                filter.write(parsedGif.newParsedData);
+                            if(capturedNewParsedData.byteLength > 0) {
+                                filter.write(capturedNewParsedData);
                             }
                         }
                     }
@@ -422,10 +424,10 @@ async function gifListener(details) {
                 await scanAndTransitionPromise();
                 statusIndicateVideoProgress(details.requestId);
             } else if(status == 'scanning') {
-                WJR_DEBUG && console.debug(`DEFG: Already scanning so bumping back parsedIndex for ${details.requestId} current status ${status} isComplete=${isComplete}, totalSize=${totalSize}, parse range ${parseRange}, ${parsedGif.newParsedData.byteLength}`);
+                WJR_DEBUG && console.debug(`DEFG: Already scanning so bumping back parsedIndex for ${details.requestId} current status ${status} isComplete=${isComplete}, totalSize=${totalSize}, parse range ${parseRange}, ${capturedNewParsedData.byteLength}`);
                 parsedGif.parsedIndex = capturedLastParsedIndex;
             } else {
-                WJR_DEBUG && console.debug(`DEFG: Skipping scan for ${details.requestId} current status ${status} isComplete=${isComplete}, totalSize=${totalSize}, parse range ${parseRange}, ${parsedGif.newParsedData.byteLength}`);
+                WJR_DEBUG && console.debug(`DEFG: Skipping scan for ${details.requestId} current status ${status} isComplete=${isComplete}, totalSize=${totalSize}, parse range ${parseRange}, ${capturedNewParsedData.byteLength}`);
             }
         } catch(e) {
             console.error(`DEFG: Error scanning for ${details.requestId} status ${status} for ${parseRange} isComplete=${isComplete}, totalSize=${totalSize}: ${e}`);
