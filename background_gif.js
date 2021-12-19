@@ -412,7 +412,7 @@ async function gifListener(details) {
                         if(totalScanCount > fullPassScanFrames || capturedParsedIndex >= fullPassScanBytes) {
                             WJR_DEBUG && console.log(`DEFG: PASS Full ${details.requestId} for ${parseRange}`);
                             status = 'pass';
-                            filter.write(captureNewParsedData);
+                            filter.write(capturedNewParsedData);
                             let disconnectBuffer = parsedGif.data.slice(capturedParsedIndex);
                             filter.write(disconnectBuffer);
                             filter.disconnect();
