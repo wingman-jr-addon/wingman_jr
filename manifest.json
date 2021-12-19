@@ -28,6 +28,7 @@
           "mp4.js",
           "ebml.js",
           "status.js",
+          "background_gif.js",
           "background.js",
           "background_video.js",
           "whitelist.js"

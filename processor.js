@@ -324,7 +324,7 @@ async function procPerformFiltering(entry) {
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
-        console.error('WEBREQP: Error for '+entry.url+': '+e);
+        console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e));
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
@@ -744,6 +744,25 @@ async function procOnPortMessage(m) {
             delete PROC_openRequests[m.requestId];
             await procCheckProcess();
         }
+        break;
+        case 'gif_frame': {
+            WJR_DEBUG && console.debug('GIF: '+m.requestId);
+            let gifRequest = {
+                requestId: m.requestId,
+                url: m.url,
+                mimeType: m.mimeType,
+                startTime: performance.now(),
+                buffers: m.buffers
+            };
+            let gifScanResult = await procPerformFiltering(gifRequest);
+            let gifResponse = {
+                type: 'gif_scan',
+                requestId: gifScanResult.requestId,
+                result: gifScanResult.result
+            };
+            PROC_port.postMessage(gifResponse);
+        }
+        break;
         case 'b64_start': {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
