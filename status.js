@@ -22,9 +22,11 @@ let STATUS_openImageHighWaterCount = 0;
 
 let STATUS_videoCounts = {
     'pass' : 0,
+    'pass_so_far' : 0,
     'block' : 0,
     'error' : 0
 };
+let STATUS_videoCheckCount = 0;
 let STATUS_openVideoFilters = { };
 let STATUS_videoProgressCounter = 0;
 let STATUS_videoLastBlockProgressCounter = -999;
@@ -155,6 +157,8 @@ function statusCompleteVideoCheck(requestId, status) {
         if(status == 'block') {
             STATUS_videoLastBlockProgressCounter = STATUS_videoProgressCounter;
         }
+        STATUS_videoCounts[status]++;
+        STATUS_videoCheckCount++;
         delete STATUS_openVideoFilters[requestId];
         statusUpdateVisuals();
     } catch(e) {
@@ -185,14 +189,16 @@ function statusCompleteImageCheck(requestId, status) {
 }
 
 function statusUpdateVisuals() {
-    if(STATUS_imageCounts['block'] > 0) {
+    let totalBlockCount = STATUS_imageCounts['block'] + STATUS_videoCounts['block'];
+    if(totalBlockCount > 0) {
         //MDN notes we can only fit "about 4" characters here
-        let txt = (STATUS_imageCounts['block'] < 1000) ? STATUS_imageCounts['block']+'' : '999+';
+        let txt = (totalBlockCount < 1000) ? totalBlockCount+'' : '999+';
         browser.browserAction.setBadgeText({ "text": txt });
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' total images\r\n'
+    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'
+        + '               ' + STATUS_videoCounts['block']+'/'+STATUS_videoCheckCount+' videos\r\n'
         + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });
 
     statusRegenerateIcon();

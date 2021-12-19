@@ -231,7 +231,7 @@ function parseGifFrames(nextBuffer, parsedGif) {
                     isComplete = true;
                     break;
                 default:
-                    console.error(`DEFG: Error parsing GIF peek byte ${peekByte} at index ${i}`);
+                    WJR_DEBUG && console.error(`DEFG: Error parsing GIF peek byte ${peekByte} at index ${i}`);
                     wasParseFailure = true;
                     parsedGif.errorIndex = i;
                     break;
@@ -376,7 +376,7 @@ async function gifListener(details) {
                     totalBlockCount += thisBlockCount;
 
                     let shouldBlock = totalBlockCount > 0;
-                    let shouldError = false;
+                    let shouldError = parsedGif.errorIndex > -1;
 
                     if(shouldBlock) {
                         console.warn(`DEFG: BLOCK ${details.requestId} for ${parseRange} with global stats ${totalBlockCount}/${totalScanCount}`);
@@ -402,7 +402,7 @@ async function gifListener(details) {
                         filter.close();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else if(shouldError) {
-                        console.warn(`DEFG: ERROR ${details.requestId} for ${parseRange}`);
+                        console.warn(`DEFG: ERROR Parsing ${details.requestId} for ${parseRange}`);
                         status = 'error';
                         let disconnectBuffer = parsedGif.data.slice(capturedLastParsedIndex);
                         filter.write(disconnectBuffer);
