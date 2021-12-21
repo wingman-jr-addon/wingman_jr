@@ -341,7 +341,7 @@ async function gifListener(details) {
             //Now transition to scanning and create a promise for next chunk of work
             if (status == 'pass' || status == 'error') {
                 //This is really a warning condition because it shouldn't happen
-                filter.write(capturedNewParsedData);
+                WJR_DEBUG && console.debug(`DEFG: Writing to already closed request ${details.requestId} with status ${status}`);
             } else if(status == 'pass_so_far' && shouldScan) {
                 //Begin synchronous only setup
                 status = 'scanning';
@@ -402,7 +402,7 @@ async function gifListener(details) {
                         filter.close();
                         statusCompleteVideoCheck(details.requestId, status);
                     } else if(shouldError) {
-                        console.warn(`DEFG: ERROR Parsing ${details.requestId} for ${parseRange}`);
+                        console.warn(`DEFG: ERROR Parsing request ${details.requestId} for ${parseRange} at ${parsedGif.errorIndex}`);
                         status = 'error';
                         let disconnectBuffer = parsedGif.data.slice(capturedLastParsedIndex);
                         filter.write(disconnectBuffer);
