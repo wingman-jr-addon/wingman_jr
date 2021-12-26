@@ -125,12 +125,13 @@ function gifTryGetExtLength(parsedGif, si) {
     return (i + subBlockSize) - si;
 }
 
-function parseGifFrames(nextBuffer, parsedGif) {
+function parseGifFrames(nextBuffer, parsedGif, maxFramesToParse) {
     if(!parsedGif) {
         parsedGif = {
             header: null, //actually header plus global color table
             screenWidth: -1,
             screenHeight: -1,
+            lidCount: 0,
             unscannedFrames: [],
             newParsedData: new Uint8Array(),
             parsedIndex: 0, //index of last fully parsed image
@@ -184,8 +185,9 @@ function parseGifFrames(nextBuffer, parsedGif) {
 
         let wasParseFailure = false;
         let isComplete = false;
+        let framesParsedThisTime = 0;
 
-        while(!wasParseFailure && !isComplete && i < b.byteLength) {
+        while(!wasParseFailure && !isComplete && i < b.byteLength && (maxFramesToParse == -1 || framesParsedThisTime < maxFramesToParse)) {
             let peekByte = b[i]; i+=1;
             switch(peekByte) {
                 // Local Image Descriptor + Data Blocks
@@ -208,6 +210,8 @@ function parseGifFrames(nextBuffer, parsedGif) {
                         i += lidLength;
                         parsedGif.parsedIndex = i;
                         WJR_DEBUG && console.debug(`DEFG: Parsed LID - results now ${parsedGif.unscannedFrames.length} and parsed index ${parsedGif.parsedIndex}`);
+                        framesParsedThisTime++;
+                        parsedGif.lidCount++;
                     } else {
                         WJR_DEBUG && console.debug(`DEFG: Could not fully parse LID - results now ${parsedGif.unscannedFrames.length}`);
                         wasParseFailure = true;
@@ -226,7 +230,7 @@ function parseGifFrames(nextBuffer, parsedGif) {
                     }
                     break;
                 case PEEK_TRAILER:
-                    WJR_DEBUG && console.debug('DEFG: Found Trailer!');
+                    WJR_DEBUG && console.info(`DEFG: Found Trailer - GIF had a total of ${parsedGif.lidCount} frames`);
                     parsedGif.parsedIndex = i;
                     isComplete = true;
                     break;
@@ -236,6 +240,10 @@ function parseGifFrames(nextBuffer, parsedGif) {
                     parsedGif.errorIndex = i;
                     break;
             }
+        }
+
+        if(framesParsedThisTime >= maxFramesToParse && maxFramesToParse != -1) {
+            WJR_DEBUG && console.warn(`DEFG: GIF parsing capped at ${framesParsedThisTime}`);
         }
 
         parsedGif.newParsedData = parsedGif.data.slice(parsedGif.lastParsedIndex, parsedGif.parsedIndex);
@@ -326,7 +334,7 @@ async function gifListener(details) {
         {
             //Ensure this top section remains synchronous
             WJR_DEBUG && console.debug(`DEFG: Data for ${details.requestId} of size ${newData.byteLength}`);
-            parsedGif = parseGifFrames(newData, parsedGif);
+            parsedGif = parseGifFrames(newData, parsedGif, isComplete ? -1 : 5);
             let capturedParsedIndex = parsedGif.parsedIndex;
             let capturedLastParsedIndex = parsedGif.lastParsedIndex;
             let unscannedFrames = parsedGif.unscannedFrames;
