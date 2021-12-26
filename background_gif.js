@@ -230,8 +230,7 @@ function parseGifFrames(nextBuffer, parsedGif, maxFramesToParse) {
                     }
                     break;
                 case PEEK_TRAILER:
-                    WJR_DEBUG && console.debug('DEFG: Found Trailer!');
-                    console.warn(`DEFG: GIF had a total of ${parsedGif.lidCount} frames`);
+                    WJR_DEBUG && console.info(`DEFG: Found Trailer - GIF had a total of ${parsedGif.lidCount} frames`);
                     parsedGif.parsedIndex = i;
                     isComplete = true;
                     break;
@@ -244,7 +243,7 @@ function parseGifFrames(nextBuffer, parsedGif, maxFramesToParse) {
         }
 
         if(framesParsedThisTime >= maxFramesToParse && maxFramesToParse != -1) {
-            console.warn(`DEFG: GIF parsing capped at ${framesParsedThisTime}`);
+            WJR_DEBUG && console.warn(`DEFG: GIF parsing capped at ${framesParsedThisTime}`);
         }
 
         parsedGif.newParsedData = parsedGif.data.slice(parsedGif.lastParsedIndex, parsedGif.parsedIndex);
