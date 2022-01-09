@@ -97,13 +97,53 @@ let PROC_processingSinceDataEndTimeTotal = 0;
 let PROC_processingSinceImageLoadTimeTotal = 0;
 let PROC_processingCountTotal = 0;
 
+function tileImage(c, imgElement) {
+    c.ctx.clearRect(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
+    if(imgElement.width >= imgElement.height) {
+        let widthMultiplier = Math.floor(imgElement.width / imgElement.height);
+        widthMultiplier = Math.ceil(Math.sqrt(widthMultiplier));
+        let dstTileWidth = PROC_IMAGE_SIZE;
+        let dstTileHeight = PROC_IMAGE_SIZE / widthMultiplier;
+        let srcTileWidth = imgElement.width / widthMultiplier;
+        let srcTileHeight = imgElement.height;
+        for(let i=0; i<widthMultiplier; i++) {
+            c.ctx.drawImage(imgElement, i*srcTileWidth, 0, srcTileWidth, srcTileHeight, 0, i*dstTileHeight, dstTileWidth, dstTileHeight);
+            //Debug line
+            if(WJR_DEBUG && widthMultiplier > 1) {
+                c.ctx.fillStyle = 'red';
+                c.ctx.fillRect(0, i*dstTileHeight, dstTileWidth, 1);
+            }
+        }
+        console.log(`TILE: Horizontal ${widthMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
+    } else {
+        let heightMultiplier = Math.floor(imgElement.height / imgElement.width);
+        heightMultiplier = Math.ceil(Math.sqrt(heightMultiplier));
+        let dstTileWidth = PROC_IMAGE_SIZE / heightMultiplier;
+        let dstTileHeight = PROC_IMAGE_SIZE;
+        let srcTileWidth = imgElement.width;
+        let srcTileHeight = imgElement.height / heightMultiplier;
+        for(let i=0; i<heightMultiplier; i++) {
+            c.ctx.drawImage(imgElement, 0, i*srcTileHeight, srcTileWidth, srcTileHeight, i*dstTileWidth, 0, dstTileWidth, dstTileHeight);
+            if(WJR_DEBUG && heightMultiplier > 1) {
+                c.ctx.fillStyle = 'red';
+                c.ctx.fillRect(i*dstTileWidth, 0, 1, dstTileHeight);
+            }
+        }
+        console.log(`TILE: Vertical ${heightMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
+    }
+}
+
+function drawImage(c, imgElement) {
+    c.ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
+}
+
 async function procPredict(imgElement) {
     let c = procGetCtx();
     try {
-        let ctx = c.ctx;
         const drawStartTime = performance.now();
-        ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
-        const rightSizeImageData = ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
+        tileImage(c, imgElement);
+        await procCommonLogImg(c.canvas, `TILE: Output`);
+        const rightSizeImageData = c.ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
