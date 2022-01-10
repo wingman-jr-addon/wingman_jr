@@ -142,7 +142,7 @@ async function procPredict(imgElement) {
     try {
         const drawStartTime = performance.now();
         tileImage(c, imgElement);
-        await procCommonLogImg(c.canvas, `TILE: Output`);
+        //await procCommonLogImg(c.canvas, `TILE: Output`);
         const rightSizeImageData = c.ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
