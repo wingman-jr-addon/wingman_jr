@@ -114,7 +114,7 @@ function tileImage(c, imgElement) {
                 c.ctx.fillRect(0, i*dstTileHeight, dstTileWidth, 1);
             }
         }
-        console.log(`TILE: Horizontal ${widthMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
+        WJR_DEBUG && console.log(`TILE: Horizontal ${widthMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
     } else {
         let heightMultiplier = Math.floor(imgElement.height / imgElement.width);
         heightMultiplier = Math.ceil(Math.sqrt(heightMultiplier));
@@ -129,7 +129,7 @@ function tileImage(c, imgElement) {
                 c.ctx.fillRect(i*dstTileWidth, 0, 1, dstTileHeight);
             }
         }
-        console.log(`TILE: Vertical ${heightMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
+        WJR_DEBUG && console.log(`TILE: Vertical ${heightMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
     }
 }
 
@@ -142,7 +142,7 @@ async function procPredict(imgElement) {
     try {
         const drawStartTime = performance.now();
         tileImage(c, imgElement);
-        //await procCommonLogImg(c.canvas, `TILE: Output`);
+        WJR_DEBUG && (await procCommonLogImg(c.canvas, `TILE: Output`));
         const rightSizeImageData = c.ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
