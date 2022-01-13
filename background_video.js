@@ -218,7 +218,10 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     let scanStepRatchet = 0.5; // ratchet up interval if perf is too low
     let scanStepMin = 1.0; // the minimum scanSetep, regardless of perf
     let scanStepMax = 4.0; // the maximum scanStep, regardless of perf
-    let scanStep = scanStepMin; // scan every x seconds
+    //Short videos often times employ shock factors and don't get the usual spinup time
+    //so we combat this by artificially setting the minimum even lower than usual
+    let isShortVideo = (expectedContentLength > 0 && expectedContentLength < 500*1024*1024);
+    let scanStep = isShortVideo ? 0.25 : scanStepMin; // scan every x seconds
     let scanMaxSteps = 20.0;
     let scanBlockBailCount = 3.0;
     let totalSize = 0;
