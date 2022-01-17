@@ -389,9 +389,11 @@ async function bkCrashDetectionWatchdog() {
 }
 
 function bkHandleCrashDetectionResult(m) {
-    if (!CRASH_DETECTION_EXPECTED_RESULT) {
+    if (!CRASH_DETECTION_EXPECTED_RESULT && m !== undefined && m.sqrxrScore !== undefined) {
         CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
         WJR_DEBUG && console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+    } else if (!CRASH_DETECTION_EXPECTED_RESULT) {
+        WJR_DEBUG && console.log(`CRASH: Cannot set yet because valid prediction has not been made`);
     } else {
         let actual = JSON.stringify(m.sqrxrScore);
         if (actual != CRASH_DETECTION_EXPECTED_RESULT) {

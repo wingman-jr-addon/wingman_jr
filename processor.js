@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_112_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_114_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -154,9 +154,11 @@ async function procPredict(imgElement) {
             //EfficientNet
             //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
             //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
-            //MobileNet V2
-            const scaled = floatImg.div(tf.scalar(127.5));
-            const normalized = scaled.sub(tf.scalar(1));
+            //MobileNet V2 & EfficientNetLite
+            //const scaled = floatImg.div(tf.scalar(127.5));
+            //const normalized = scaled.sub(tf.scalar(1));
+            //EfficientNet V2
+            const normalized = floatImg.div(tf.scalar(255.0));
             // Reshape to a single-element batch so we can pass it to predict.
             const batched = tf.stack([normalized]);
             const result = PROC_wingman.predict(batched, {batchSize: 1});
@@ -164,7 +166,10 @@ async function procPredict(imgElement) {
             return result;
         });
 
-        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        //Double check -TF.js likes to switch the model output order every other model or so on conversion...
+        //Change the index ordering here
+        //Threshold (shape [1]), SQRX (shape [4]) is the "interface" for syncedResult
+        let syncedResult = [logits[1].dataSync(),logits[0].dataSync()];
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
@@ -317,14 +322,7 @@ async function procPerformFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                let sqrxrScore;
-                if(PROC_timingInfoDumpCount<10) {
-                    PROC_timingInfoDumpCount++;
-                    let timingInfo = await tf.time(async ()=>sqrxrScore=await procPredict(img));
-                    WJR_DEBUG && console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
-                } else {
-                    sqrxrScore = await procPredict(img);
-                }
+                let sqrxrScore = await procPredict(img);
                 if(procIsSafe(sqrxrScore)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
