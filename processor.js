@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_114_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_115_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -20,7 +20,7 @@ const procWingmanStartup = async () => {
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
     }
-    tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
+    //tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
     WJR_DEBUG && console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
@@ -157,7 +157,7 @@ async function procPredict(imgElement) {
             //MobileNet V2 & EfficientNetLite
             //const scaled = floatImg.div(tf.scalar(127.5));
             //const normalized = scaled.sub(tf.scalar(1));
-            //EfficientNet V2
+            //EfficientNet V2 & MobileNetV3
             const normalized = floatImg.div(tf.scalar(255.0));
             // Reshape to a single-element batch so we can pass it to predict.
             const batched = tf.stack([normalized]);
@@ -169,7 +169,7 @@ async function procPredict(imgElement) {
         //Double check -TF.js likes to switch the model output order every other model or so on conversion...
         //Change the index ordering here
         //Threshold (shape [1]), SQRX (shape [4]) is the "interface" for syncedResult
-        let syncedResult = [logits[1].dataSync(),logits[0].dataSync()];
+        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
