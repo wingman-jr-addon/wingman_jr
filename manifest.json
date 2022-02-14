@@ -18,7 +18,8 @@
       "proxy",
       "storage",
       "tabHide",
-      "idle"
+      "idle",
+      "contextMenus"
     ],
   
     "background": {

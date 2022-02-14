@@ -744,6 +744,20 @@ function bkDetectCharset(contentType) {
 }
 
 
+////////////////////////////Context Menu////////////////////////////
+
+browser.menus.create({
+    title: "Hide Image",
+    documentUrlPatterns: ["*://*/*"],
+    contexts: ["image"],
+    onclick(info, tab) {
+      browser.tabs.executeScript(tab.id, {
+        frameId: info.frameId,
+        code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
+      });
+    },
+  });
+
 
 ////////////////////////Actual Startup//////////////////////////////
 
