@@ -4,5 +4,6 @@ function whtIsWhitelisted(url) {
 
 const whtWhitelistStems = [
     'https://www.google.com/recaptcha',
-    'https://www.gstatic.com/recaptcha'
+    'https://www.gstatic.com/recaptcha',
+    'https://loremflickr.com/'
 ];
