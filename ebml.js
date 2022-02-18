@@ -212,8 +212,8 @@ function ebmlCreateFragmentedWebM(u8Array) {
 //This is a specialized method to simply probe if the location is likely the start of a Cluster
 const EBML_CLUSTER_ID_ARRAY = [0x1F, 0x43, 0xB6, 0x75];
 function ebmlIsLikelyCluster(u8Array, index) {
-    for(let i=index; i<index+4 && i<u8Array.length; i++) {
-        if(u8Array[i] != EBML_CLUSTER_ID_ARRAY[i]) {
+    for(let i=0; i<4 && i+index<u8Array.length; i++) {
+        if(u8Array[i+index] != EBML_CLUSTER_ID_ARRAY[i]) {
             return false;
         }
     }
