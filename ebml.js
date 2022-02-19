@@ -255,7 +255,7 @@ function ebmlIsLikelyProbe(u8Array) {
         return false;
     }
     for(let i=0; i<4; i++) {
-        if(u8Array[i] != EBML_CLUSTER_ID_ARRAY[i]) {
+        if(u8Array[i] != EBML_EBML_ID_ARRAY[i]) {
             return false;
         }
     }
