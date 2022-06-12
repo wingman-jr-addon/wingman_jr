@@ -148,6 +148,8 @@ async function procPredict(imgElement) {
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
         const startTime = performance.now();
+        
+        
         const logits = tf.tidy(() => {
             const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
             const floatImg = rightSizeImageDataTF.toFloat();
@@ -165,6 +167,8 @@ async function procPredict(imgElement) {
         });
 
         let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        
+        //let syncedResult = [ [1], [0, 0, 0, 1] ];
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
