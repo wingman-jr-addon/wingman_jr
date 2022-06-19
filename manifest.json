@@ -6,6 +6,7 @@
 
     "browser_specific_settings": {
       "gecko": {
+		"id": "wingman_jr@example.org",
         "strict_min_version": "91.1.0"
       }
     },
@@ -19,7 +20,8 @@
       "storage",
       "tabHide",
       "idle",
-      "contextMenus"
+      "contextMenus",
+	  "nativeMessaging"
     ],
   
     "background": {

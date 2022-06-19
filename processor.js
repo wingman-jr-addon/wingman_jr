@@ -137,6 +137,46 @@ function drawImage(c, imgElement) {
     c.ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
 }
 
+async function procPredictBlaze(rightSizeImageData) {
+  
+	//A little hacky
+	return new Promise((resolve, reject) => {
+		try
+		{
+			let tempListener = null;
+			tempListener = (response) => {
+				console.log("BLAZE: Received: " + JSON.stringify(response));
+				blaze_port.onMessage.removeListener(tempListener);
+				resolve(response);
+			};
+			
+			console.log(`BLAZE: ${rightSizeImageData.width}x${rightSizeImageData.height}: ${rightSizeImageData.data.byteLength}`);
+			/*
+			let d = new Uint8Array(2 + 2 + rightSizeImageData.data.byteLength);
+			d[0] = rightSizeImageData.width & 0xFF;
+			d[1] = (rightSizeImageData.width >> 8) & 0xFF;
+			d[2] = rightSizeImageData.height & 0xFF;
+			d[3] = (rightSizeImageData.height >> 8) & 0xFF;
+			d.set(rightSizeImageData.data, 4);
+			*/
+			
+			//Serialize it this way to preserve metadata and ensure array goes as a normal array rather than KVP e.g. { "0": 1, "1": 1 }
+			//JavaScript always makes me feel like I'm using atomic weapons but lacking basic things like hammers at the same time.....
+			let serialized = {
+				"width" : rightSizeImageData.width,
+				"height": rightSizeImageData.height,
+				"data"  : Array.from(rightSizeImageData.data)
+			};
+
+			blaze_port.onMessage.addListener(tempListener);
+			blaze_port.postMessage(serialized);
+		} catch(e) {
+			reject(e);
+		}
+
+	});
+};
+
 async function procPredict(imgElement) {
     let c = procGetCtx();
     try {
@@ -148,6 +188,7 @@ async function procPredict(imgElement) {
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
         const startTime = performance.now();
+		/*
         const logits = tf.tidy(() => {
             const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
             const floatImg = rightSizeImageDataTF.toFloat();
@@ -163,8 +204,13 @@ async function procPredict(imgElement) {
 
             return result;
         });
+		
 
         let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+		*/
+		let syncedResult = await procPredictBlaze(rightSizeImageData);
+		console.log('BLAZE: SyncedResult: '+JSON.stringify(syncedResult));
+		
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
@@ -862,11 +908,31 @@ async function procOnPortMessage(m) {
     }
 }
 
+let blaze_port = null;
 let PROC_port = null;
 let PROC_processorId = (new URL(document.location)).searchParams.get('id');
 procWingmanStartup()
 .then(async ()=>
 {
+	console.log("BLAZE: Connecting!");
+	blaze_port = browser.runtime.connectNative("wingman_blaze");
+	try
+	{
+
+		blaze_port.onDisconnect.addListener(p => {
+			if(p.error) {
+				console.log(`BLAZE: Disconnect due to error ${p.error.message}`);
+			} else {
+				console.log("BLAZE: Disconnect without error");
+			}
+		});
+		console.log('BLAZE: connected???');
+	}
+	catch(e)
+	{
+		console.log('BLAZE: exception '+e);
+	}
+	
     PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
     PROC_port.onMessage.addListener(procOnPortMessage);
     PROC_port.postMessage({
