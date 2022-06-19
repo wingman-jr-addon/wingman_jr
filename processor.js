@@ -9,6 +9,10 @@ function procOnModelLoadProgress(percentage) {
     WJR_DEBUG && console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
 
+function getLogits(tfLiteTensor) {
+	return [tfLiteTensor["StatefulPartitionedCall:1"].dataSync(),tfLiteTensor["StatefulPartitionedCall:0"].dataSync()];
+}
+
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
@@ -32,17 +36,19 @@ const procWingmanStartup = async () => {
         return;
     }
     WJR_DEBUG && console.log('LIFECYCLE: Loading model...');
-    PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
+	PROC_wingman = await tflite.loadTFLiteModel('112_sqrxr_plus_best.tflite');
+    //PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
     WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
 
     WJR_DEBUG && console.log('LIFECYCLE: Warming up...');
     let dummy_data = tf.zeros([1, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE, 3]);
     let warmup_result = null;
-    let timingInfo = await tf.time(()=>warmup_result = PROC_wingman.predict(dummy_data));
+	let timingInfo = await tf.time(()=>warmup_result = getLogits(PROC_wingman.predict(dummy_data)));
+	console.dir(warmup_result);
     WJR_DEBUG && console.log(warmup_result);
     console.log('LIFECYCLE: TIMING LOADING: '+JSON.stringify(timingInfo));
-    warmup_result[0].dispose();
-    warmup_result[1].dispose();
+    //warmup_result["StatefulPartitionedCall:0"].dispose();
+    //warmup_result["StatefulPartitionedCall:1"].dispose();
     console.log('LIFECYCLE: Ready to go at '+performance.now()+'!');
 };
 
@@ -164,7 +170,7 @@ async function procPredict(imgElement) {
             return result;
         });
 
-        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        let syncedResult = getLogits(logits);
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;

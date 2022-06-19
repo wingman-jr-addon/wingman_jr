@@ -1,0 +1,26 @@
+/**
+ * @license
+ * Copyright 2021 Google LLC. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * =============================================================================
+ */
+export * from './tflite_model';
+export * from './tflite_task_library_client/image_classifier';
+export * from './tflite_task_library_client/image_segmenter';
+export * from './tflite_task_library_client/object_detector';
+export * from './tflite_task_library_client/nl_classifier';
+export * from './tflite_task_library_client/bert_nl_classifier';
+export * from './tflite_task_library_client/bert_qa';
+export { setWasmPath } from './tflite_task_library_client/common';
+export { getWasmFeatures } from './tflite_task_library_client/common';
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiaW5kZXguanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi8uLi90ZmpzLXRmbGl0ZS9zcmMvaW5kZXgudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6IkFBQUE7Ozs7Ozs7Ozs7Ozs7OztHQWVHO0FBRUgsY0FBYyxnQkFBZ0IsQ0FBQztBQUUvQixjQUFjLCtDQUErQyxDQUFDO0FBQzlELGNBQWMsOENBQThDLENBQUM7QUFDN0QsY0FBYyw4Q0FBOEMsQ0FBQztBQUM3RCxjQUFjLDRDQUE0QyxDQUFDO0FBQzNELGNBQWMsaURBQWlELENBQUM7QUFDaEUsY0FBYyxzQ0FBc0MsQ0FBQztBQUNyRCxPQUFPLEVBQUMsV0FBVyxFQUFDLE1BQU0scUNBQXFDLENBQUM7QUFDaEUsT0FBTyxFQUFDLGVBQWUsRUFBQyxNQUFNLHFDQUFxQyxDQUFDIiwic291cmNlc0NvbnRlbnQiOlsiLyoqXG4gKiBAbGljZW5zZVxuICogQ29weXJpZ2h0IDIwMjEgR29vZ2xlIExMQy4gQWxsIFJpZ2h0cyBSZXNlcnZlZC5cbiAqIExpY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAgKHRoZSBcIkxpY2Vuc2VcIik7XG4gKiB5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxlIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuXG4gKiBZb3UgbWF5IG9idGFpbiBhIGNvcHkgb2YgdGhlIExpY2Vuc2UgYXRcbiAqXG4gKiBodHRwOi8vd3d3LmFwYWNoZS5vcmcvbGljZW5zZXMvTElDRU5TRS0yLjBcbiAqXG4gKiBVbmxlc3MgcmVxdWlyZWQgYnkgYXBwbGljYWJsZSBsYXcgb3IgYWdyZWVkIHRvIGluIHdyaXRpbmcsIHNvZnR3YXJlXG4gKiBkaXN0cmlidXRlZCB1bmRlciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiBcIkFTIElTXCIgQkFTSVMsXG4gKiBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC5cbiAqIFNlZSB0aGUgTGljZW5zZSBmb3IgdGhlIHNwZWNpZmljIGxhbmd1YWdlIGdvdmVybmluZyBwZXJtaXNzaW9ucyBhbmRcbiAqIGxpbWl0YXRpb25zIHVuZGVyIHRoZSBMaWNlbnNlLlxuICogPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT1cbiAqL1xuXG5leHBvcnQgKiBmcm9tICcuL3RmbGl0ZV9tb2RlbCc7XG5leHBvcnQgKiBmcm9tICcuL3R5cGVzL3RmbGl0ZV93ZWJfbW9kZWxfcnVubmVyJztcbmV4cG9ydCAqIGZyb20gJy4vdGZsaXRlX3Rhc2tfbGlicmFyeV9jbGllbnQvaW1hZ2VfY2xhc3NpZmllcic7XG5leHBvcnQgKiBmcm9tICcuL3RmbGl0ZV90YXNrX2xpYnJhcnlfY2xpZW50L2ltYWdlX3NlZ21lbnRlcic7XG5leHBvcnQgKiBmcm9tICcuL3RmbGl0ZV90YXNrX2xpYnJhcnlfY2xpZW50L29iamVjdF9kZXRlY3Rvcic7XG5leHBvcnQgKiBmcm9tICcuL3RmbGl0ZV90YXNrX2xpYnJhcnlfY2xpZW50L25sX2NsYXNzaWZpZXInO1xuZXhwb3J0ICogZnJvbSAnLi90ZmxpdGVfdGFza19saWJyYXJ5X2NsaWVudC9iZXJ0X25sX2NsYXNzaWZpZXInO1xuZXhwb3J0ICogZnJvbSAnLi90ZmxpdGVfdGFza19saWJyYXJ5X2NsaWVudC9iZXJ0X3FhJztcbmV4cG9ydCB7c2V0V2FzbVBhdGh9IGZyb20gJy4vdGZsaXRlX3Rhc2tfbGlicmFyeV9jbGllbnQvY29tbW9uJztcbmV4cG9ydCB7Z2V0V2FzbUZlYXR1cmVzfSBmcm9tICcuL3RmbGl0ZV90YXNrX2xpYnJhcnlfY2xpZW50L2NvbW1vbic7XG4iXX0=
