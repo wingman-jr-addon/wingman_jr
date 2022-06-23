@@ -871,7 +871,7 @@ function bkUpdateFromSettings() {
 
 function bkLoadBackendSettings() {
     browser.storage.local.get('backend_selection').then(result => {
-        let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        let backends = ['webgpu']; // result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
         let hasChanged = backends.length != BK_processorBackendPreference.length;
         for (let i = 0; i < backends.length && !hasChanged; i++) {
             hasChanged = backends[i] != BK_processorBackendPreference[i];
