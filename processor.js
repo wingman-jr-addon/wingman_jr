@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_112_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_112_fp16/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -21,6 +21,7 @@ const procWingmanStartup = async () => {
         tf.setBackend(backendRequested || 'wasm');
     }
     tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
+	tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
     WJR_DEBUG && console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
@@ -164,7 +165,14 @@ async function procPredict(imgElement) {
             return result;
         });
 
-        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+		let classifier = logits[0].dataSync();
+		let threshold = logits[1].dataSync();
+		//TF.js converter likes to flip values order of outputs or do some other minor quirks so check this when updating model.
+		//console.log(`RAW OUTPUT (Classifier/Threshold): ${JSON.stringify(classifier)}    /     ${JSON.stringify(threshold)}`);
+		classifier = [ classifier['0'], classifier['1'], classifier['2'], classifier['3'] ];
+		threshold = [ threshold['0'] ];
+		
+        let syncedResult = [threshold, classifier];
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
