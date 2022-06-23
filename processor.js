@@ -36,7 +36,7 @@ const procWingmanStartup = async () => {
         return;
     }
     WJR_DEBUG && console.log('LIFECYCLE: Loading model...');
-	PROC_wingman = await tflite.loadTFLiteModel('112_sqrxr_plus_best.tflite');
+	PROC_wingman = await tflite.loadTFLiteModel('112_fp16.tflite', {enableProfiling: true});
     //PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
     WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
 
@@ -174,6 +174,9 @@ async function procPredict(imgElement) {
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
+		if(PROC_inferenceCountTotal % 10 == 9) {
+			console.log(PROC_wingman.getProfilingSummary());
+		}
         const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
         WJR_DEBUG && console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
 
