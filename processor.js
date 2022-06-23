@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_112_fp16/model.json'
+const PROC_MODEL_PATH = 'sqrxr_112_cfv2/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -21,7 +21,6 @@ const procWingmanStartup = async () => {
         tf.setBackend(backendRequested || 'wasm');
     }
     tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
-	tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
     WJR_DEBUG && console.log(tf.env().getFlags());
     tf.enableProdMode();
     await tf.ready();
