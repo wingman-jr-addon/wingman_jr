@@ -291,8 +291,6 @@ const procLoadImagePromise = url => new Promise( (resolve, reject) => {
     img.src = url
 });
 
-let PROC_timingInfoDumpCount = 0;
-
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
     WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
@@ -317,14 +315,7 @@ async function procPerformFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                let sqrxrScore;
-                if(PROC_timingInfoDumpCount<10) {
-                    PROC_timingInfoDumpCount++;
-                    let timingInfo = await tf.time(async ()=>sqrxrScore=await procPredict(img));
-                    WJR_DEBUG && console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
-                } else {
-                    sqrxrScore = await procPredict(img);
-                }
+                let sqrxrScore = await procPredict(img);
                 if(procIsSafe(sqrxrScore)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
@@ -364,7 +355,7 @@ async function procPerformFiltering(entry) {
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
-        console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e));
+        console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e)+' '+e.stack);
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
