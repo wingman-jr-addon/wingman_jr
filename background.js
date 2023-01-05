@@ -652,26 +652,30 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         }
     }
     if (headerIndex == -1) {
-      WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
+      WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one by guessing.');
+      contentType = bkGuessContentType(details);
       headerIndex = details.responseHeaders.length;
-      contentType = 'text/html';
       details.responseHeaders.push(
         {
           "name": "Content-Type",
-          "value":"text/html"
+          "value": contentType
         }
       );
     }
 
     let baseType;
-    if(contentType.trim().startsWith('text/html')) {
+    let trimmedContentType = contentType.trim();
+    if(trimmedContentType.startsWith('text/html')) {
       baseType = 'text/html';
       WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
-    } else if(contentType.trim().startsWith('application/xhtml+xml')) {
+    } else if(trimmedContentType.startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
       WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
-    } else if(contentType.trim().startsWith('image/')) {
+    } else if(trimmedContentType.startsWith('image/')) {
       WJR_DEBUG && console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      return;
+    } else if(trimmedContentType == 'application/pdf') {
+      WJR_DEBUG && console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is a PDF MIME type');
       return;
     } else {
       baseType = 'text/html';
@@ -700,6 +704,44 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
 
     return [decoder, encoder];
+}
+
+// Guess the content type when none is supplied
+// Ideally this would actually look at the bytes supplied but we
+// don't have those available yet, so do some hacky guessing
+function bkGuessContentType(details) {
+    try {
+        for (let i = 0; i < details.responseHeaders.length; i++) {
+            let header = details.responseHeaders[i];
+            // If no content-type was specified BUT a default filename was
+            // provided, fallback to a MIME type derived from the extension - YUCK
+            // e.g. content-disposition: inline; filename="user-guide-nokia-5310-user-guide.pdf" -> application/pdf
+            // Note: we will not try to handle filename* as per https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Disposition
+            // and https://datatracker.ietf.org/doc/html/rfc5987#page-7
+            if (header.name.toLowerCase() == "content-disposition") {
+                let filenameMatches = [...header.value.matchAll(/filename[ ]*=[ ]*\"([^\"]*)\"/g)];
+                if(filenameMatches.length > 0) {
+                    let filename = filenameMatches[0][1]; //First capture group of first match
+                    let extensionMatch = filename.match(/\.[^\.]+$/);
+                    if(extensionMatch != null && extensionMatch.length > 0) {
+                        let extension = extensionMatch[0];
+                        switch(extension) {
+                            case ".pdf":
+                                WJR_DEBUG && console.debug('CHARSET: Guessed content type application/pdf using extension ' + extension + ' for ' + details.url);
+                                return 'application/pdf';
+                            default:
+                                WJR_DEBUG && console.debug('CHARSET: Unhandled file extension "' + extension + '" for ' + details.url);
+                                break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    } catch(e) {
+        console.error('CHARSET: Exception guessing content type when none supplied for '+details.url+' '+e);
+    }
+    return 'text/html';
 }
 
 
