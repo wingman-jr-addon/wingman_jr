@@ -651,6 +651,10 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
             break;
         }
     }
+    for (let i = 0; i < details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        WJR_DEBUG && console.debug('CHARSET:  '+header.name+': '+header.value);
+    }
     if (headerIndex == -1) {
       WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one by guessing.');
       contentType = bkGuessContentType(details);
@@ -698,12 +702,38 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         decodingCharset = detectedCharset;
         WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
     }
-    details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
+    
 
     let decoder = new TextDecoder(decodingCharset);
-    let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
+    let encoder = null;
+
+    if(detectedCharset == 'utf-8')
+    {
+        details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
+        encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
+    }
+    else
+    {
+        WJR_DEBUG && console.debug('CHARSET: Using ISO-8859-1 encoder fro '+url);
+        encoder = new TextEncoderISO_8859_1();
+    }
 
     return [decoder, encoder];
+}
+
+function TextEncoderISO_8859_1()
+{
+    this.encode = function(str) {
+        var result = new Uint8Array(str.length);
+        for(let i=0; i<str.length; i++) {
+            let charCodeClamped = str.charCodeAt(i);
+            if(charCodeClamped > 255) {
+                charCodeClamped = 255;
+            }
+            result[i] = charCodeClamped;
+        }
+        return result;
+    }
 }
 
 // Guess the content type when none is supplied
