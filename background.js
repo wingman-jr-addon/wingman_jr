@@ -701,12 +701,18 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     if (detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
         WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+    } else if(trimmedContentType.startsWith('application/xhtml+xml')) {
+        decodingCharset = 'utf-8';
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
+    } else {
+        decodingCharset = undefined;
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until decoding error encountered!');
     }
-    
 
-    let decoder = new TextDecoder(decodingCharset);
-    let encoder = null;
+    let decoder = new TextDecoderWithSniffing(decodingCharset);
+    let encoder = new TextEncoderWithSniffing(decoder);
 
+    /*
     if(detectedCharset == 'utf-8')
     {
         details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
@@ -714,11 +720,57 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     }
     else
     {
-        WJR_DEBUG && console.debug('CHARSET: Using ISO-8859-1 encoder fro '+url);
+        WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + detectedCharset + ' Using ISO-8859-1 encoder from '+url);
         encoder = new TextEncoderISO_8859_1();
     }
+    */
 
     return [decoder, encoder];
+}
+
+function TextDecoderWithSniffing(declType)
+{
+    let self = this;
+    self.currentType = declType;
+    self.decoder = (self.currentType === undefined) ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : new TextDecoder(self.currentType);
+
+    self.decode = function(buffer, options) {
+        if(self.currentType === undefined) {
+            try {
+                WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
+                return self.decoder.decode(buffer, options);
+            } catch {
+                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1');
+                self.decoder = new TextDecoder('iso-8859-1');
+                self.currentType = 'iso-8859-1';
+                return self.decoder.decode(buffer, options);
+            }
+        } else {
+            WJR_DEBUG && console.debug('CHARSET: Effective decoding ' + self.currentType);
+            return self.decoder.decode(buffer, options);
+        }
+    }
+}
+
+function TextEncoderWithSniffing(decoder) {
+    let self = this;
+    self.utf8Encoder = new TextEncoder();
+    self.iso_8859_1_Encoder = new TextEncoderISO_8859_1();
+    self.linkedDecoder = decoder;
+
+    self.encode = function(str) {
+        WJR_DEBUG && console.debug('CHARSET: Encoding with decoder current type '+self.linkedDecoder.currentType);
+        if(self.linkedDecoder.currentType === undefined) {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
+            return self.iso_8859_1_Encoder.encode(str);
+        } else if(self.linkedDecoder.currentType == 'utf-8') {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding utf-8');
+            return self.utf8Encoder.encode(str);
+        } else {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
+            return self.iso_8859_1_Encoder.encode(str);
+        }
+    }
 }
 
 function TextEncoderISO_8859_1()
