@@ -336,6 +336,7 @@ fetch('silent_data/zoe-reeve-ijRuGjKpBcg-unsplash.jpg')
         setInterval(bkCrashDetectionWatchdog, 7500);
     });
 let CRASH_DETECTION_EXPECTED_RESULT;
+let CRASH_DETECTION_WARMUPS_LEFT = 3;
 let CRASH_DETECTION_COUNT = 0;
 let CRASH_NO_PROCESSOR_COUNT = 0;
 let CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
@@ -356,7 +357,7 @@ async function bkCrashDetectionWatchdog() {
         CRASH_NO_PROCESSOR_COUNT++;
         if(CRASH_NO_PROCESSOR_COUNT >= CRASH_NO_PROCESSOR_RESTART_THRESHOLD) {
             console.error(`CRASH: No processors found after extended time - reloading.`);
-            //browser.runtime.reload();
+            browser.runtime.reload();
         }
         console.warn(`CRASH: Processors not yet ready.`);
         return;
@@ -382,7 +383,7 @@ async function bkCrashDetectionWatchdog() {
         CRASH_NO_PROCESSOR_COUNT++;
         if(CRASH_NO_PROCESSOR_COUNT >= CRASH_NO_PROCESSOR_RESTART_THRESHOLD) {
             console.error(`CRASH: Failure to post to processor after extended time - reloading.`);
-            //browser.runtime.reload();
+            browser.runtime.reload();
         }
         console.error(`CRASH: Failure to post to processor.`);
     }
@@ -390,8 +391,13 @@ async function bkCrashDetectionWatchdog() {
 
 function bkHandleCrashDetectionResult(m) {
     if (!CRASH_DETECTION_EXPECTED_RESULT) {
-        CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
-        console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        if(CRASH_DETECTION_WARMUPS_LEFT > 0) {
+            CRASH_DETECTION_WARMUPS_LEFT -= 1;
+            console.log(`CRASH: Warmups left before setting crash result ${CRASH_DETECTION_WARMUPS_LEFT}`);
+        } else {
+            CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
+            console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        }
     } else {
         let actual = JSON.stringify(m.sqrxrScore);
         if (actual != CRASH_DETECTION_EXPECTED_RESULT) {
@@ -399,7 +405,7 @@ function bkHandleCrashDetectionResult(m) {
             CRASH_BAD_STATE_ENCOUNTERED_COUNT++;
             if (CRASH_BAD_STATE_ENCOUNTERED_COUNT >= CRASH_BAD_STATE_RESTART_THRESHOLD) {
                 console.error(`CRASH: Bad state threshold exceeded, reloading plugin!!!`);
-                //browser.runtime.reload();
+                browser.runtime.reload();
             }
         } else {
             console.log(`CRASH: Detection passed`);
