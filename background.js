@@ -389,19 +389,31 @@ async function bkCrashDetectionWatchdog() {
     }
 }
 
+function bkApproxEq(expected, actual) {
+    return Math.abs(actual - expected) < 0.01;
+}
+
+function bkCompareSqrxScores(x, a) {
+    return bkApproxEq(x[0][0],a[0][0])
+        && bkApproxEq(x[1][0],a[1][0])
+        && bkApproxEq(x[1][1],a[1][1])
+        && bkApproxEq(x[1][2],a[1][2])
+        && bkApproxEq(x[1][3],a[1][3]);
+}
+
 function bkHandleCrashDetectionResult(m) {
     if (!CRASH_DETECTION_EXPECTED_RESULT) {
         if(CRASH_DETECTION_WARMUPS_LEFT > 0) {
             CRASH_DETECTION_WARMUPS_LEFT -= 1;
             console.log(`CRASH: Warmups left before setting crash result ${CRASH_DETECTION_WARMUPS_LEFT}`);
         } else {
-            CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
-            console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+            CRASH_DETECTION_EXPECTED_RESULT = { ... m.sqrxrScore};
+            console.log(`CRASH: Setting expected result to ${JSON.stringify(CRASH_DETECTION_EXPECTED_RESULT)}`);
         }
     } else {
-        let actual = JSON.stringify(m.sqrxrScore);
-        if (actual != CRASH_DETECTION_EXPECTED_RESULT) {
-            console.error(`CRASH: Check actual ${actual} vs. Expected ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        let actual = m.sqrxrScore;
+        if (!bkCompareSqrxScores(CRASH_DETECTION_EXPECTED_RESULT,actual)) {
+            console.error(`CRASH: Check actual ${JSON.stringify(actual)} vs. Expected ${JSON.stringify(CRASH_DETECTION_EXPECTED_RESULT)}`);
             CRASH_BAD_STATE_ENCOUNTERED_COUNT++;
             if (CRASH_BAD_STATE_ENCOUNTERED_COUNT >= CRASH_BAD_STATE_RESTART_THRESHOLD) {
                 console.error(`CRASH: Bad state threshold exceeded, reloading plugin!!!`);
