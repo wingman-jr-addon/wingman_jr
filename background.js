@@ -390,7 +390,7 @@ async function bkCrashDetectionWatchdog() {
 }
 
 function bkApproxEq(expected, actual) {
-    return Math.abs(actual - expected) < 0.01;
+    return Math.abs(actual - expected) < 0.02;
 }
 
 function bkCompareSqrxScores(x, a) {
