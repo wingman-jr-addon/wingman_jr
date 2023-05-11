@@ -728,15 +728,64 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     return [decoder, encoder];
 }
 
+function bkConcatBuffersToUint8Array(buffers) {
+    let fullLength = buffers.reduce((acc,buf)=>acc+buf.byteLength, 0);
+    let result = new Uint8Array(fullLength);
+    let offset = 0;
+    for(let buffer of buffers) {
+        result.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
+    }
+    return result;
+}
+
+function bkDoesSniffStringIndicateUtf8(sniffString) {
+    return (
+        /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
+    || /<meta\s+http-equiv="Content-Type"\s+content="text\/html;\s+charset=utf-8"\s+\/>/gm.test(sniffString));
+}
+
 function TextDecoderWithSniffing(declType)
 {
     let self = this;
     self.currentType = declType;
     self.decoder = (self.currentType === undefined) ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : new TextDecoder(self.currentType);
+    self.sniffBufferList = [];
+    self.sniffCount = 0;
 
     self.decode = function(buffer, options) {
         if(self.currentType === undefined) {
             try {
+                if(self.sniffCount < 512) {
+                    //Start by checking for BOM
+                    //Buffer should always be >= 3 but just in case...
+                    if(self.sniffCount == 0 && buffer.byteLength >= 3) {
+                        let bom = new Uint8Array(buffer, 0, 3);
+                        if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+                            WJR_DEBUG && console.debug('CHARSET: Sniff found utf-8 BOM');
+                            self.currentType = 'utf-8';
+                        }
+                    }
+                    //Continue with normal header sniffing
+                    if(self.currentType === undefined) {
+                        self.sniffBufferList.push(buffer);
+                        self.sniffCount += buffer.byteLength;
+                        WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
+                        if(self.sniffCount >= 512) {
+                            let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
+                            self.sniffBufferList = null;
+                            let tmpDecoder = new TextDecoder('iso-8859-1');
+                            let sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
+                            if(bkDoesSniffStringIndicateUtf8(sniffString)) {
+                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of utf-8 by examining header');
+                                self.currentType = 'utf-8';
+                            } else {
+                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate UTF-8');
+                            }
+                        }
+                    }
+                }
                 WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
                 return self.decoder.decode(buffer, options);
             } catch {
