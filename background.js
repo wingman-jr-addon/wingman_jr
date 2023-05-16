@@ -687,14 +687,20 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
       return;
     }
 
-    // It is important to detect the charset to correctly initialize TextDecoder or
-    // else we run into garbage output sometimes.
-    // However, TextEncoder does NOT support other than 'utf-8', so it is necessary
-    // to change the Content-Type on the header to UTF-8
+    // Character set detection is quite a difficult problem.
+    // In general, this implementation supports iso-8859-1 and utf-8.
+    // By default, the implementation starts in iso-8859-1 and then
+    // "upgrades" to utf-8 if any of a variety of conditions are encountered:
+    //  1) Headers: Content-Type has a charset
+    //  2) Content sniffing: starts with BOM
+    //  3) Content sniffing: XML encoding indicates utf-8
+    //  4) Content sniffing: meta http-equiv Content-Type indicates utf-8
+    // Content sniffing uses the first 512 bytes currently.
+    // Note that if decoding as utf-8 fails, decoding will fallback to 
+    // iso-8859-1.
     // If modifying this block of code, ensure that the tests at
     // https://www.w3.org/2006/11/mwbp-tests/index.xhtml
-    // all pass - current implementation only fails on #9 but this detection ensures
-    // tests #3,4,5, and 8 pass.
+    // all pass - current implementation passes on all
     let decodingCharset = 'utf-8';
     let detectedCharset = bkDetectCharset(contentType);
 
@@ -711,19 +717,6 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
 
     let decoder = new TextDecoderWithSniffing(decodingCharset);
     let encoder = new TextEncoderWithSniffing(decoder);
-
-    /*
-    if(detectedCharset == 'utf-8')
-    {
-        details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
-        encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
-    }
-    else
-    {
-        WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + detectedCharset + ' Using ISO-8859-1 encoder from '+url);
-        encoder = new TextEncoderISO_8859_1();
-    }
-    */
 
     return [decoder, encoder];
 }
