@@ -669,6 +669,10 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
             break;
         }
     }
+    for (let i = 0; i < details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        WJR_DEBUG && console.debug('CHARSET:  '+header.name+': '+header.value);
+    }
     if (headerIndex == -1) {
       WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one by guessing.');
       contentType = bkGuessContentType(details);
@@ -701,27 +705,147 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
       return;
     }
 
-    // It is important to detect the charset to correctly initialize TextDecoder or
-    // else we run into garbage output sometimes.
-    // However, TextEncoder does NOT support other than 'utf-8', so it is necessary
-    // to change the Content-Type on the header to UTF-8
+    // Character set detection is quite a difficult problem.
+    // In general, this implementation supports iso-8859-1 and utf-8.
+    // By default, the implementation starts in iso-8859-1 and then
+    // "upgrades" to utf-8 if any of a variety of conditions are encountered:
+    //  1) Headers: Content-Type has a charset
+    //  2) Content sniffing: starts with BOM
+    //  3) Content sniffing: XML encoding indicates utf-8
+    //  4) Content sniffing: meta http-equiv Content-Type indicates utf-8
+    // Content sniffing uses the first 512 bytes currently.
+    // Note that if decoding as utf-8 fails, decoding will fallback to 
+    // iso-8859-1.
     // If modifying this block of code, ensure that the tests at
     // https://www.w3.org/2006/11/mwbp-tests/index.xhtml
-    // all pass - current implementation only fails on #9 but this detection ensures
-    // tests #3,4,5, and 8 pass.
+    // all pass - current implementation passes on all
     let decodingCharset = 'utf-8';
     let detectedCharset = bkDetectCharset(contentType);
 
     if (detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
         WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+    } else if(trimmedContentType.startsWith('application/xhtml+xml')) {
+        decodingCharset = 'utf-8';
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
+    } else {
+        decodingCharset = undefined;
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until decoding error encountered!');
     }
-    details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
 
-    let decoder = new TextDecoder(decodingCharset);
-    let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
+    let decoder = new TextDecoderWithSniffing(decodingCharset);
+    let encoder = new TextEncoderWithSniffing(decoder);
 
     return [decoder, encoder];
+}
+
+function bkConcatBuffersToUint8Array(buffers) {
+    let fullLength = buffers.reduce((acc,buf)=>acc+buf.byteLength, 0);
+    let result = new Uint8Array(fullLength);
+    let offset = 0;
+    for(let buffer of buffers) {
+        result.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
+    }
+    return result;
+}
+
+function bkDoesSniffStringIndicateUtf8(sniffString) {
+    return (
+        /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
+    || /<meta\s+http-equiv="Content-Type"\s+content="text\/html;\s+charset=utf-8"\s+\/>/gm.test(sniffString));
+}
+
+function TextDecoderWithSniffing(declType)
+{
+    let self = this;
+    self.currentType = declType;
+    self.decoder = (self.currentType === undefined) ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : new TextDecoder(self.currentType);
+    self.sniffBufferList = [];
+    self.sniffCount = 0;
+
+    self.decode = function(buffer, options) {
+        if(self.currentType === undefined) {
+            try {
+                if(self.sniffCount < 512) {
+                    //Start by checking for BOM
+                    //Buffer should always be >= 3 but just in case...
+                    if(self.sniffCount == 0 && buffer.byteLength >= 3) {
+                        let bom = new Uint8Array(buffer, 0, 3);
+                        if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+                            WJR_DEBUG && console.debug('CHARSET: Sniff found utf-8 BOM');
+                            self.currentType = 'utf-8';
+                        }
+                    }
+                    //Continue with normal header sniffing
+                    if(self.currentType === undefined) {
+                        self.sniffBufferList.push(buffer);
+                        self.sniffCount += buffer.byteLength;
+                        WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
+                        if(self.sniffCount >= 512) {
+                            let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
+                            self.sniffBufferList = null;
+                            let tmpDecoder = new TextDecoder('iso-8859-1');
+                            let sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
+                            if(bkDoesSniffStringIndicateUtf8(sniffString)) {
+                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of utf-8 by examining header');
+                                self.currentType = 'utf-8';
+                            } else {
+                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate UTF-8');
+                            }
+                        }
+                    }
+                }
+                WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
+                return self.decoder.decode(buffer, options);
+            } catch {
+                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1');
+                self.decoder = new TextDecoder('iso-8859-1');
+                self.currentType = 'iso-8859-1';
+                return self.decoder.decode(buffer, options);
+            }
+        } else {
+            WJR_DEBUG && console.debug('CHARSET: Effective decoding ' + self.currentType);
+            return self.decoder.decode(buffer, options);
+        }
+    }
+}
+
+function TextEncoderWithSniffing(decoder) {
+    let self = this;
+    self.utf8Encoder = new TextEncoder();
+    self.iso_8859_1_Encoder = new TextEncoderISO_8859_1();
+    self.linkedDecoder = decoder;
+
+    self.encode = function(str) {
+        WJR_DEBUG && console.debug('CHARSET: Encoding with decoder current type '+self.linkedDecoder.currentType);
+        if(self.linkedDecoder.currentType === undefined) {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
+            return self.iso_8859_1_Encoder.encode(str);
+        } else if(self.linkedDecoder.currentType == 'utf-8') {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding utf-8');
+            return self.utf8Encoder.encode(str);
+        } else {
+            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
+            return self.iso_8859_1_Encoder.encode(str);
+        }
+    }
+}
+
+function TextEncoderISO_8859_1()
+{
+    this.encode = function(str) {
+        var result = new Uint8Array(str.length);
+        for(let i=0; i<str.length; i++) {
+            let charCodeClamped = str.charCodeAt(i);
+            if(charCodeClamped > 255) {
+                charCodeClamped = 255;
+            }
+            result[i] = charCodeClamped;
+        }
+        return result;
+    }
 }
 
 // Guess the content type when none is supplied
