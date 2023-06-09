@@ -753,7 +753,7 @@ function bkConcatBuffersToUint8Array(buffers) {
 function bkDoesSniffStringIndicateUtf8(sniffString) {
     return (
         /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
-    || /<meta\s+http-equiv="Content-Type"\s+content="text\/html;\s+charset=utf-8"\s+\/>/gm.test(sniffString));
+    || /<meta[^>]+utf-8/igm.test(sniffString));
 }
 
 function TextDecoderWithSniffing(declType)
