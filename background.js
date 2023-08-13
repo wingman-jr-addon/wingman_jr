@@ -750,11 +750,21 @@ function bkConcatBuffersToUint8Array(buffers) {
     return result;
 }
 
+/*
+ * UTF-8 test functions.
+ * If you change one, check to make sure another doesn't need to change.
+ */
+function bkIsUtf8Alias(declType) {
+    //Passes all 6 aliases found at https://encoding.spec.whatwg.org/#names-and-labels
+    return (/.*utf.?8/gmi.test(declType));
+}
+
 function bkDoesSniffStringIndicateUtf8(sniffString) {
     return (
         /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
-    || /<meta[^>]+utf-8/igm.test(sniffString));
+    || /<meta[^>]+[^<]*utf.?8/igm.test(sniffString));
 }
+/* End UTF-8 test function */
 
 function TextDecoderWithSniffing(declType)
 {
@@ -823,7 +833,7 @@ function TextEncoderWithSniffing(decoder) {
         if(self.linkedDecoder.currentType === undefined) {
             WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
             return self.iso_8859_1_Encoder.encode(str);
-        } else if(self.linkedDecoder.currentType == 'utf-8') {
+        } else if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
             WJR_DEBUG && console.debug('CHARSET: Effective encoding utf-8');
             return self.utf8Encoder.encode(str);
         } else {
