@@ -451,7 +451,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     if(isGif) {
         return await gifListener(details);
     }
-    
+
     return await bkImageListenerNormal(details, mimeType);
 }
 
@@ -474,7 +474,7 @@ async function bkImageListenerNormal(details, mimeType) {
             dataStartTime = performance.now();
         }
         WJR_DEBUG && console.debug('WEBREQ: data '+details.requestId);
-        processor.postMessage({ 
+        processor.postMessage({
             type: 'ondata',
             requestId: details.requestId,
             data: event.data
@@ -714,7 +714,7 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     //  3) Content sniffing: XML encoding indicates utf-8
     //  4) Content sniffing: meta http-equiv Content-Type indicates utf-8
     // Content sniffing uses the first 512 bytes currently.
-    // Note that if decoding as utf-8 fails, decoding will fallback to 
+    // Note that if decoding as utf-8 fails, decoding will fallback to
     // iso-8859-1.
     // If modifying this block of code, ensure that the tests at
     // https://www.w3.org/2006/11/mwbp-tests/index.xhtml
@@ -940,17 +940,19 @@ function bkDetectCharset(contentType) {
 
 ////////////////////////////Context Menu////////////////////////////
 
-browser.menus.create({
-    title: "Hide Image",
-    documentUrlPatterns: ["*://*/*"],
-    contexts: ["image"],
-    onclick(info, tab) {
-      browser.tabs.executeScript(tab.id, {
-        frameId: info.frameId,
-        code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
+if (browser.menus) {
+    browser.menus.create({
+        title: "Hide Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["image"],
+        onclick(info, tab) {
+          browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
+          });
+        },
       });
-    },
-  });
+}
 
 
 ////////////////////////Actual Startup//////////////////////////////
