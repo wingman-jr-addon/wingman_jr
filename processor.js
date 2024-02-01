@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_112_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_136_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -151,12 +151,12 @@ async function procPredict(imgElement) {
         const logits = tf.tidy(() => {
             const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
             const floatImg = rightSizeImageDataTF.toFloat();
-            //EfficientNet
-            //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
-            //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
-            //MobileNet V2
-            const scaled = floatImg.div(tf.scalar(127.5));
-            const normalized = scaled.sub(tf.scalar(1));
+            //Torch Preprocessing
+            const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
+            const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
+            //TF Preprocessing
+            //const scaled = floatImg.div(tf.scalar(127.5));
+            //const normalized = scaled.sub(tf.scalar(1));
             // Reshape to a single-element batch so we can pass it to predict.
             const batched = tf.stack([normalized]);
             const result = PROC_wingman.predict(batched, {batchSize: 1});
