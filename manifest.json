@@ -29,6 +29,8 @@
           "mp4.js",
           "ebml.js",
           "status.js",
+          "encoders_data.js",
+          "encoders.js",
           "background_gif.js",
           "background.js",
           "background_video.js",

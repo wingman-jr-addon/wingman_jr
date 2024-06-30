@@ -830,16 +830,33 @@ function TextEncoderWithSniffing(decoder) {
 
     self.encode = function(str) {
         WJR_DEBUG && console.debug('CHARSET: Encoding with decoder current type '+self.linkedDecoder.currentType);
-        if(self.linkedDecoder.currentType === undefined) {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
-            return self.iso_8859_1_Encoder.encode(str);
-        } else if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding utf-8');
+
+        if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
+            WJR_DEBUG && console.debug('CHARSET: Encoding utf-8');
             return self.utf8Encoder.encode(str);
-        } else {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
-            return self.iso_8859_1_Encoder.encode(str);
         }
+        console.log('CHARSET: Test '+TEXT_ENCODINGS[self.linkedDecoder.currentType]);
+        let effectiveEncoding = TEXT_ENCODINGS[self.linkedDecoder.currentType] ?? TEXT_ENCODINGS['iso-8859-1'];
+        WJR_DEBUG && console.debug('CHARSET: Effective encoding ' + effectiveEncoding.name);
+        let outputRaw = [];
+        let untranslatable = [];
+        let untranslatableString = '';
+        for(const codePoint of str) {
+            let initialCodePoint = codePoint.codePointAt(0);
+            let bytes = effectiveEncoding.codePointsToBytes[initialCodePoint];
+            if(bytes !== undefined) {
+                for(let i=0; i<bytes.length; i++) {
+                    outputRaw.push(bytes[i]);
+                }
+            } else {
+                untranslatable.push(initialCodePoint);
+                untranslatableString += (initialCodePoint + ',');
+            }
+        }
+        let result = new Uint8Array(outputRaw);
+        WJR_DEBUG && console.log('CHARSET: added '+result.length+' bytes ('+untranslatable.length+' untranslated) with effective encoding '+ effectiveEncoding.name);
+        console.warn('CHARSET: untranslatable '+untranslatableString.substring(0, 100));
+        return result;
     }
 }
 
