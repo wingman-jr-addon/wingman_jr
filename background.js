@@ -839,8 +839,7 @@ function TextEncoderWithSniffing(decoder) {
         let effectiveEncoding = TEXT_ENCODINGS[self.linkedDecoder.currentType] ?? TEXT_ENCODINGS['iso-8859-1'];
         WJR_DEBUG && console.debug('CHARSET: Effective encoding ' + effectiveEncoding.name);
         let outputRaw = [];
-        let untranslatable = [];
-        let untranslatableString = '';
+        let untranslatableCount = 0;
         for(const codePoint of str) {
             let initialCodePoint = codePoint.codePointAt(0);
             let bytes = effectiveEncoding.codePointsToBytes[initialCodePoint];
@@ -849,13 +848,14 @@ function TextEncoderWithSniffing(decoder) {
                     outputRaw.push(bytes[i]);
                 }
             } else {
-                untranslatable.push(initialCodePoint);
-                untranslatableString += (initialCodePoint + ',');
+                if(untranslatableCount == 0) {
+                    console.warn('CHARSET: untranslatable code point '+initialCodePoint+' found while charset='+self.linkedDecoder.currentType);
+                }
+                untranslatableCount++;
             }
         }
         let result = new Uint8Array(outputRaw);
-        WJR_DEBUG && console.log('CHARSET: added '+result.length+' bytes ('+untranslatable.length+' untranslated) with effective encoding '+ effectiveEncoding.name);
-        console.warn('CHARSET: untranslatable '+untranslatableString.substring(0, 100));
+        WJR_DEBUG && console.log('CHARSET: re-encoded '+result.length+' bytes ('+untranslatableCount+' untranslated code points) with effective encoding '+ effectiveEncoding.name);
         return result;
     }
 }
