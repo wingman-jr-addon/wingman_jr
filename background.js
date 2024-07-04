@@ -730,7 +730,7 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
     } else {
         decodingCharset = undefined;
-        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until decoding error encountered!');
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until sniff finds an encoding or decoding error encountered!');
     }
 
     let decoder = new TextDecoderWithSniffing(decodingCharset);
@@ -750,21 +750,26 @@ function bkConcatBuffersToUint8Array(buffers) {
     return result;
 }
 
-/*
- * UTF-8 test functions.
- * If you change one, check to make sure another doesn't need to change.
- */
 function bkIsUtf8Alias(declType) {
     //Passes all 6 aliases found at https://encoding.spec.whatwg.org/#names-and-labels
     return (/.*utf.?8/gmi.test(declType));
 }
 
-function bkDoesSniffStringIndicateUtf8(sniffString) {
-    return (
-        /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
-    || /<meta[^>]+[^<]*utf.?8/igm.test(sniffString));
+function bkSniffExtractEncoding(sniffString) {
+    try {
+        const xmlParts = /<\?xml\sversion="1\.0"\s+encoding="([^"]+)"\?>/gm.exec(sniffString);
+        if(xmlParts) {
+            return xmlParts[1];
+        }
+        const metaParts = /<meta[^>]+charset="([^"]+)"/igm.exec(sniffString);
+        if(metaParts) {
+            return metaParts[1];
+        }
+    } catch (ex) {
+        console.error('CHARSET: Sniff extraction exception: '+ex);
+    }
+    return null;
 }
-/* End UTF-8 test function */
 
 function TextDecoderWithSniffing(declType)
 {
@@ -797,20 +802,25 @@ function TextDecoderWithSniffing(declType)
                             self.sniffBufferList = null;
                             let tmpDecoder = new TextDecoder('iso-8859-1');
                             let sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            if(sniffString.length > 512) {
+                                sniffString = sniffString.substring(0, 512);
+                            }
                             WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
-                            if(bkDoesSniffStringIndicateUtf8(sniffString)) {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of utf-8 by examining header');
-                                self.currentType = 'utf-8';
+                            let extractedEncoding = bkSniffExtractEncoding(sniffString);
+                            if(extractedEncoding) {
+                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
+                                self.currentType = extractedEncoding.toLowerCase();
+                                self.decoder = new TextDecoder(self.currentType);
                             } else {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate UTF-8');
+                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate encoding');
                             }
                         }
                     }
                 }
                 WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
                 return self.decoder.decode(buffer, options);
-            } catch {
-                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1');
+            } catch (ex) {
+                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
                 self.decoder = new TextDecoder('iso-8859-1');
                 self.currentType = 'iso-8859-1';
                 return self.decoder.decode(buffer, options);
