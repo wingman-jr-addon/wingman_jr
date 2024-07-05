@@ -761,7 +761,7 @@ function bkSniffExtractEncoding(sniffString) {
         if(xmlParts) {
             return xmlParts[1];
         }
-        const metaParts = /<meta[^>]+charset="([^"]+)"/igm.exec(sniffString);
+        const metaParts = /<meta[^>]+charset="?([^"]+)"/igm.exec(sniffString);
         if(metaParts) {
             return metaParts[1];
         }
@@ -788,7 +788,7 @@ function TextDecoderWithSniffing(declType)
                     if(self.sniffCount == 0 && buffer.byteLength >= 3) {
                         let bom = new Uint8Array(buffer, 0, 3);
                         if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
-                            WJR_DEBUG && console.debug('CHARSET: Sniff found utf-8 BOM');
+                            WJR_DEBUG && console.log('CHARSET: Sniff found utf-8 BOM');
                             self.currentType = 'utf-8';
                         }
                     }
@@ -808,16 +808,16 @@ function TextDecoderWithSniffing(declType)
                             WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
                             let extractedEncoding = bkSniffExtractEncoding(sniffString);
                             if(extractedEncoding) {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
+                                WJR_DEBUG && console.log('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
                                 self.currentType = extractedEncoding.toLowerCase();
                                 self.decoder = new TextDecoder(self.currentType);
                             } else {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate encoding');
+                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding');
                             }
                         }
                     }
                 }
-                WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
+                WJR_DEBUG && console.debug('CHARSET: Sniff received a chunk, current decoding type '+self.currentType);
                 return self.decoder.decode(buffer, options);
             } catch (ex) {
                 WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
