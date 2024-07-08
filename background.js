@@ -730,7 +730,7 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
     } else {
         decodingCharset = undefined;
-        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until decoding error encountered!');
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until sniff finds an encoding or decoding error encountered!');
     }
 
     let decoder = new TextDecoderWithSniffing(decodingCharset);
@@ -750,21 +750,26 @@ function bkConcatBuffersToUint8Array(buffers) {
     return result;
 }
 
-/*
- * UTF-8 test functions.
- * If you change one, check to make sure another doesn't need to change.
- */
 function bkIsUtf8Alias(declType) {
     //Passes all 6 aliases found at https://encoding.spec.whatwg.org/#names-and-labels
     return (/.*utf.?8/gmi.test(declType));
 }
 
-function bkDoesSniffStringIndicateUtf8(sniffString) {
-    return (
-        /<\?xml\sversion="1\.0"\s+encoding="utf-8"\?>/gm.test(sniffString)
-    || /<meta[^>]+[^<]*utf.?8/igm.test(sniffString));
+function bkSniffExtractEncoding(sniffString) {
+    try {
+        const xmlParts = /<\?xml\sversion="1\.0"\s+encoding="([^"]+)"\?>/gm.exec(sniffString);
+        if(xmlParts) {
+            return xmlParts[1];
+        }
+        const metaParts = /<meta[^>]+charset="?([^"]+)"/igm.exec(sniffString);
+        if(metaParts) {
+            return metaParts[1];
+        }
+    } catch (ex) {
+        console.error('CHARSET: Sniff extraction exception: '+ex);
+    }
+    return null;
 }
-/* End UTF-8 test function */
 
 function TextDecoderWithSniffing(declType)
 {
@@ -783,7 +788,7 @@ function TextDecoderWithSniffing(declType)
                     if(self.sniffCount == 0 && buffer.byteLength >= 3) {
                         let bom = new Uint8Array(buffer, 0, 3);
                         if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
-                            WJR_DEBUG && console.debug('CHARSET: Sniff found utf-8 BOM');
+                            WJR_DEBUG && console.log('CHARSET: Sniff found utf-8 BOM');
                             self.currentType = 'utf-8';
                         }
                     }
@@ -797,20 +802,25 @@ function TextDecoderWithSniffing(declType)
                             self.sniffBufferList = null;
                             let tmpDecoder = new TextDecoder('iso-8859-1');
                             let sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            if(sniffString.length > 512) {
+                                sniffString = sniffString.substring(0, 512);
+                            }
                             WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
-                            if(bkDoesSniffStringIndicateUtf8(sniffString)) {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff found decoding of utf-8 by examining header');
-                                self.currentType = 'utf-8';
+                            let extractedEncoding = bkSniffExtractEncoding(sniffString);
+                            if(extractedEncoding) {
+                                WJR_DEBUG && console.log('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
+                                self.currentType = extractedEncoding.toLowerCase();
+                                self.decoder = new TextDecoder(self.currentType);
                             } else {
-                                WJR_DEBUG && console.debug('CHARSET: Sniff string did not indicate UTF-8');
+                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding');
                             }
                         }
                     }
                 }
-                WJR_DEBUG && console.debug('CHARSET: Sniffing decoding of utf-8');
+                WJR_DEBUG && console.debug('CHARSET: Sniff received a chunk, current decoding type '+self.currentType);
                 return self.decoder.decode(buffer, options);
-            } catch {
-                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1');
+            } catch (ex) {
+                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
                 self.decoder = new TextDecoder('iso-8859-1');
                 self.currentType = 'iso-8859-1';
                 return self.decoder.decode(buffer, options);
@@ -825,76 +835,36 @@ function TextDecoderWithSniffing(declType)
 function TextEncoderWithSniffing(decoder) {
     let self = this;
     self.utf8Encoder = new TextEncoder();
-    self.iso_8859_1_Encoder = new TextEncoderISO_8859_1();
     self.linkedDecoder = decoder;
 
     self.encode = function(str) {
         WJR_DEBUG && console.debug('CHARSET: Encoding with decoder current type '+self.linkedDecoder.currentType);
-        if(self.linkedDecoder.currentType === undefined) {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
-            return self.iso_8859_1_Encoder.encode(str);
-        } else if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding utf-8');
+
+        if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
+            WJR_DEBUG && console.debug('CHARSET: Encoding utf-8');
             return self.utf8Encoder.encode(str);
-        } else {
-            WJR_DEBUG && console.debug('CHARSET: Effective encoding iso-8859-1');
-            return self.iso_8859_1_Encoder.encode(str);
         }
-    }
-}
-
-//https://www.i18nqa.com/debug/table-iso8859-1-vs-windows-1252.html
-BK_Windows1252_special_chars = 
-{
-	0x20AC : 0x80,
-	0x201A : 0x82,
-	0x192  : 0x83,
-	0x201E : 0x84,
-	0x2026 : 0x85,
-	0x2020 : 0x86,
-	0x2021 : 0x87,
-	0x2C6  : 0x88,
-	0x2030 : 0x89,
-	0x160  : 0x8A,
-	0x2039 : 0x8B,
-	0x152  : 0x8C,
-	0x17D  : 0x8E,
-	0x2018 : 0x91,
-	0x2019 : 0x92,
-	0x201C : 0x93,
-	0x201D : 0x94,
-	0x2022 : 0x95,
-	0x2013 : 0x96,
-	0x2014 : 0x97,
-	0x2DC  : 0x98,
-	0x2122 : 0x99,
-	0x161  : 0x9A,
-	0x203A : 0x9B,
-	0x153  : 0x9C,
-	0x17E  : 0x9E,
-	0x178  : 0x9F
-}
-
-function TextEncoderISO_8859_1()
-{
-    this.encode = function(str) {
-        var result = new Uint8Array(str.length);
-        for(let i=0; i<str.length; i++) {
-            let charCode = str.charCodeAt(i);
-			
-			//So this is subtle. ISO-8859-1 is actually interpreted as Windows-1252 on decoding by browsers.
-			//When the TextDecoder got instantiated with 'iso-8859-1', it actually used Windows-1252.
-			//This means that for the characters in the (decimal) range 128-159, the Unicode point is not
-			//in the normal 0-255 range and we need to detect these characters specially to back-convert into
-			//Windows-1252 raw encoding masquerading as ISO-8859-1.
-			charCode = BK_Windows1252_special_chars[charCode] || charCode;
-			
-            if(charCode > 255) {
-				WJR_DEBUG && console.log(`CHARSET: Warning - likely mistranslation of character ${str[i]}`);
-                charCode = 255;
+        console.log('CHARSET: Test '+TEXT_ENCODINGS[self.linkedDecoder.currentType]);
+        let effectiveEncoding = TEXT_ENCODINGS[self.linkedDecoder.currentType] ?? TEXT_ENCODINGS['iso-8859-1'];
+        WJR_DEBUG && console.debug('CHARSET: Effective encoding ' + effectiveEncoding.name);
+        let outputRaw = [];
+        let untranslatableCount = 0;
+        for(const codePoint of str) {
+            let initialCodePoint = codePoint.codePointAt(0);
+            let bytes = effectiveEncoding.codePointsToBytes[initialCodePoint];
+            if(bytes !== undefined) {
+                for(let i=0; i<bytes.length; i++) {
+                    outputRaw.push(bytes[i]);
+                }
+            } else {
+                if(untranslatableCount == 0) {
+                    console.warn('CHARSET: untranslatable code point '+initialCodePoint+' found while charset='+self.linkedDecoder.currentType);
+                }
+                untranslatableCount++;
             }
-            result[i] = charCode;
         }
+        let result = new Uint8Array(outputRaw);
+        WJR_DEBUG && console.log('CHARSET: re-encoded '+result.length+' bytes ('+untranslatableCount+' untranslated code points) with effective encoding '+ effectiveEncoding.name);
         return result;
     }
 }
