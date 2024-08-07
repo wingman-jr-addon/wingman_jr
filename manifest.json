@@ -2,7 +2,7 @@
     "description": "Filter images transparently for kids",
     "manifest_version": 2,
     "name": "Wingman Jr.",
-    "version": "3.3.6",
+    "version": "3.4.0",
 
     "browser_specific_settings": {
       "gecko": {
