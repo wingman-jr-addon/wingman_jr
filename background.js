@@ -706,16 +706,6 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
     }
 
     // Character set detection is quite a difficult problem.
-    // In general, this implementation supports iso-8859-1 and utf-8.
-    // By default, the implementation starts in iso-8859-1 and then
-    // "upgrades" to utf-8 if any of a variety of conditions are encountered:
-    //  1) Headers: Content-Type has a charset
-    //  2) Content sniffing: starts with BOM
-    //  3) Content sniffing: XML encoding indicates utf-8
-    //  4) Content sniffing: meta http-equiv Content-Type indicates utf-8
-    // Content sniffing uses the first 512 bytes currently.
-    // Note that if decoding as utf-8 fails, decoding will fallback to
-    // iso-8859-1.
     // If modifying this block of code, ensure that the tests at
     // https://www.w3.org/2006/11/mwbp-tests/index.xhtml
     // all pass - current implementation passes on all
@@ -730,7 +720,7 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
         WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
     } else {
         decodingCharset = undefined;
-        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with UTF-8 until sniff finds an encoding or decoding error encountered!');
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with Windows-1252 until sniff finds an encoding or decoding error encountered!');
     }
 
     let decoder = new TextDecoderWithSniffing(decodingCharset);
@@ -857,6 +847,14 @@ function TextEncoderWithSniffing(decoder) {
                     outputRaw.push(bytes[i]);
                 }
             } else {
+                //If no character encoding was specified, the default is a bit sketchy but locale-defined
+                //However, I've seen pages where it wasn't specified, the default should be iso-8859-1/Windows-1252
+                //and yet the content was actually utf-8. Since this is a passthrough, retry encoding as utf-8
+                //in that specific circumstance
+                if(self.linkedDecoder.currentType === undefined) {
+                    console.warn('CHARSET: Encoding was unspecified, but iso-8859-1 encoding failed, so falling back to utf-8');
+                    return self.utf8Encoder.encode(str);
+                }
                 if(untranslatableCount == 0) {
                     console.warn('CHARSET: untranslatable code point '+initialCodePoint+' found while charset='+self.linkedDecoder.currentType);
                 }
