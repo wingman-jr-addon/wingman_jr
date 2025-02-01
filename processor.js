@@ -12,10 +12,8 @@ function procOnModelLoadProgress(percentage) {
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
-const procWingmanStartup = async () => {
+const procWingmanStartup = async (backendRequested) => {
     WJR_DEBUG && console.log('LIFECYCLE: Launching TF.js!');
-    let params = (new URL(document.location)).searchParams;
-    let backendRequested = params.get('backend');
     WJR_DEBUG && console.log('LIFECYCLE: Backend requested '+backendRequested);
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
@@ -854,16 +852,3 @@ async function procOnPortMessage(m) {
 }
 
 let PROC_port = null;
-let PROC_processorId = (new URL(document.location)).searchParams.get('id');
-procWingmanStartup()
-.then(async ()=>
-{
-    PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
-    PROC_port.onMessage.addListener(procOnPortMessage);
-    PROC_port.postMessage({
-        type: 'registration',
-        tabId: (await browser.tabs.getCurrent()).id,
-        processorId: PROC_processorId,
-        backend: PROC_loadedBackend
-    });
-});

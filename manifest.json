@@ -32,6 +32,15 @@
           "encoders_data.js",
           "encoders.js",
           "background_gif.js",
+
+          "libs/tfjs_3.11.0.js",
+          "libs/tf-backend-wasm.min.js",
+          "libs/mux_5.1.2.js",
+          "silent_data/index.js",
+          "silent_mode.js",
+          "processor.js",
+          "processor_backgroundstartup.js",
+
           "background.js",
           "background_video.js",
           "whitelist.js"

@@ -51,6 +51,7 @@
     <br />
     <h4>Which Tensorflow.js processing backend should be used? (Advanced option)</h4>
     <input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><label for="backend_selection_webgl">WebGL only</label> <br />
+    <input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><label for="backend_selection_inprocwebgl">Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</label> <br />
     <input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm"><label for="backend_selection_wasm">WASM only</label> <br />
     <input type="radio" name="backend_selection" id="backend_selection_webgl_wasm" value="webgl_wasm"><label for="backend_selection_webgl_wasm">WebGL (primary) + WASM (secondary)</label> <br />
     <input type="radio" name="backend_selection" id="backend_selection_wasm_webgl" value="wasm_webgl"><label for="backend_selection_wasm_webgl">WASM (primary) + WebGL (secondary)</label> <br />
