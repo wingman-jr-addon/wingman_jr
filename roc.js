@@ -12190,7 +12190,7 @@ let ROC_VALUES =
 ];
 
 
-var ROC_trustedRoc = rocFindRocEntryByFpr(0.004);
+var ROC_trustedRoc = rocFindRocEntryByFpr(0.007);
 console.log("Trusted ROC: "+rocGetEntryString(ROC_trustedRoc));
 var ROC_trustedToNeutralPercentage = 0.04;
 var ROC_neutralRoc = rocFindRocEntryByFpr(0.015);
