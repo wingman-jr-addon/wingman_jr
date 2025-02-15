@@ -1,4 +1,5 @@
-let WJR_DEBUG = false;
+//Used to be defined here, but now with inprocwebgl, it is inherited from processor.js initialization
+//let WJR_DEBUG = false;
 
 //Ensure browser cache isn't going to cause us problems
 browser.webRequest.handlerBehaviorChanged();
@@ -50,7 +51,9 @@ function bkGetNextProcessor() {
     }
     //TODO Right now we only use primary.
     for(let key of Object.keys(BK_connectedClients)) {
-        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
+        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0] ||
+            'inproc'+BK_connectedClients[key].backend == BK_processorBackendPreference[0]
+        ) {
             WJR_DEBUG && console.debug(`BACKEND: Selecting client ${key}`);
             return BK_connectedClients[key];
         }
@@ -83,7 +86,14 @@ function bkReloadProcessors() {
     let keys = Object.keys(BK_connectedClients);
     for (let key of keys) {
         let client = BK_connectedClients[key];
-        browser.tabs.remove(client.tabId);
+        if(client.tabId !== 'fake') {
+            browser.tabs.remove(client.tabId);
+        } else {
+            console.log('LIFECYCLE: Cleaning up fake tab.');
+            try {
+                client.destroy();
+            } catch {}
+        }
         delete BK_connectedClients[key];
     }
 
@@ -92,8 +102,17 @@ function bkReloadProcessors() {
     for(let i=0; i<BK_processorBackendPreference.length; i++) {
         let backend = BK_processorBackendPreference[i];
         WJR_DEBUG && console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
-        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-            .then(async tab=>await browser.tabs.hide(tab.id));
+        if(backend == 'inprocwebgl') {
+            console.log(`LIFECYCLE: Probing for inprocwebgl backend`);
+            if(!bkTryStartupBackgroundJsProcessor()) {
+                console.log(`LIFECYCLE: Probe for inprocwebgl failed, falling back to webgl`);
+                browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+                    .then(async tab=>await browser.tabs.hide(tab.id));
+            }
+        } else {
+            browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+                .then(async tab=>await browser.tabs.hide(tab.id));
+        }
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
