@@ -1,4 +1,4 @@
-const PROC_MODEL_PATH = 'sqrxr_112_graphopt/model.json'
+const PROC_MODEL_PATH = 'sqrxr_141_graphopt/model.json'
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -164,7 +164,7 @@ async function procPredict(imgElement) {
             return result;
         });
 
-        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
+        let syncedResult = [logits[1].dataSync(),logits[0].dataSync()]; //On model conversion/import, order sometimes switches
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
