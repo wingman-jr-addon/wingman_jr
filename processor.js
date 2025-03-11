@@ -263,12 +263,6 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
     }
 }
 
-let PROC_checkThreshold = ROC_neutralRoc;
-
-function procSetThreshold(threshold) {
-    PROC_checkThreshold = threshold;
-}
-
 function procScoreToStr(sqrxrScore) {
     return sqrxrScore[0][0].toFixed(5) + ' ('+
         sqrxrScore[1][0].toFixed(2)+', '+
@@ -277,8 +271,8 @@ function procScoreToStr(sqrxrScore) {
         sqrxrScore[1][3].toFixed(2)+')';
 }
 
-function procIsSafe(sqrxrScore) {
-    return sqrxrScore[0][0] < PROC_checkThreshold;
+function procIsSafe(sqrxrScore, threshold) {
+    return sqrxrScore[0][0] < threshold;
 }
 
 const procLoadImagePromise = url => new Promise( (resolve, reject) => {
@@ -314,7 +308,7 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
-                if(procIsSafe(sqrxrScore)) {
+                if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
@@ -423,7 +417,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     let sqrxrScore = await procPredict(img);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
-                    if(procIsSafe(sqrxrScore)) {
+                    if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
@@ -663,6 +657,7 @@ async function procGetVideoScanStatus(
     url,
     mimeType,
     buffers,
+    threshold,
     scanStart,
     scanStep,
     scanMaxSteps,
@@ -703,7 +698,7 @@ async function procGetVideoScanStatus(
             sqrxrScore = await procPredict(inferenceVideo);
             scanResults.scanCount++;
             let frameStatus;
-            if(procIsSafe(sqrxrScore))
+            if(procIsSafe(sqrxrScore, threshold))
             {
                 WJR_DEBUG && console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
                 await procCommonLogImg(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
@@ -748,6 +743,7 @@ async function procOnPortMessage(m) {
                 requestId: m.requestId,
                 url: m.url,
                 mimeType: m.mimeType,
+                threshold: m.threshold,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -781,7 +777,8 @@ async function procOnPortMessage(m) {
                 url: m.url,
                 mimeType: m.mimeType,
                 startTime: performance.now(),
-                buffers: m.buffers
+                buffers: m.buffers,
+                threshold: m.threshold
             };
             let gifScanResult = await procPerformFiltering(gifRequest);
             let gifResponse = {
@@ -795,6 +792,7 @@ async function procOnPortMessage(m) {
         case 'b64_start': {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
+                threshold: m.threshold,
                 startTime: performance.now(),
                 fullStr: ''
             };
@@ -820,6 +818,7 @@ async function procOnPortMessage(m) {
                 m.url,
                 m.mimeType,
                 m.buffers,
+                m.threshold,
                 m.scanStart,
                 m.scanStep,
                 m.scanMaxSteps,
@@ -837,11 +836,6 @@ async function procOnPortMessage(m) {
                     console.error(`DATAV: Failed to post video result for ${m.requestId} because ${e}, unsure how to proceed.`);
                 }
             }
-        }
-        break;
-        case 'thresholdChange': {
-            WJR_DEBUG && console.log('PROC: Setting threshold '+m.threshold);
-            procSetThreshold(m.threshold);
         }
         break;
         default: {
