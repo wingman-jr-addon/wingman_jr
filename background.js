@@ -36,7 +36,6 @@ function bkOnClientConnected(port) {
     BK_connectedClients[registration.processorId] = registration;
     WJR_DEBUG && console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
-    bkNotifyThreshold();
     bkBroadcastProcessorSettings();
     if (!BK_isInitialized) {
         BK_isInitialized = true;
@@ -295,15 +294,7 @@ function bkSetZone(newZone)
     if(didZoneChange) {
         WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
         bkClearPredictionBuffer();
-        bkNotifyThreshold();
     }
-}
-
-function bkNotifyThreshold() {
-    bkBroadcastMessageToProcessors({
-        type: 'thresholdChange',
-        threshold: BK_zoneThreshold
-    });
 }
 
 ////////////////////// ZONE END //////////////////////////
@@ -387,7 +378,8 @@ async function bkCrashDetectionWatchdog() {
             type: 'start',
             requestId: pseudoRequestId,
             mimeType: 'image/jpeg',
-            url: pseudoRequestId
+            url: pseudoRequestId,
+            threshold: BK_zoneThreshold
         });
         processor.postMessage({
             type: 'ondata',
@@ -484,7 +476,8 @@ async function bkImageListenerNormal(details, mimeType) {
         type: 'start',
         requestId: details.requestId,
         mimeType: mimeType,
-        url: details.url
+        url: details.url,
+        threshold: BK_zoneThreshold
     });
     statusStartImageCheck(details.requestId);
 
@@ -632,7 +625,8 @@ async function bkBase64ContentListener(details) {
     let processor = bkGetNextProcessor().port;
     processor.postMessage({
         type: 'b64_start',
-        requestId: details.requestId
+        requestId: details.requestId,
+        threshold: BK_zoneThreshold
     });
 
     filter.ondata = evt => {
