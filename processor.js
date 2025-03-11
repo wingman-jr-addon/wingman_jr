@@ -777,7 +777,8 @@ async function procOnPortMessage(m) {
                 url: m.url,
                 mimeType: m.mimeType,
                 startTime: performance.now(),
-                buffers: m.buffers
+                buffers: m.buffers,
+                threshold: m.threshold
             };
             let gifScanResult = await procPerformFiltering(gifRequest);
             let gifResponse = {

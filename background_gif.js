@@ -273,7 +273,8 @@ async function gifPerformGifFrameScan(
     processor,
     gifRequestId,
     gifFrame,
-    url /* informational */
+    url, /* informational */
+    threshold
 ) {
     let p = new Promise(function(resolve, reject) {
         GIF_OPEN_REQUESTS[gifRequestId] = {
@@ -287,6 +288,7 @@ async function gifPerformGifFrameScan(
         requestId: gifRequestId,
         url: url,
         buffers: [gifFrame.buffer],
+        threshold: threshold,
         mimeType: 'image/gif'
     })
     return p;
@@ -307,6 +309,7 @@ async function gifListener(details) {
         console.warn('WEBREQG: Weird error parsing content-length '+e);
     }
 
+    let threshold = BK_zoneThreshold;
     let mimeType = 'image/gif';
     WJR_DEBUG && console.log(`DEFG: Starting request ${details.requestId} of type ${mimeType} of expected content-length ${expectedContentLength}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -328,7 +331,7 @@ async function gifListener(details) {
 
     statusStartVideoCheck(details.requestId);
 
-    let pump = async function(newData, isComplete) {
+    let pump = async function(newData, isComplete, threshold) {
         let parseRange = '<unknown>';
         try
         {
@@ -360,7 +363,7 @@ async function gifListener(details) {
 
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
-                    WJR_DEBUG && console.info(`DEFG: Performing scan for ${details.requestId} for ${parseRange}`);
+                    WJR_DEBUG && console.info(`DEFG: Performing scan for ${details.requestId} for ${parseRange} w/ threshold ${threshold}`);
                     let scanPerfStartTime = performance.now();
                     let thisScanCount = 0;
                     let thisBlockCount = 0;
@@ -369,7 +372,8 @@ async function gifListener(details) {
                             processor,
                             gifChainId+'-'+gifFrameCount,
                             unscannedFrame,
-                            details.url
+                            details.url,
+                            threshold
                         );
                         gifFrameCount++;
                         thisScanCount++;
@@ -457,7 +461,7 @@ async function gifListener(details) {
         if(status == 'block') {
             return;
         }
-        await pump(event.data, false);
+        await pump(event.data, false, threshold);
     }
 
     filter.onerror = e => {
@@ -477,7 +481,7 @@ async function gifListener(details) {
         if(status == 'block') {
             return;
         }
-        await pump(new Uint8Array(), true);
+        await pump(new Uint8Array(), true, threshold);
     }
     return details;
 }

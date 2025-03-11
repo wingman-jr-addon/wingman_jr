@@ -72,6 +72,7 @@ async function vidPerformVideoScan(
     url,
     requestType,
     buffers,
+    threshold,
     scanStart,
     scanStep,
     scanMaxSteps,
@@ -92,6 +93,7 @@ async function vidPerformVideoScan(
         url: url,
         mimeType: mimeType,
         buffers: buffers,
+        threshold: threshold,
         scanStart: scanStart,
         scanStep: scanStep,
         scanMaxSteps: scanMaxSteps,
@@ -131,6 +133,8 @@ async function vidRootListener(details) {
     catch(e) {
         console.warn('WEBREQV: Weird error parsing content-length '+e);
     }
+
+    let threshold = BK_zoneThreshold;
 
     let contentRange = undefined;
     for(let i=0; i<details.responseHeaders.length; i++) {
@@ -176,10 +180,10 @@ async function vidRootListener(details) {
     if(parsedUrl.hostname.endsWith('.googlevideo.com')) {
         if(mimeType.startsWith('video/mp4')) {
             WJR_DEBUG && console.info(`WEBREQV/YTVMP4: Starting for request ${details.requestId}`);
-            return await vidYtMp4Listener(details, mimeType, parsedUrl);
+            return await vidYtMp4Listener(details, mimeType, parsedUrl, threshold);
         } else if(mimeType.startsWith('video/webm')) {
             WJR_DEBUG && console.info(`WEBREQV/YTVWEBM: Starting for request ${details.requestId}`);
-            return await vidYtWebmListener(details, mimeType, parsedUrl);
+            return await vidYtWebmListener(details, mimeType, parsedUrl, threshold);
         } else {
             let cpn = parsedUrl.searchParams.get('cpn');
             let range = parsedUrl.searchParams.get('range');
@@ -191,21 +195,21 @@ async function vidRootListener(details) {
     } else if (contentRange !== undefined && !(contentRange.start == 0 && contentRange.end == contentRange.size - 1)) {
         if(mimeType.startsWith('video/mp4')) {
             WJR_DEBUG && console.info(`WEBREQV/DASHVMP4: Starting for request ${details.requestId} range ${JSON.stringify(contentRange)} for url ${details.url}`);
-            return await vidDashMp4Listener(details, mimeType, parsedUrl, contentRange);
+            return await vidDashMp4Listener(details, mimeType, parsedUrl, contentRange, threshold);
         } else if(mimeType.startsWith('video/webm')) {
             console.warn(`WEBREQV/DASHVMP4: Unsupported DASH WEBM request ${details.requestId} for url ${details.url}`);
-            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
+            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength, threshold);
         } else {
             console.warn(`WEBREQV/MLV: Request range for interesting MIME type ${mimeType}`);
-            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
+            return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength, threshold);
         }
     } else {
         WJR_DEBUG && console.info(`WEBREQV/MLV: Default video listener for url ${details.url}`);
-        return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength);
+        return await vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength, threshold);
     }
 }
 
-async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength) {
+async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentLength, threshold) {
     WJR_DEBUG && console.log(`DEFV: Starting request ${details.requestId} of type ${mimeType}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
@@ -285,6 +289,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         details.url,
                         details.type,
                         scanBuffers,
+                        threshold,
                         flushScanStartTime,
                         scanStep,
                         scanMaxSteps,
@@ -475,7 +480,7 @@ function stuffPlaceholderMp4(filter, expectedContentLength) {
     }
 }
 
-async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
+async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold) {
     let url = details.url;
     let videoChainId = `dash-mp4-${details.requestId}-bytes-${range.start}-${range.end}-url-${url}`;
     WJR_DEBUG && console.info('DASHVMP4: Starting request '+details.requestId+' '+range.start+'-'+range.end);
@@ -632,6 +637,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range) {
                 details.url,
                 details.type,
                 scanBuffers,
+                threshold,
                 scanStart,
                 scanStep,
                 scanMaxSteps,
@@ -704,7 +710,7 @@ let VID_YT_GROUPS = { };
 
 //Youtube MP4 stream listener.
 //Note this expects that each fragment is relatively small
-async function vidYtMp4Listener(details, mimeType, parsedUrl) {
+async function vidYtMp4Listener(details, mimeType, parsedUrl, threshold) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-mp4-'+cpn+'-'+details.requestId;
@@ -830,6 +836,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
                 details.url,
                 details.type,
                 scanBuffers,
+                threshold,
                 scanStart,
                 scanStep,
                 scanMaxSteps,
@@ -870,7 +877,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl) {
 
 //Youtube WebM stream listener.
 //Note this expects that each fragment is relatively small
-async function vidYtWebmListener(details, mimeType, parsedUrl) {
+async function vidYtWebmListener(details, mimeType, parsedUrl, threshold) {
 
     let cpn = parsedUrl.searchParams.get('cpn');
     let videoChainId = 'yt-webm-'+cpn+'-'+details.requestId;
@@ -992,6 +999,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl) {
                 details.url,
                 details.type,
                 scanBuffers,
+                threshold,
                 scanStart,
                 scanStep,
                 scanMaxSteps,
