@@ -58,7 +58,7 @@ function ssAddRequestRecord(requestRecord /*user-supplied fields*/ ) {
 }
 
 // Give an array of [0,1] elements, and this will create a normalized histogram in Unicode
-function ssCreateHistogram(arr) {
+function ssCreateHistogram(arr, startBin=1) {
     let bins = [];
     let binCount = 50;
     let binSize = 1/binCount;
@@ -78,14 +78,17 @@ function ssCreateHistogram(arr) {
     }
     //Normalize
     let binMax = 0;
-    for(let i=0; i<bins.length; i++) {
+    for(let i=startBin; i<bins.length; i++) {
         if(bins[i] > binMax) {
             binMax = bins[i];
         }
     }
+    if(binMax == 0) {
+        return '[No bin values for histogram]';
+    }
     //Histogram
     let histogram = '';
-    for(let i=0; i<bins.length; i++) {
+    for(let i=startBin; i<bins.length; i++) {
         let binHeightRaw = bins[i] / binMax;
         //Unicode supports 8ths of a block
         //Here, we'll show 1/8th for zero, so use 8 divisions rather than 9

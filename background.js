@@ -104,13 +104,19 @@ function bkExtractRootDomain(url) {
 
 function bkGetTopmostUrl(details) {
     let result = 'undefined';
-    if(details.documentUrl) {
-        result = details.documentUrl;
-    } else if(details.frameAncestors !== undefined && details.frameAncestors.length > 0) {
+    if(details.frameAncestors !== undefined && details.frameAncestors.length > 0) {
         result = details.frameAncestors[details.frameAncestors.length - 1].url;
+    } else if(details.documentUrl) {
+        result = details.documentUrl;
     } else {
         result = details.originUrl;
     }
+    // DEBUG START
+    let testHost = bkExtractRootDomain(result);
+    if(testHost === '2mdn.net' || testHost === 'adtrafficquality.google') {
+        console.warn('SO: mystery url '+JSON.stringify(details));
+    }
+    // DEBUG END
     return result;
 }
 
