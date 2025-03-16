@@ -57,3 +57,74 @@ function ssAddRequestRecord(requestRecord /*user-supplied fields*/ ) {
     console.info('SO: record '+JSON.stringify(copy));
 }
 
+// Give an array of [0,1] elements, and this will create a normalized histogram in Unicode
+function ssCreateHistogram(arr) {
+    let bins = [];
+    let binCount = 50;
+    let binSize = 1/binCount;
+    for(let i=0; i<binCount; i++) {
+        bins.push(0);
+    }
+    //Calculate
+    for(let i=0; i<arr.length; i++) {
+        let value = arr[i];
+        let binValue = Math.round(value / binSize);
+        if(binValue < 0) {
+            binValue = 0;
+        } else if(binValue > binCount-1) {
+            binValue = binCount - 1;
+        }
+        bins[binValue]++;
+    }
+    //Normalize
+    let binMax = 0;
+    for(let i=0; i<bins.length; i++) {
+        if(bins[i] > binMax) {
+            binMax = bins[i];
+        }
+    }
+    //Histogram
+    let histogram = '';
+    for(let i=0; i<bins.length; i++) {
+        let binHeightRaw = bins[i] / binMax;
+        //Unicode supports 8ths of a block
+        //Here, we'll show 1/8th for zero, so use 8 divisions rather than 9
+        let binHeight = Math.round(binHeightRaw*8);
+        histogram += String.fromCodePoint(0x2581+binHeight);
+    }
+    return histogram;
+}
+
+function ssCreateStatsForPageHost(pageHost) {
+    let scores = [];
+    for(let i=0; i<ssAllRecords.length; i++) {
+        if(ssAllRecords[i].pageHost == pageHost) {
+            scores.push(ssAllRecords[i].score);
+        }
+    }
+    let histogram = ssCreateHistogram(scores);
+    return histogram;
+}
+
+function ssDumpStats() {
+    // Sort all records by page host
+    let scoresByPageHost = {};
+    for(let i=0; i<ssAllRecords.length; i++) {
+        let r = ssAllRecords[i];
+        let entry = scoresByPageHost[r.pageHost];
+        if(entry === undefined) {
+            entry = { scores: [] };
+            scoresByPageHost[r.pageHost] = entry;
+        }
+        entry.scores.push(r.score);
+    }
+    // Now dump histograms
+    let fullReport = '';
+    for (const [key, value] of Object.entries(scoresByPageHost)) {
+        let histogram = ssCreateHistogram(value.scores);
+        fullReport += histogram+' '+key + '\r\n';
+    }
+    return fullReport;
+}
+
+

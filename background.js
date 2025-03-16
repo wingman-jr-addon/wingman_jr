@@ -102,6 +102,18 @@ function bkExtractRootDomain(url) {
     }
 }
 
+function bkGetTopmostUrl(details) {
+    let result = 'undefined';
+    if(details.documentUrl) {
+        result = details.documentUrl;
+    } else if(details.frameAncestors !== undefined && details.frameAncestors.length > 0) {
+        result = details.frameAncestors[details.frameAncestors.length - 1].url;
+    } else {
+        result = details.originUrl;
+    }
+    return result;
+}
+
 let BK_processorBackendPreference = [];
 
 function bkReloadProcessors() {
@@ -505,13 +517,14 @@ async function bkImageListenerNormal(details, mimeType) {
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let processor = bkGetNextProcessor().port;
+    console.info('SO: details topmost url host: '+bkExtractRootDomain(bkGetTopmostUrl(details)));
     processor.postMessage({
         type: 'start',
         requestId: details.requestId,
         mimeType: mimeType,
         url: details.url,
         threshold: BK_zoneThreshold,
-        opaque: { type: 'normal', pageHost: bkExtractRootDomain(details.originUrl), contentHost: bkExtractRootDomain(details.url) }
+        opaque: { type: 'normal', pageHost: bkExtractRootDomain(bkGetTopmostUrl(details)), contentHost: bkExtractRootDomain(details.url) }
     });
     statusStartImageCheck(details.requestId);
 
@@ -657,7 +670,7 @@ async function bkBase64ContentListener(details) {
 
     //Choose highest power here because we have many images possibly
     let processor = bkGetNextProcessor().port;
-    let pageHost = bkExtractRootDomain(details.url);
+    let pageHost = bkExtractRootDomain(bkGetTopmostUrl(details));
     processor.postMessage({
         type: 'b64_start',
         requestId: details.requestId,
