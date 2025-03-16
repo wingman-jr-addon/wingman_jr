@@ -40,6 +40,7 @@
           "processor.js",
           "processor_backgroundstartup.js",
 
+          "site_store.js",
           "background.js",
           "background_video.js",
           "background_gif.js",

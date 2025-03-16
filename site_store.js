@@ -43,7 +43,17 @@ Request record structure:
 }
 */
 
-function ssAddRequestRecord(requestRecord /*user-supplied fields*/ ) {
+let ssAllRecords = []
 
+function ssAddRequestRecord(requestRecord /*user-supplied fields*/ ) {
+    let copy = {
+        pageHost: requestRecord.pageHost,
+        contentHost: requestRecord.contentHost,
+        score: requestRecord.score,
+        storeDate: new Date(),
+        key: ssAllRecords.length
+    };
+    ssAllRecords.push(copy);
+    console.info('SO: record '+JSON.stringify(copy));
 }
 

@@ -178,7 +178,6 @@ function bkOnProcessorMessage(m) {
             break;
         case 'stat': {
             WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
-            console.info('SO: stat opaque: '+JSON.stringify(m.opaque));
             statusCompleteImageCheck(m.requestId, m.result);
             switch (m.result) {
                 case 'pass': {
@@ -189,6 +188,14 @@ function bkOnProcessorMessage(m) {
                     bkIncrementBlockCount();
                 }
                 //could also be tiny or error
+            }
+            console.info('SO: stat opaque: '+JSON.stringify(m.opaque));
+            if(m.opaque !== undefined && m.opaque.type !== 'pseudo') {
+                ssAddRequestRecord({
+                    pageHost: m.opaque.pageHost,
+                    contentHost: m.opaque.contentHost,
+                    score: rocFindConfidence(m.rocScore)
+                });
             }
         }
             break;
