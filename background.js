@@ -77,6 +77,30 @@ function bkBroadcastProcessorSettings() {
 
 browser.runtime.onConnect.addListener(bkOnClientConnected);
 
+function bkExtractRootDomain(url) {
+    try {
+        let parsedUrl = new URL(url);
+        let parts = parsedUrl.hostname.split('.');
+        // So, usually this is just the last two parts, e.g. example.com -> 'example', 'com'
+        // But, thanks to things like google.co.uk, this gets harder
+        // As far as I know, the second to last part can potentially be two characters long - at
+        // least that matches what I've seen. But then you can valid sites ab.co that could in
+        // theory have a subdomain like x.ab.co. In this case, the right extraction should be
+        // ab.co. I'm not sure that's avoidable without a TLD list and it's not worth the
+        // complexity for the level needed here ... so...
+        if(parts.length <= 2) {
+            return parsedUrl.hostname;
+        }
+        let root = parts[parts.length - 2] + '.' + parts[parts.length - 1];
+        if(parts[parts.length - 2].length == 2) {
+            root = parts[parts.length - 3] + '.' + root;
+        }
+        return root;
+    } catch(ex) {
+        console.warn('SO: Could not extract root domain because '+ex+' for '+url);
+        return 'undefined';
+    }
+}
 
 let BK_processorBackendPreference = [];
 
@@ -154,6 +178,7 @@ function bkOnProcessorMessage(m) {
             break;
         case 'stat': {
             WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
+            console.info('SO: stat opaque: '+JSON.stringify(m.opaque));
             statusCompleteImageCheck(m.requestId, m.result);
             switch (m.result) {
                 case 'pass': {
@@ -379,7 +404,8 @@ async function bkCrashDetectionWatchdog() {
             requestId: pseudoRequestId,
             mimeType: 'image/jpeg',
             url: pseudoRequestId,
-            threshold: BK_zoneThreshold
+            threshold: BK_zoneThreshold,
+            opaque: { type: 'pseudo' }
         });
         processor.postMessage({
             type: 'ondata',
@@ -477,7 +503,8 @@ async function bkImageListenerNormal(details, mimeType) {
         requestId: details.requestId,
         mimeType: mimeType,
         url: details.url,
-        threshold: BK_zoneThreshold
+        threshold: BK_zoneThreshold,
+        opaque: { type: 'normal', pageHost: bkExtractRootDomain(details.originUrl), contentHost: bkExtractRootDomain(details.url) }
     });
     statusStartImageCheck(details.requestId);
 
@@ -623,10 +650,12 @@ async function bkBase64ContentListener(details) {
 
     //Choose highest power here because we have many images possibly
     let processor = bkGetNextProcessor().port;
+    let pageHost = bkExtractRootDomain(details.url);
     processor.postMessage({
         type: 'b64_start',
         requestId: details.requestId,
-        threshold: BK_zoneThreshold
+        threshold: BK_zoneThreshold,
+        opaque: { type: 'b64', pageHost: pageHost, contentHost: pageHost }
     });
 
     filter.ondata = evt => {
