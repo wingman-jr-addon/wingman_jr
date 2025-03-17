@@ -112,10 +112,12 @@ function bkGetTopmostUrl(details) {
         result = details.originUrl;
     }
     // DEBUG START
+    /*
     let testHost = bkExtractRootDomain(result);
     if(testHost === '2mdn.net' || testHost === 'adtrafficquality.google') {
         console.warn('SO: mystery url '+JSON.stringify(details));
     }
+    */
     // DEBUG END
     return result;
 }
@@ -212,7 +214,8 @@ function bkOnProcessorMessage(m) {
                 ssAddRequestRecord({
                     pageHost: m.opaque.pageHost,
                     contentHost: m.opaque.contentHost,
-                    score: rocFindConfidence(m.rocScore)
+                    score: m.rocScore,
+                    imageBytes: m.imageBytes
                 });
             }
         }
@@ -529,7 +532,9 @@ async function bkImageListenerNormal(details, mimeType) {
         requestId: details.requestId,
         mimeType: mimeType,
         url: details.url,
-        threshold: BK_zoneThreshold,
+        //threshold: BK_zoneThreshold,
+        //threshold: ssSuggestThresholdStdDevAdaptive(bkExtractRootDomain(bkGetTopmostUrl(details)), ROC_trustedRoc.threshold, 0.025),
+        threshold: 1.0, //DEBUG, remove!
         opaque: { type: 'normal', pageHost: bkExtractRootDomain(bkGetTopmostUrl(details)), contentHost: bkExtractRootDomain(details.url) }
     });
     statusStartImageCheck(details.requestId);

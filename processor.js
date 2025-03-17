@@ -544,6 +544,7 @@ async function procCheckProcess() {
                 type:'stat',
                 result: result.result,
                 rocScore: result.rocScore,
+                imageBytes: result.imageBytes,
                 requestId: toProcess.requestId,
                 opaque: result.opaque
             });
