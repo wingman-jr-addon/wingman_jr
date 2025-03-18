@@ -477,7 +477,7 @@ async function ssReadFileAsDataURL (inputFile) {
 
 async function ssLogLevelCollage() {
     //Setup
-    let divider = 1;
+    let divider = 4;
     let entriesByLevels = [];
     for(let i=0; i<100/divider; i++) {
         let capturedI = i;
@@ -574,18 +574,15 @@ async function ssLogLevelCollage() {
     <head><meta charset="utf-8"/></head>
     <body><table>`;
     let imageSize = 128;
-    let imagesPerRow = 30;
+    let imagesPerRow = 10;
     for(let i=0; i<entriesByLevels.length; i++) {
         let entry = entriesByLevels[i];
         html += '<tr>';
         html += '<td>Score '+(i*divider)+'</td>\r\n';
-        for(let j=0; j<entry.recordIndices.length; j++ ) {
+        for(let j=0; j<entry.recordIndices.length && j<imagesPerRow; j++ ) {
             let record = ssAllRecords[entry.recordIndices[j]];
             let imageBytesB64 = await ssReadFileAsDataURL(new Blob([record.imageBytes]));
             html += `<td><img src="${imageBytesB64}" style="max-width: ${imageSize}px; max-height: ${imageSize}px;"  /></td>\r\n`;
-            if(j % imagesPerRow == imagesPerRow-1) {
-                html += '</tr><tr><td></td>';
-            }
         }
         html+= '</tr>\r\n';
     }
