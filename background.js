@@ -214,7 +214,7 @@ function bkOnProcessorMessage(m) {
                 ssAddRequestRecord({
                     pageHost: m.opaque.pageHost,
                     contentHost: m.opaque.contentHost,
-                    score: m.rocScore,
+                    score: rocFindConfidence(m.rocScore),
                     imageBytes: m.rawImageBytes
                 });
             }
