@@ -215,7 +215,7 @@ function bkOnProcessorMessage(m) {
                     pageHost: m.opaque.pageHost,
                     contentHost: m.opaque.contentHost,
                     score: m.rocScore,
-                    imageBytes: m.imageBytes
+                    imageBytes: m.rawImageBytes
                 });
             }
         }
@@ -533,8 +533,8 @@ async function bkImageListenerNormal(details, mimeType) {
         mimeType: mimeType,
         url: details.url,
         //threshold: BK_zoneThreshold,
-        //threshold: ssSuggestThresholdStdDevAdaptive(bkExtractRootDomain(bkGetTopmostUrl(details)), ROC_trustedRoc.threshold, 0.025),
-        threshold: 1.0, //DEBUG, remove!
+        threshold: ssSuggestThresholdStdDevAdaptive(bkExtractRootDomain(bkGetTopmostUrl(details)), ROC_trustedRoc.threshold, 0.025),
+        //threshold: 1.0, //DEBUG, remove!
         opaque: { type: 'normal', pageHost: bkExtractRootDomain(bkGetTopmostUrl(details)), contentHost: bkExtractRootDomain(details.url) }
     });
     statusStartImageCheck(details.requestId);

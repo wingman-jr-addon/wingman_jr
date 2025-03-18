@@ -294,6 +294,7 @@ async function procPerformFiltering(entry) {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
+        rawImageBytes: null,
         result: null,
         rocScore: 0,
         opaque: entry.opaque
@@ -320,6 +321,7 @@ async function procPerformFiltering(entry) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
+                    result.rawImageBytes = result.imageBytes; //In passing case, the same
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
@@ -328,6 +330,7 @@ async function procPerformFiltering(entry) {
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
                     result.imageBytes = encodedTypedBuffer.buffer;
+                    result.rawImageBytes = await blob.arrayBuffer();
                 }
                 const endTime = performance.now();
                 const totalTime = endTime - entry.startTime;
@@ -348,15 +351,18 @@ async function procPerformFiltering(entry) {
             } else {
                 result.result = 'tiny';
                 result.imageBytes = await blob.arrayBuffer();
+                result.rawImageBytes = result.imageBytes;
             }
         } else {
             result.result = 'tiny';
             result.imageBytes = await blob.arrayBuffer();
+            result.rawImageBytes = result.imageBytes;
         }
     } catch(e) {
         console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e)+' '+e.stack);
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
+        result.rawImageBytes = result.imageBytes;
     } finally {
         WJR_DEBUG && console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
@@ -544,7 +550,7 @@ async function procCheckProcess() {
                 type:'stat',
                 result: result.result,
                 rocScore: result.rocScore,
-                imageBytes: result.imageBytes,
+                rawImageBytes: result.rawImageBytes,
                 requestId: toProcess.requestId,
                 opaque: result.opaque
             });

@@ -294,7 +294,7 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
             scores.push(ssAllRecords[i].score);
         }
     }
-    if(scores.length <= 30) {
+    if(scores.length <= 50) {
         return fallbackThreshold;
     }
 
@@ -309,7 +309,7 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
         varianceSum += (scores[i] - mean)*(scores[i] - mean);
     }
     let stddev = Math.sqrt(varianceSum / (scores.length - 1));
-    let scaleFactor = 2 + 30.0 / Math.pow(scores.length, 1.5); //Scale to a reasonable sigma at infinity
+    let scaleFactor = 2.5 + 8.0 / Math.pow(scores.length, 1.5); //Scale to a reasonable sigma at infinity
     let pushFromMean = stddev*scaleFactor;
     //When the distribution first starts out and only really good images are encountered
     //the std dev is way too small, this helps constrain it.
@@ -574,7 +574,7 @@ async function ssLogLevelCollage() {
     <head><meta charset="utf-8"/></head>
     <body><table>`;
     let imageSize = 128;
-    let imagesPerRow = 7;
+    let imagesPerRow = 10;
     for(let i=0; i<entriesByLevels.length; i++) {
         let entry = entriesByLevels[i];
         html += '<tr>';
