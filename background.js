@@ -217,6 +217,7 @@ function bkOnProcessorMessage(m) {
                     score: m.rocScore,
                     imageBytes: m.rawImageBytes
                 });
+                onTabVisualUpdateNeeded();
             }
         }
             break;
@@ -1036,6 +1037,46 @@ if (browser.menus) {
       });
 }
 
+
+
+/////////////////////Active Tab Management///////////////////////////
+
+function onTabVisualUpdateNeeded() {
+    browser.tabs.query({active: true, currentWindow: true})
+        .then((tabs) => {
+            if(tabs[0]) {
+                let activeTab = tabs[0];
+                if(activeTab.url.startsWith('http')) {
+                    let pageHost = bkExtractRootDomain(activeTab.url);
+                    let threshold = ssSuggestThresholdStdDevAdaptive(pageHost, ROC_trustedRoc.threshold, 0.025);
+                    //Don't need 1.0 exactly to be red
+                    threshold *= 1.3;
+                    if(threshold > 1) {
+                        threshold = 1;
+                    }
+                    let r = Math.round(255*threshold);
+                    let g = Math.round(255*(1-threshold));
+                    browser.browserAction.setIcon({ imageData: null, path: null });
+                    browser.browserAction.setBadgeBackgroundColor({
+                        color: `rgba(${r},${g},0,1.0)`,
+                        tabId: activeTab.id,
+                      });
+                }
+                
+            } else {
+                console.error('Active tab[0] was falsey');
+            }
+        });
+}
+
+
+// Listen for tab URL changing, tab switching, and window switching
+browser.tabs.onUpdated.addListener(onTabVisualUpdateNeeded);
+browser.tabs.onActivated.addListener(onTabVisualUpdateNeeded);
+browser.windows.onFocusChanged.addListener(onTabVisualUpdateNeeded);
+
+//Get initial state
+onTabVisualUpdateNeeded();
 
 ////////////////////////Actual Startup//////////////////////////////
 

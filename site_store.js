@@ -309,7 +309,7 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
         varianceSum += (scores[i] - mean)*(scores[i] - mean);
     }
     let stddev = Math.sqrt(varianceSum / (scores.length - 1));
-    let scaleFactor = 2.5 + 8.0 / Math.pow(scores.length, 1.5); //Scale to a reasonable sigma at infinity
+    let scaleFactor = 2 + 30.0 / Math.pow(scores.length, 1.5); //Scale to a reasonable sigma at infinity
     let pushFromMean = stddev*scaleFactor;
     //When the distribution first starts out and only really good images are encountered
     //the std dev is way too small, this helps constrain it.
@@ -477,7 +477,7 @@ async function ssReadFileAsDataURL (inputFile) {
 
 async function ssLogLevelCollage() {
     //Setup
-    let divider = 4;
+    let divider = 1;
     let entriesByLevels = [];
     for(let i=0; i<100/divider; i++) {
         let capturedI = i;
@@ -579,10 +579,13 @@ async function ssLogLevelCollage() {
         let entry = entriesByLevels[i];
         html += '<tr>';
         html += '<td>Score '+(i*divider)+'</td>\r\n';
-        for(let j=0; j<entry.recordIndices.length && j<imagesPerRow; j++ ) {
+        for(let j=0; j<entry.recordIndices.length; j++ ) {
             let record = ssAllRecords[entry.recordIndices[j]];
             let imageBytesB64 = await ssReadFileAsDataURL(new Blob([record.imageBytes]));
             html += `<td><img src="${imageBytesB64}" style="max-width: ${imageSize}px; max-height: ${imageSize}px;"  /></td>\r\n`;
+            if(j % imagesPerRow == imagesPerRow-1) {
+                html += '</tr><tr><td></td>';
+            }
         }
         html+= '</tr>\r\n';
     }

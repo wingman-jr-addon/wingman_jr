@@ -50,6 +50,9 @@ const STATUS_blockFadeoutColors = [
 ];
 
 function statusRegenerateIcon() {
+    //DEBUG
+    return;
+
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
     if(STATUS_openImageHighWaterCount > 0) {
@@ -113,7 +116,8 @@ function statusRegenerateIcon() {
 
 
 function statusInitialize() {
-    browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
+    //DEBUG
+    //browser.browserAction.setIcon({path: "icons/wingman_icon_32.png"});
 }
 
 function statusOnLoaded() {
