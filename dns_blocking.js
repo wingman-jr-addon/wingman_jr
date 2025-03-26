@@ -76,7 +76,15 @@ async function dnsMakeRequest(url) {
         return true; //Can't do anything about it, but not going to block everything!
     }
     let json = await response.json();
-    let didResolve = json["Answer"] !== undefined;
-    dnsLookupCache[url.hostname] = didResolve;
-    return didResolve;
+    //Known values as first string in Comment for blocking
+    //"EDE(16): Censored"
+    //"EDE(17): Filtered"
+    let shouldNotBlock = (json["Comment"] === undefined) || (json["Comment"].some((c)=>(c+'').indexOf('EDE(')));
+    if(!shouldNotBlock) {
+        console.log('DNS: Adding new block for '+url.hostname+' '+JSON.stringify(json["Comment"]));
+    } else {
+        console.log('DNS: should not block for '+url.hostname+' Comment: '+JSON.stringify(json["Comment"]));
+    }
+    dnsLookupCache[url.hostname] = shouldNotBlock;
+    return shouldNotBlock;
 }
