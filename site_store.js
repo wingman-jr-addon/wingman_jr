@@ -498,76 +498,7 @@ async function ssLogLevelCollage() {
         let collageEntry = entriesByLevels[score];
         collageEntry.recordIndices.push(capturedI);
     }
-    //Create collage
-    /*
-    let imageSize = 128;
-    let imagesPerRow = 7;
-    for(let i=0; i<entriesByLevels.length; i++) {
-        let logCanvas = document.createElement('canvas');
-        logCanvas.width = imageSize*5;
-        logCanvas.height = imageSize;
-        let logCtx = logCanvas.getContext('2d', { alpha: false});
-        let entry = entriesByLevels[i];
-        console.warn('Entry '+i+' has '+entry.recordIndices.length+' image entries');
-        let y = 0;
-        let x = 0;
-        for(let j=0; j<entry.recordIndices.length && j<imagesPerRow; j++ ) {
-            let record = ssAllRecords[entry.recordIndices[j]];
-            let url = null;
-            let didAvance = false;
-            try {
-                let blob = new Blob([record.imageBytes], {type: 'image/*'});
-                url = URL.createObjectURL(blob);
-                let img = await ssLoadImagePromise(url);
-                let maxSide = Math.max(img.width, img.height);
-                let ratio = imageSize/maxSide;
-                let newWidth = img.width*ratio;
-                let newHeight = img.height*ratio;
-                logCtx.clearRect(x,y,imageSize,imageSize);
-                logCtx.drawImage(img, x, y, newWidth, newHeight);
-                console.warn('Drew at '+y+','+x+' - advancing');
-                x += imageSize;
-                didAvance = true;
-            } catch(ex) {
-                console.error(ex);
-            }
-            if(url != null) {
-                URL.revokeObjectURL(url);
-            }
-
-            //Try forcing svg
-            if(!didAvance) {
-                console.warn('Fallback to svg attempt...');
-                url = null;
-                try {
-                    let blob = new Blob([record.imageBytes], {type: 'image/svg+xml'});
-                    url = URL.createObjectURL(blob);
-                    let img = await ssLoadImagePromise(url);
-                    let maxSide = Math.max(img.width, img.height);
-                    let ratio = imageSize/maxSide;
-                    let newWidth = img.width*ratio;
-                    let newHeight = img.height*ratio;
-                    logCtx.clearRect(x,y,imageSize,imageSize);
-                    logCtx.drawImage(img, x, y, newWidth, newHeight);
-                    console.warn('Drew at '+y+','+x+' - advancing');
-                    x += imageSize;
-                } catch(ex) {
-                    console.error(ex);
-                }
-                if(url != null) {
-                    URL.revokeObjectURL(url);
-                }
-            }
-        }
-        let logDataUrl = logCanvas.toDataURL('image/jpeg', 0.7);
-        let blockedCSS = 'color: #00FF00; display: inline-block; font-size: 0; ' +
-            'width: '+(logCanvas.width+10) + 'px; '+
-            'height: '+(logCanvas.height+10) + 'px; background-image: url('+logDataUrl+'); background-size: cover; background-repeat: no-repeat;';
-        console.warn('%c '+'Score '+(i*divider), blockedCSS);
-
-
-    }
-    */
+    
     let html = `
     <!DOCTYPE html>
     <html>
@@ -599,3 +530,29 @@ async function ssLogLevelCollage() {
     browser.tabs.create({ url: htmlBlobUrl });
 }
 
+async function ssLogLevelCollageSorted() {
+    let allRecordsSorted = ssAllRecords.slice(0);
+    allRecordsSorted.sort((a,b)=>a.score-b.score);
+    
+    let html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"/></head>
+    <body><table><tr>`;
+    let imageSize = 128;
+    let imagesPerRow = 10;
+    for(let i=0; i<allRecordsSorted.length; i++) {
+        let record = allRecordsSorted[i];
+        let imageBytesB64 = await ssReadFileAsDataURL(new Blob([record.imageBytes]));
+        html += `<td><img src="${imageBytesB64}" style="max-width: ${imageSize}px; max-height: ${imageSize}px;" title="${record.score}" /></td>\r\n`;
+        if(i % imagesPerRow == imagesPerRow-1) {
+            html += '</tr><tr><td></td>';
+        }
+    }
+    html += `</tr></table></body></html>`;
+
+    const htmlBlob = new Blob([html], { type: "text/html" });
+    const htmlBlobUrl = URL.createObjectURL(htmlBlob);
+
+    browser.tabs.create({ url: htmlBlobUrl });
+}
