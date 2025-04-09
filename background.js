@@ -1,4 +1,5 @@
-let WJR_DEBUG = false;
+//Used to be defined here, but now with inprocwebgl, it is inherited from processor.js initialization
+//let WJR_DEBUG = false;
 
 //Ensure browser cache isn't going to cause us problems
 browser.webRequest.handlerBehaviorChanged();
@@ -35,7 +36,6 @@ function bkOnClientConnected(port) {
     BK_connectedClients[registration.processorId] = registration;
     WJR_DEBUG && console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
-    bkNotifyThreshold();
     bkBroadcastProcessorSettings();
     if (!BK_isInitialized) {
         BK_isInitialized = true;
@@ -50,7 +50,9 @@ function bkGetNextProcessor() {
     }
     //TODO Right now we only use primary.
     for(let key of Object.keys(BK_connectedClients)) {
-        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0]) {
+        if(BK_connectedClients[key].backend == BK_processorBackendPreference[0] ||
+            'inproc'+BK_connectedClients[key].backend == BK_processorBackendPreference[0]
+        ) {
             WJR_DEBUG && console.debug(`BACKEND: Selecting client ${key}`);
             return BK_connectedClients[key];
         }
@@ -83,7 +85,14 @@ function bkReloadProcessors() {
     let keys = Object.keys(BK_connectedClients);
     for (let key of keys) {
         let client = BK_connectedClients[key];
-        browser.tabs.remove(client.tabId);
+        if(client.tabId !== 'fake') {
+            browser.tabs.remove(client.tabId);
+        } else {
+            console.log('LIFECYCLE: Cleaning up fake tab.');
+            try {
+                client.destroy();
+            } catch {}
+        }
         delete BK_connectedClients[key];
     }
 
@@ -92,8 +101,17 @@ function bkReloadProcessors() {
     for(let i=0; i<BK_processorBackendPreference.length; i++) {
         let backend = BK_processorBackendPreference[i];
         WJR_DEBUG && console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
-        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-            .then(async tab=>await browser.tabs.hide(tab.id));
+        if(backend == 'inprocwebgl') {
+            console.log(`LIFECYCLE: Probing for inprocwebgl backend`);
+            if(!bkTryStartupBackgroundJsProcessor()) {
+                console.log(`LIFECYCLE: Probe for inprocwebgl failed, falling back to webgl`);
+                browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+                    .then(async tab=>await browser.tabs.hide(tab.id));
+            }
+        } else {
+            browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+                .then(async tab=>await browser.tabs.hide(tab.id));
+        }
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
@@ -276,15 +294,7 @@ function bkSetZone(newZone)
     if(didZoneChange) {
         WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
         bkClearPredictionBuffer();
-        bkNotifyThreshold();
     }
-}
-
-function bkNotifyThreshold() {
-    bkBroadcastMessageToProcessors({
-        type: 'thresholdChange',
-        threshold: BK_zoneThreshold
-    });
 }
 
 ////////////////////// ZONE END //////////////////////////
@@ -336,6 +346,7 @@ fetch('silent_data/zoe-reeve-ijRuGjKpBcg-unsplash.jpg')
         setInterval(bkCrashDetectionWatchdog, 7500);
     });
 let CRASH_DETECTION_EXPECTED_RESULT;
+let CRASH_DETECTION_WARMUPS_LEFT = 3;
 let CRASH_DETECTION_COUNT = 0;
 let CRASH_NO_PROCESSOR_COUNT = 0;
 let CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
@@ -346,7 +357,7 @@ const CRASH_IDLE_SECONDS = 3 * 60;
 async function bkCrashDetectionWatchdog() {
     let idleState = await browser.idle.queryState(CRASH_IDLE_SECONDS)
     if(idleState != 'active') {
-        WJR_DEBUG && console.log('CRASH: User not active, ceasing crash check.');
+        console.log('CRASH: User not active, ceasing crash check.');
         return;
     }
     let pseudoRequestId = `crash-detection-${CRASH_DETECTION_COUNT}`;
@@ -367,7 +378,8 @@ async function bkCrashDetectionWatchdog() {
             type: 'start',
             requestId: pseudoRequestId,
             mimeType: 'image/jpeg',
-            url: pseudoRequestId
+            url: pseudoRequestId,
+            threshold: BK_zoneThreshold
         });
         processor.postMessage({
             type: 'ondata',
@@ -388,21 +400,38 @@ async function bkCrashDetectionWatchdog() {
     }
 }
 
+function bkApproxEq(expected, actual) {
+    return Math.abs(actual - expected) < 0.02;
+}
+
+function bkCompareSqrxScores(x, a) {
+    return bkApproxEq(x[0][0],a[0][0])
+        && bkApproxEq(x[1][0],a[1][0])
+        && bkApproxEq(x[1][1],a[1][1])
+        && bkApproxEq(x[1][2],a[1][2])
+        && bkApproxEq(x[1][3],a[1][3]);
+}
+
 function bkHandleCrashDetectionResult(m) {
     if (!CRASH_DETECTION_EXPECTED_RESULT) {
-        CRASH_DETECTION_EXPECTED_RESULT = JSON.stringify(m.sqrxrScore);
-        WJR_DEBUG && console.log(`CRASH: Setting expected result to ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        if(CRASH_DETECTION_WARMUPS_LEFT > 0) {
+            CRASH_DETECTION_WARMUPS_LEFT -= 1;
+            console.log(`CRASH: Warmups left before setting crash result ${CRASH_DETECTION_WARMUPS_LEFT}`);
+        } else {
+            CRASH_DETECTION_EXPECTED_RESULT = { ... m.sqrxrScore};
+            console.log(`CRASH: Setting expected result to ${JSON.stringify(CRASH_DETECTION_EXPECTED_RESULT)}`);
+        }
     } else {
-        let actual = JSON.stringify(m.sqrxrScore);
-        if (actual != CRASH_DETECTION_EXPECTED_RESULT) {
-            console.error(`CRASH: Check actual ${actual} vs. Expected ${CRASH_DETECTION_EXPECTED_RESULT}`);
+        let actual = m.sqrxrScore;
+        if (!bkCompareSqrxScores(CRASH_DETECTION_EXPECTED_RESULT,actual)) {
+            console.error(`CRASH: Check actual ${JSON.stringify(actual)} vs. Expected ${JSON.stringify(CRASH_DETECTION_EXPECTED_RESULT)}`);
             CRASH_BAD_STATE_ENCOUNTERED_COUNT++;
             if (CRASH_BAD_STATE_ENCOUNTERED_COUNT >= CRASH_BAD_STATE_RESTART_THRESHOLD) {
                 console.error(`CRASH: Bad state threshold exceeded, reloading plugin!!!`);
                 browser.runtime.reload();
             }
         } else {
-            WJR_DEBUG && console.log(`CRASH: Detection passed`);
+            console.log(`CRASH: Detection passed`);
         }
     }
 }
@@ -433,7 +462,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     if(isGif) {
         return await gifListener(details);
     }
-    
+
     return await bkImageListenerNormal(details, mimeType);
 }
 
@@ -447,7 +476,8 @@ async function bkImageListenerNormal(details, mimeType) {
         type: 'start',
         requestId: details.requestId,
         mimeType: mimeType,
-        url: details.url
+        url: details.url,
+        threshold: BK_zoneThreshold
     });
     statusStartImageCheck(details.requestId);
 
@@ -456,7 +486,7 @@ async function bkImageListenerNormal(details, mimeType) {
             dataStartTime = performance.now();
         }
         WJR_DEBUG && console.debug('WEBREQ: data '+details.requestId);
-        processor.postMessage({ 
+        processor.postMessage({
             type: 'ondata',
             requestId: details.requestId,
             data: event.data
@@ -595,7 +625,8 @@ async function bkBase64ContentListener(details) {
     let processor = bkGetNextProcessor().port;
     processor.postMessage({
         type: 'b64_start',
-        requestId: details.requestId
+        requestId: details.requestId,
+        threshold: BK_zoneThreshold
     });
 
     filter.ondata = evt => {
@@ -651,27 +682,35 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
             break;
         }
     }
+    for (let i = 0; i < details.responseHeaders.length; i++) {
+        let header = details.responseHeaders[i];
+        WJR_DEBUG && console.debug('CHARSET:  '+header.name+': '+header.value);
+    }
     if (headerIndex == -1) {
-      WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one.');
+      WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one by guessing.');
+      contentType = bkGuessContentType(details);
       headerIndex = details.responseHeaders.length;
-      contentType = 'text/html';
       details.responseHeaders.push(
         {
           "name": "Content-Type",
-          "value":"text/html"
+          "value": contentType
         }
       );
     }
 
     let baseType;
-    if(contentType.trim().startsWith('text/html')) {
+    let trimmedContentType = contentType.trim();
+    if(trimmedContentType.startsWith('text/html')) {
       baseType = 'text/html';
       WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
-    } else if(contentType.trim().startsWith('application/xhtml+xml')) {
+    } else if(trimmedContentType.startsWith('application/xhtml+xml')) {
       baseType = 'application/xhtml+xml';
       WJR_DEBUG && console.debug('CHARSET: Detected base type was '+baseType);
-    } else if(contentType.trim().startsWith('image/')) {
+    } else if(trimmedContentType.startsWith('image/')) {
       WJR_DEBUG && console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is an image/ MIME type');
+      return;
+    } else if(trimmedContentType == 'application/pdf') {
+      WJR_DEBUG && console.debug('CHARSET: Base64 listener is ignoring '+details.requestId+' because it is a PDF MIME type');
       return;
     } else {
       baseType = 'text/html';
@@ -679,27 +718,204 @@ function bkDetectCharsetAndSetupDecoderEncoder(details) {
       return;
     }
 
-    // It is important to detect the charset to correctly initialize TextDecoder or
-    // else we run into garbage output sometimes.
-    // However, TextEncoder does NOT support other than 'utf-8', so it is necessary
-    // to change the Content-Type on the header to UTF-8
+    // Character set detection is quite a difficult problem.
     // If modifying this block of code, ensure that the tests at
     // https://www.w3.org/2006/11/mwbp-tests/index.xhtml
-    // all pass - current implementation only fails on #9 but this detection ensures
-    // tests #3,4,5, and 8 pass.
+    // all pass - current implementation passes on all
     let decodingCharset = 'utf-8';
     let detectedCharset = bkDetectCharset(contentType);
 
     if (detectedCharset !== undefined) {
         decodingCharset = detectedCharset;
         WJR_DEBUG && console.debug('CHARSET: Detected charset was ' + decodingCharset + ' for ' + details.url);
+    } else if(trimmedContentType.startsWith('application/xhtml+xml')) {
+        decodingCharset = 'utf-8';
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, but content type was application/xhtml+xml so using UTF-8');
+    } else {
+        decodingCharset = undefined;
+        WJR_DEBUG && console.debug('CHARSET: No detected charset, moving ahead with Windows-1252 until sniff finds an encoding or decoding error encountered!');
     }
-    details.responseHeaders[headerIndex].value = baseType + ';charset=utf-8';
 
-    let decoder = new TextDecoder(decodingCharset);
-    let encoder = new TextEncoder(); //Encoder does not support non-UTF-8 charsets so this is always utf-8.
+    let decoder = new TextDecoderWithSniffing(decodingCharset);
+    let encoder = new TextEncoderWithSniffing(decoder);
 
     return [decoder, encoder];
+}
+
+function bkConcatBuffersToUint8Array(buffers) {
+    let fullLength = buffers.reduce((acc,buf)=>acc+buf.byteLength, 0);
+    let result = new Uint8Array(fullLength);
+    let offset = 0;
+    for(let buffer of buffers) {
+        result.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
+    }
+    return result;
+}
+
+function bkIsUtf8Alias(declType) {
+    //Passes all 6 aliases found at https://encoding.spec.whatwg.org/#names-and-labels
+    return (/.*utf.?8/gmi.test(declType));
+}
+
+function bkSniffExtractEncoding(sniffString) {
+    try {
+        const xmlParts = /<\?xml\sversion="1\.0"\s+encoding="([^"]+)"\?>/gm.exec(sniffString);
+        if(xmlParts) {
+            return xmlParts[1];
+        }
+        const metaParts = /<meta[^>]+charset="?([^"]+)"/igm.exec(sniffString);
+        if(metaParts) {
+            return metaParts[1];
+        }
+    } catch (ex) {
+        console.error('CHARSET: Sniff extraction exception: '+ex);
+    }
+    return null;
+}
+
+function TextDecoderWithSniffing(declType)
+{
+    let self = this;
+    self.currentType = declType;
+    self.decoder = (self.currentType === undefined) ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : new TextDecoder(self.currentType);
+    self.sniffBufferList = [];
+    self.sniffCount = 0;
+
+    self.decode = function(buffer, options) {
+        if(self.currentType === undefined) {
+            try {
+                if(self.sniffCount < 512) {
+                    //Start by checking for BOM
+                    //Buffer should always be >= 3 but just in case...
+                    if(self.sniffCount == 0 && buffer.byteLength >= 3) {
+                        let bom = new Uint8Array(buffer, 0, 3);
+                        if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+                            WJR_DEBUG && console.log('CHARSET: Sniff found utf-8 BOM');
+                            self.currentType = 'utf-8';
+                        }
+                    }
+                    //Continue with normal header sniffing
+                    if(self.currentType === undefined) {
+                        self.sniffBufferList.push(buffer);
+                        self.sniffCount += buffer.byteLength;
+                        WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
+                        if(self.sniffCount >= 512) {
+                            let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
+                            self.sniffBufferList = null;
+                            let tmpDecoder = new TextDecoder('iso-8859-1');
+                            let sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            if(sniffString.length > 512) {
+                                sniffString = sniffString.substring(0, 512);
+                            }
+                            WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
+                            let extractedEncoding = bkSniffExtractEncoding(sniffString);
+                            if(extractedEncoding) {
+                                WJR_DEBUG && console.log('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
+                                self.currentType = extractedEncoding.toLowerCase();
+                                self.decoder = new TextDecoder(self.currentType);
+                            } else {
+                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding');
+                            }
+                        }
+                    }
+                }
+                WJR_DEBUG && console.debug('CHARSET: Sniff received a chunk, current decoding type '+self.currentType);
+                return self.decoder.decode(buffer, options);
+            } catch (ex) {
+                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
+                self.decoder = new TextDecoder('iso-8859-1');
+                self.currentType = 'iso-8859-1';
+                return self.decoder.decode(buffer, options);
+            }
+        } else {
+            WJR_DEBUG && console.debug('CHARSET: Effective decoding ' + self.currentType);
+            return self.decoder.decode(buffer, options);
+        }
+    }
+}
+
+function TextEncoderWithSniffing(decoder) {
+    let self = this;
+    self.utf8Encoder = new TextEncoder();
+    self.linkedDecoder = decoder;
+
+    self.encode = function(str) {
+        WJR_DEBUG && console.debug('CHARSET: Encoding with decoder current type '+self.linkedDecoder.currentType);
+
+        if(bkIsUtf8Alias(self.linkedDecoder.currentType)) {
+            WJR_DEBUG && console.debug('CHARSET: Encoding utf-8');
+            return self.utf8Encoder.encode(str);
+        }
+        console.log('CHARSET: Test '+TEXT_ENCODINGS[self.linkedDecoder.currentType]);
+        let effectiveEncoding = TEXT_ENCODINGS[self.linkedDecoder.currentType] ?? TEXT_ENCODINGS['iso-8859-1'];
+        WJR_DEBUG && console.debug('CHARSET: Effective encoding ' + effectiveEncoding.name);
+        let outputRaw = [];
+        let untranslatableCount = 0;
+        for(const codePoint of str) {
+            let initialCodePoint = codePoint.codePointAt(0);
+            let bytes = effectiveEncoding.codePointsToBytes[initialCodePoint];
+            if(bytes !== undefined) {
+                for(let i=0; i<bytes.length; i++) {
+                    outputRaw.push(bytes[i]);
+                }
+            } else {
+                //If no character encoding was specified, the default is a bit sketchy but locale-defined
+                //However, I've seen pages where it wasn't specified, the default should be iso-8859-1/Windows-1252
+                //and yet the content was actually utf-8. Since this is a passthrough, retry encoding as utf-8
+                //in that specific circumstance
+                if(self.linkedDecoder.currentType === undefined) {
+                    console.warn('CHARSET: Encoding was unspecified, but iso-8859-1 encoding failed, so falling back to utf-8');
+                    return self.utf8Encoder.encode(str);
+                }
+                if(untranslatableCount == 0) {
+                    console.warn('CHARSET: untranslatable code point '+initialCodePoint+' found while charset='+self.linkedDecoder.currentType);
+                }
+                untranslatableCount++;
+            }
+        }
+        let result = new Uint8Array(outputRaw);
+        WJR_DEBUG && console.log('CHARSET: re-encoded '+result.length+' bytes ('+untranslatableCount+' untranslated code points) with effective encoding '+ effectiveEncoding.name);
+        return result;
+    }
+}
+
+// Guess the content type when none is supplied
+// Ideally this would actually look at the bytes supplied but we
+// don't have those available yet, so do some hacky guessing
+function bkGuessContentType(details) {
+    try {
+        for (let i = 0; i < details.responseHeaders.length; i++) {
+            let header = details.responseHeaders[i];
+            // If no content-type was specified BUT a default filename was
+            // provided, fallback to a MIME type derived from the extension - YUCK
+            // e.g. content-disposition: inline; filename="user-guide-nokia-5310-user-guide.pdf" -> application/pdf
+            // Note: we will not try to handle filename* as per https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Disposition
+            // and https://datatracker.ietf.org/doc/html/rfc5987#page-7
+            if (header.name.toLowerCase() == "content-disposition") {
+                let filenameMatches = [...header.value.matchAll(/filename[ ]*=[ ]*\"([^\"]*)\"/g)];
+                if(filenameMatches.length > 0) {
+                    let filename = filenameMatches[0][1]; //First capture group of first match
+                    let extensionMatch = filename.match(/\.[^\.]+$/);
+                    if(extensionMatch != null && extensionMatch.length > 0) {
+                        let extension = extensionMatch[0];
+                        switch(extension) {
+                            case ".pdf":
+                                WJR_DEBUG && console.debug('CHARSET: Guessed content type application/pdf using extension ' + extension + ' for ' + details.url);
+                                return 'application/pdf';
+                            default:
+                                WJR_DEBUG && console.debug('CHARSET: Unhandled file extension "' + extension + '" for ' + details.url);
+                                break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    } catch(e) {
+        console.error('CHARSET: Exception guessing content type when none supplied for '+details.url+' '+e);
+    }
+    return 'text/html';
 }
 
 
@@ -746,17 +962,19 @@ function bkDetectCharset(contentType) {
 
 ////////////////////////////Context Menu////////////////////////////
 
-browser.menus.create({
-    title: "Hide Image",
-    documentUrlPatterns: ["*://*/*"],
-    contexts: ["image"],
-    onclick(info, tab) {
-      browser.tabs.executeScript(tab.id, {
-        frameId: info.frameId,
-        code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
+if (browser.menus) {
+    browser.menus.create({
+        title: "Hide Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["image"],
+        onclick(info, tab) {
+          browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
+          });
+        },
       });
-    },
-  });
+}
 
 
 ////////////////////////Actual Startup//////////////////////////////

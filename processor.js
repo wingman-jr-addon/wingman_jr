@@ -12,10 +12,8 @@ function procOnModelLoadProgress(percentage) {
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
-const procWingmanStartup = async () => {
+const procWingmanStartup = async (backendRequested) => {
     WJR_DEBUG && console.log('LIFECYCLE: Launching TF.js!');
-    let params = (new URL(document.location)).searchParams;
-    let backendRequested = params.get('backend');
     WJR_DEBUG && console.log('LIFECYCLE: Backend requested '+backendRequested);
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
@@ -265,12 +263,6 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
     }
 }
 
-let PROC_checkThreshold = ROC_neutralRoc;
-
-function procSetThreshold(threshold) {
-    PROC_checkThreshold = threshold;
-}
-
 function procScoreToStr(sqrxrScore) {
     return sqrxrScore[0][0].toFixed(5) + ' ('+
         sqrxrScore[1][0].toFixed(2)+', '+
@@ -279,8 +271,8 @@ function procScoreToStr(sqrxrScore) {
         sqrxrScore[1][3].toFixed(2)+')';
 }
 
-function procIsSafe(sqrxrScore) {
-    return sqrxrScore[0][0] < PROC_checkThreshold;
+function procIsSafe(sqrxrScore, threshold) {
+    return sqrxrScore[0][0] < threshold;
 }
 
 const procLoadImagePromise = url => new Promise( (resolve, reject) => {
@@ -290,8 +282,6 @@ const procLoadImagePromise = url => new Promise( (resolve, reject) => {
     img.decoding = 'sync'
     img.src = url
 });
-
-let PROC_timingInfoDumpCount = 0;
 
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
@@ -317,15 +307,8 @@ async function procPerformFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                let sqrxrScore;
-                if(PROC_timingInfoDumpCount<10) {
-                    PROC_timingInfoDumpCount++;
-                    let timingInfo = await tf.time(async ()=>sqrxrScore=await procPredict(img));
-                    WJR_DEBUG && console.debug('PERF: TIMING NORMAL: '+JSON.stringify(timingInfo));
-                } else {
-                    sqrxrScore = await procPredict(img);
-                }
-                if(procIsSafe(sqrxrScore)) {
+                let sqrxrScore = await procPredict(img);
+                if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
@@ -364,7 +347,7 @@ async function procPerformFiltering(entry) {
             result.imageBytes = await blob.arrayBuffer();
         }
     } catch(e) {
-        console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e));
+        console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e)+' '+e.stack);
         result.result = 'error';
         result.imageBytes = result.imageBytes || await blob.arrayBuffer();
     } finally {
@@ -434,7 +417,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     let sqrxrScore = await procPredict(img);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
-                    if(procIsSafe(sqrxrScore)) {
+                    if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
@@ -674,6 +657,7 @@ async function procGetVideoScanStatus(
     url,
     mimeType,
     buffers,
+    threshold,
     scanStart,
     scanStep,
     scanMaxSteps,
@@ -714,7 +698,7 @@ async function procGetVideoScanStatus(
             sqrxrScore = await procPredict(inferenceVideo);
             scanResults.scanCount++;
             let frameStatus;
-            if(procIsSafe(sqrxrScore))
+            if(procIsSafe(sqrxrScore, threshold))
             {
                 WJR_DEBUG && console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
                 await procCommonLogImg(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
@@ -759,6 +743,7 @@ async function procOnPortMessage(m) {
                 requestId: m.requestId,
                 url: m.url,
                 mimeType: m.mimeType,
+                threshold: m.threshold,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -792,7 +777,8 @@ async function procOnPortMessage(m) {
                 url: m.url,
                 mimeType: m.mimeType,
                 startTime: performance.now(),
-                buffers: m.buffers
+                buffers: m.buffers,
+                threshold: m.threshold
             };
             let gifScanResult = await procPerformFiltering(gifRequest);
             let gifResponse = {
@@ -806,6 +792,7 @@ async function procOnPortMessage(m) {
         case 'b64_start': {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
+                threshold: m.threshold,
                 startTime: performance.now(),
                 fullStr: ''
             };
@@ -831,6 +818,7 @@ async function procOnPortMessage(m) {
                 m.url,
                 m.mimeType,
                 m.buffers,
+                m.threshold,
                 m.scanStart,
                 m.scanStep,
                 m.scanMaxSteps,
@@ -850,11 +838,6 @@ async function procOnPortMessage(m) {
             }
         }
         break;
-        case 'thresholdChange': {
-            WJR_DEBUG && console.log('PROC: Setting threshold '+m.threshold);
-            procSetThreshold(m.threshold);
-        }
-        break;
         default: {
             console.error('ERROR: received unknown message: '+m);
         }
@@ -863,16 +846,3 @@ async function procOnPortMessage(m) {
 }
 
 let PROC_port = null;
-let PROC_processorId = (new URL(document.location)).searchParams.get('id');
-procWingmanStartup()
-.then(async ()=>
-{
-    PROC_port = browser.runtime.connect(browser.runtime.id, {name:PROC_processorId});
-    PROC_port.onMessage.addListener(procOnPortMessage);
-    PROC_port.postMessage({
-        type: 'registration',
-        tabId: (await browser.tabs.getCurrent()).id,
-        processorId: PROC_processorId,
-        backend: PROC_loadedBackend
-    });
-});

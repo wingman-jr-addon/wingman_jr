@@ -2,7 +2,7 @@
     "description": "Filter images transparently for kids",
     "manifest_version": 2,
     "name": "Wingman Jr.",
-    "version": "3.3.0",
+    "version": "3.4.0",
 
     "browser_specific_settings": {
       "gecko": {
@@ -29,9 +29,20 @@
           "mp4.js",
           "ebml.js",
           "status.js",
-          "background_gif.js",
+          "encoders_data.js",
+          "encoders.js",
+
+          "libs/tfjs_3.11.0.js",
+          "libs/tf-backend-wasm.min.js",
+          "libs/mux_5.1.2.js",
+          "silent_data/index.js",
+          "silent_mode.js",
+          "processor.js",
+          "processor_backgroundstartup.js",
+
           "background.js",
           "background_video.js",
+          "background_gif.js",
           "whitelist.js"
         ]
     },
