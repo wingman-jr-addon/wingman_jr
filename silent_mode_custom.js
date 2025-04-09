@@ -14,11 +14,19 @@ async function SMC_readFileAsDataURL (inputFile) {
     });
   };
 
+SMC_customUrl = 'https://placehold.co/{width}/{height}';
+function SMC_setCustomUrl(customUrl) {
+    SMC_customUrl = customUrl;
+}
+
+function SMC_getReplacementUrl(vars) {
+  return SMC_customUrl.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+}
 
 async function SMC_getReplacementSVG(img, visibleScore) {
     //Originally tried using <image crossorigin="anonymous" href="{url}" ... but it did not work.
-    let url = `https://loremflickr.com/${img.width}/${img.height}/scrabble`;
-    WJR_DEBUG && console.log(`SILENT CUSTOM: Creating replacement for image ${img.width}x${img.height} score ${visibleScore} using URL ${url}`);
+    let url = SMC_getReplacementUrl({ width: img.width, height: img.height, visibleScore: visibleScore });
+    console.log(`SMC: Creating replacement for image ${img.width}x${img.height} score ${visibleScore} using URL ${url}`);
     let data = await fetch(url);
     let blob = await data.blob();
     let dataUrl = await SMC_readFileAsDataURL(blob);

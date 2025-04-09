@@ -28,8 +28,11 @@
     <h4>Silent mode?</h4>
 	Instead of showing a blocked icon, instead choose a placeholder image. <br /> <br />
     <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_yes" value="is_silent_mode_enabled_yes" checked><label for="is_silent_mode_enabled_yes">Enabled</label>
-    <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><label for="is_silent_mode_enabled_no">Disabled</label><br />
-    <a href="silent_credits.html" target="_blank">View the image credits</a> <br />
+    <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><label for="is_silent_mode_enabled_no">Disabled</label>
+    <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_custom" value="is_silent_mode_enabled_custom"><label for="is_silent_mode_enabled_custom">Custom</label><br />
+    If custom, will use the URL below. <br />
+    <input type="text" id="silent_mode_custom_url"></input> <br />
+    <a href="silent_credits.html" target="_blank">View the builtin silent mode image credits</a> <br />
     <br />
     <h4>Use Cloudflare's "1.1.1.1 for Families" DNS-based blocking?</h4>
     <input type="radio" name="dns_blocking" id="dns_blocking_yes" value="dns_blocking_yes"><label for="dns_blocking_yes">Yes</label>
