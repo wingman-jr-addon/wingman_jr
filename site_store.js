@@ -332,7 +332,8 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
     let suggestedPushFromMean = Math.max(pushFromMean, fallbackPushFromMean);
     
     let suggested = mean + suggestedPushFromMean;
-    console.warn(`SO: threshold pick. ${pageHost} Mean ${mean} Stddev ${stddev} Scale ${scaleFactor} Suggested: ${suggested} Fallback ${fallbackThreshold}`);
+    let balancedScore = rocEstimateBalancedScoreAtThreshold(suggested);
+    console.warn(`SO: threshold pick. ${pageHost} Mean ${mean} Stddev ${stddev} Scale ${scaleFactor} Suggested: ${suggested} (Balanced: ${balancedScore}) Fallback ${fallbackThreshold}`);
     return Math.min(suggested, fallbackThreshold);
 }
 
@@ -392,6 +393,28 @@ function ssDumpStats() {
     let fullReport = '';
     for (const [key, value] of Object.entries(scoresByPageHost)) {
         let histogram = ssCreateHistogramLineSplit(value.scores);
+        fullReport += histogram+' '+key + '\r\n';
+    }
+    return fullReport;
+}
+
+function ssDumpStatsBalanced() {
+    // Sort all records by page host
+    let scoresByPageHost = {};
+    for(let i=0; i<ssAllRecords.length; i++) {
+        let r = ssAllRecords[i];
+        let entry = scoresByPageHost[r.pageHost];
+        if(entry === undefined) {
+            entry = { scores: [] };
+            scoresByPageHost[r.pageHost] = entry;
+        }
+        entry.scores.push(r.score);
+    }
+    // Now dump histograms
+    let fullReport = '';
+    for (const [key, value] of Object.entries(scoresByPageHost)) {
+        let balanced = value.scores.map(score => rocEstimateBalancedScoreAtThreshold(score))
+        let histogram = ssCreateHistogramLine(balanced);
         fullReport += histogram+' '+key + '\r\n';
     }
     return fullReport;
@@ -559,7 +582,8 @@ async function ssLogLevelCollageSorted() {
     for(let i=0; i<allRecordsSorted.length; i++) {
         let record = allRecordsSorted[i];
         let imageBytesB64 = await ssReadFileAsDataURL(new Blob([record.imageBytes]));
-        html += `<td><img src="${imageBytesB64}" style="max-width: ${imageSize}px; max-height: ${imageSize}px;" title="${record.score}" /></td>\r\n`;
+        let balancedScore = rocEstimateBalancedScoreAtThreshold(record.score);
+        html += `<td><img src="${imageBytesB64}" style="max-width: ${imageSize}px; max-height: ${imageSize}px;" title="${record.score} (Balanced score from balanced distribution: ${balancedScore}) " /></td>\r\n`;
         if(i % imagesPerRow == imagesPerRow-1) {
             html += '</tr><tr><td></td>';
         }

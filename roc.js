@@ -13,6 +13,17 @@ function rocFindConfidence(threshold) {
     return 1.0-bestMatch.tpr;
 }
 
+function rocEstimateBalancedScoreAtThreshold(threshold) {
+  let bestMatch = ROC_VALUES[0];
+  for(let i=0; i<ROC_VALUES.length; i++) {
+      if(ROC_VALUES[i].threshold < threshold) {
+          bestMatch = ROC_VALUES[i]
+          break;
+      }
+  }
+  return 1.0 - (bestMatch.tp + bestMatch.fp) / (bestMatch.tp + bestMatch.fp + bestMatch.tn + bestMatch.fn);
+}
+
 function rocFindRocEntryByFpr(desiredFPR) {
     let bestMatch = ROC_VALUES[0];
     for(let i=ROC_VALUES.length-1; i>=0; i--) {
