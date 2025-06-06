@@ -803,7 +803,7 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'b64_onerror': {
-            delete openB64Filters[m.requestId];
+            delete PROC_openB64Requests[m.requestId];
         }
         case 'b64_onstop': {
             await procCompleteB64Filtering(PROC_openB64Requests[m.requestId], PROC_port);
