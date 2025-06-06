@@ -395,6 +395,6 @@ function mp4IsLikelyProbe(u8Array) {
     if(u8Array.byteLength < 8) {
         return false;
     }
-    let ftypType = mp4ReadType(initBuffer, offset+4);
+    let ftypType = mp4ReadType(u8Array, 4);
     return ftypType == 'ftyp';
 }
