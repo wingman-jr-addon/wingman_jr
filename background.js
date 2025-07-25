@@ -774,6 +774,8 @@ function bkSniffExtractEncoding(sniffString) {
     return null;
 }
 
+const SNIFF_SIZE = 1024;
+
 function TextDecoderWithSniffing(declType)
 {
     let self = this;
@@ -782,10 +784,63 @@ function TextDecoderWithSniffing(declType)
     self.sniffBufferList = [];
     self.sniffCount = 0;
 
+    // Auto-generated, but seems generally sound
+    self.isLikelyUtf8 = function(buf) {
+        const n = buf.length;
+        let i = 0;
+
+        while (i < n) {
+            const b1 = buf[i];
+
+            // 1-byte (ASCII)
+            if (b1 <= 0x7F) { i++; continue; }
+
+            // 2-byte (U+0080-07FF) — lead C2-DF, trail 80-BF
+            if (0xC2 <= b1 && b1 <= 0xDF) {
+                if (i + 1 >= n) return false;
+                const b2 = buf[i + 1];
+                if (b2 < 0x80 || b2 > 0xBF) return false;
+                i += 2;
+                continue;
+            }
+
+            // 3-byte (U+0800-FFFF, excluding surrogates)
+            if (0xE0 <= b1 && b1 <= 0xEF) {
+                if (i + 2 >= n) return false;
+                const b2 = buf[i + 1], b3 = buf[i + 2];
+                if (b2 < 0x80 || b2 > 0xBF || b3 < 0x80 || b3 > 0xBF) return false;
+                if (b1 === 0xE0 && b2 < 0xA0) return false;   // over-long
+                if (b1 === 0xED && b2 > 0x9F) return false;   // surrogate range
+                i += 3;
+                continue;
+            }
+
+            // 4-byte (U+10000-10FFFF)
+            if (0xF0 <= b1 && b1 <= 0xF4) {
+                if (i + 3 >= n) return false;
+                const b2 = buf[i + 1], b3 = buf[i + 2], b4 = buf[i + 3];
+                if (
+                    b2 < 0x80 || b2 > 0xBF ||
+                    b3 < 0x80 || b3 > 0xBF ||
+                    b4 < 0x80 || b4 > 0xBF
+                ) return false;
+                if (b1 === 0xF0 && b2 < 0x90) return false;   // over-long
+                if (b1 === 0xF4 && b2 > 0x8F) return false;   // > U+10FFFF
+                i += 4;
+                continue;
+            }
+
+            // Any other lead byte (C0/C1, F5-FF) or stray continuation byte is illegal
+            return false;
+        }
+
+        return true;
+    };
+
     self.decode = function(buffer, options) {
         if(self.currentType === undefined) {
             try {
-                if(self.sniffCount < 512) {
+                if(self.sniffCount < SNIFF_SIZE) {
                     //Start by checking for BOM
                     //Buffer should always be >= 3 but just in case...
                     if(self.sniffCount == 0 && buffer.byteLength >= 3) {
@@ -800,13 +855,18 @@ function TextDecoderWithSniffing(declType)
                         self.sniffBufferList.push(buffer);
                         self.sniffCount += buffer.byteLength;
                         WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
-                        if(self.sniffCount >= 512) {
+                        if(self.sniffCount >= SNIFF_SIZE) {
                             let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
                             self.sniffBufferList = null;
                             let tmpDecoder = new TextDecoder('iso-8859-1');
-                            let sniffString = tmpDecoder.decode(fullSniffBuffer);
-                            if(sniffString.length > 512) {
-                                sniffString = sniffString.substring(0, 512);
+                            let sniffString = '';
+                            try {
+                                sniffString = tmpDecoder.decode(fullSniffBuffer);
+                            } catch(ex) {
+                                WJR_DEBUG && console.warn('CHARSET: Sniff string decode failed initially, so only pattern will work. '+ex);
+                            }
+                            if(sniffString.length > SNIFF_SIZE) {
+                                sniffString = sniffString.substring(0, SNIFF_SIZE);
                             }
                             WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
                             let extractedEncoding = bkSniffExtractEncoding(sniffString);
@@ -815,7 +875,14 @@ function TextDecoderWithSniffing(declType)
                                 self.currentType = extractedEncoding.toLowerCase();
                                 self.decoder = new TextDecoder(self.currentType);
                             } else {
-                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding');
+                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding, testing if likely utf-8');
+                                if(self.isLikelyUtf8(fullSniffBuffer)) {
+                                    WJR_DEBUG && console.log('CHARSET: Text was likely utf-8, treating as such.');
+                                    self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+                                    self.currentType = 'utf-8';
+                                } else {
+                                    WJR_DEBUG && console.log('CHARSET: Text was not clearly utf-8, falling back to locale approach');
+                                }
                             }
                         }
                     }
@@ -823,9 +890,14 @@ function TextDecoderWithSniffing(declType)
                 WJR_DEBUG && console.debug('CHARSET: Sniff received a chunk, current decoding type '+self.currentType);
                 return self.decoder.decode(buffer, options);
             } catch (ex) {
+                //WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to utf-8 (Exception: '+ex+')');
+                //self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+                //self.currentType = 'utf-8';
+
                 WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
                 self.decoder = new TextDecoder('iso-8859-1');
                 self.currentType = 'iso-8859-1';
+
                 return self.decoder.decode(buffer, options);
             }
         } else {
