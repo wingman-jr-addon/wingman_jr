@@ -630,6 +630,7 @@ async function bkBase64ContentListener(details) {
     });
 
     filter.ondata = evt => {
+        console.log('CHARSET: filter.ondata '+evt.data);
         let str = decoder.decode(evt.data, { stream: true });
         processor.postMessage({
             type: 'b64_ondata',
@@ -639,7 +640,11 @@ async function bkBase64ContentListener(details) {
     };
 
     filter.onstop = async evt => {
-        let str = decoder.decode(evt.data, { stream: true });
+        console.log('CHARSET: filter.onstop '+evt.data);
+        let str = decoder.decode(evt.data ?? new ArrayBuffer(), { stream: true });
+        //Force a flush
+        str += decoder.decode(new ArrayBuffer(), { stream: true });
+        console.log('CHARSET: String after flush: '+str);
         processor.postMessage({
             type: 'b64_ondata',
             requestId: details.requestId,
@@ -774,7 +779,7 @@ function bkSniffExtractEncoding(sniffString) {
     return null;
 }
 
-const SNIFF_SIZE = 1024;
+const SNIFF_SIZE = 2048;
 
 function TextDecoderWithSniffing(declType)
 {
@@ -837,66 +842,77 @@ function TextDecoderWithSniffing(declType)
         return true;
     };
 
+    self.isSniffComplete = false;
     self.decode = function(buffer, options) {
-        if(self.currentType === undefined) {
+        //Use an empty buffer as a forced flush
+        let isFlush = (buffer.byteLength == 0);
+        if(isFlush) {
+            WJR_DEBUG && console.log('CHARSET: Empty buffer received, treating as flush. Sniff previously complete? '+self.isSniffComplete);
+        }
+        WJR_DEBUG && console.log('CHARSET: Buffer '+buffer);
+        if(!self.isSniffComplete) {
             try {
-                if(self.sniffCount < SNIFF_SIZE) {
-                    //Start by checking for BOM
-                    //Buffer should always be >= 3 but just in case...
-                    if(self.sniffCount == 0 && buffer.byteLength >= 3) {
-                        let bom = new Uint8Array(buffer, 0, 3);
+                self.sniffBufferList.push(buffer);
+                self.sniffCount += buffer.byteLength;
+                WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
+                if(isFlush || self.sniffCount >= SNIFF_SIZE) {
+
+                    let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
+                    if(self.sniffCount < 3) {
+                        WJR_DEBUG && console.warn('CHARSET: Less than 3 characters to sniff, skipping BOM check');
+                    } else {
+                        let bom = new Uint8Array(fullSniffBuffer, 0, 3);
                         if(bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
                             WJR_DEBUG && console.log('CHARSET: Sniff found utf-8 BOM');
                             self.currentType = 'utf-8';
                         }
                     }
-                    //Continue with normal header sniffing
-                    if(self.currentType === undefined) {
-                        self.sniffBufferList.push(buffer);
-                        self.sniffCount += buffer.byteLength;
-                        WJR_DEBUG && console.debug('CHARSET: Sniff count '+self.sniffCount);
-                        if(self.sniffCount >= SNIFF_SIZE) {
-                            let fullSniffBuffer = bkConcatBuffersToUint8Array(self.sniffBufferList);
-                            self.sniffBufferList = null;
-                            let tmpDecoder = new TextDecoder('iso-8859-1');
-                            let sniffString = '';
-                            try {
-                                sniffString = tmpDecoder.decode(fullSniffBuffer);
-                            } catch(ex) {
-                                WJR_DEBUG && console.warn('CHARSET: Sniff string decode failed initially, so only pattern will work. '+ex);
-                            }
-                            if(sniffString.length > SNIFF_SIZE) {
-                                sniffString = sniffString.substring(0, SNIFF_SIZE);
-                            }
-                            WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
-                            let extractedEncoding = bkSniffExtractEncoding(sniffString);
-                            if(extractedEncoding) {
-                                WJR_DEBUG && console.log('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
-                                self.currentType = extractedEncoding.toLowerCase();
-                                self.decoder = new TextDecoder(self.currentType);
-                            } else {
-                                WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding, testing if likely utf-8');
-                                if(self.isLikelyUtf8(fullSniffBuffer)) {
-                                    WJR_DEBUG && console.log('CHARSET: Text was likely utf-8, treating as such.');
-                                    self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-                                    self.currentType = 'utf-8';
-                                } else {
-                                    WJR_DEBUG && console.log('CHARSET: Text was not clearly utf-8, falling back to locale approach');
-                                }
-                            }
+
+                    self.sniffBufferList = null;
+                    let tmpDecoder = new TextDecoder('iso-8859-1');
+                    let sniffString = '';
+                    try {
+                        sniffString = tmpDecoder.decode(fullSniffBuffer);
+                    } catch(ex) {
+                        WJR_DEBUG && console.warn('CHARSET: Sniff string decode failed initially, so only pattern will work. '+ex);
+                    }
+                    if(sniffString.length > SNIFF_SIZE) {
+                        sniffString = sniffString.substring(0, SNIFF_SIZE);
+                    }
+                    WJR_DEBUG && console.debug('CHARSET: Sniff string constructed: '+sniffString);
+                    let extractedEncoding = bkSniffExtractEncoding(sniffString);
+                    if(extractedEncoding) {
+                        WJR_DEBUG && console.log('CHARSET: Sniff found decoding of '+extractedEncoding+' by examining header, changing decoder');
+                        self.currentType = extractedEncoding.toLowerCase();
+                        self.decoder = new TextDecoder(self.currentType);
+                    } else {
+                        WJR_DEBUG && console.log('CHARSET: Sniff string did not indicate encoding, testing if likely utf-8');
+                        if(self.isLikelyUtf8(fullSniffBuffer)) {
+                            WJR_DEBUG && console.log('CHARSET: Text was likely utf-8, treating as such.');
+                            self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+                            self.currentType = 'utf-8';
+                        } else {
+                            WJR_DEBUG && console.log('CHARSET: Text was not clearly utf-8, falling back to locale approach');
+                            self.decoder = new TextDecoder('iso-8859-1');
+                            self.currentType = 'iso-8859-1';
                         }
                     }
+                    self.isSniffComplete = true;
+
+                    return self.decoder.decode(fullSniffBuffer, options);
+                } else {
+                    WJR_DEBUG && console.log('CHARSET: Sniff chunk received but not enough to complete sniff. Buffer: '+self.sniffCount);
+                    return '';
                 }
-                WJR_DEBUG && console.debug('CHARSET: Sniff received a chunk, current decoding type '+self.currentType);
-                return self.decoder.decode(buffer, options);
             } catch (ex) {
                 //WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to utf-8 (Exception: '+ex+')');
                 //self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
                 //self.currentType = 'utf-8';
 
-                WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
+                WJR_DEBUG && console.warn('CHARSET: Sniff exception, aborting. Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
                 self.decoder = new TextDecoder('iso-8859-1');
                 self.currentType = 'iso-8859-1';
+                self.isSniffComplete = true;
 
                 return self.decoder.decode(buffer, options);
             }
