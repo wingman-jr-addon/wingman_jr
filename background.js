@@ -630,7 +630,6 @@ async function bkBase64ContentListener(details) {
     });
 
     filter.ondata = evt => {
-        console.log('CHARSET: filter.ondata '+evt.data);
         let str = decoder.decode(evt.data, { stream: true });
         processor.postMessage({
             type: 'b64_ondata',
@@ -640,11 +639,9 @@ async function bkBase64ContentListener(details) {
     };
 
     filter.onstop = async evt => {
-        console.log('CHARSET: filter.onstop '+evt.data);
         let str = decoder.decode(evt.data ?? new ArrayBuffer(), { stream: true });
         //Force a flush
         str += decoder.decode(new ArrayBuffer(), { stream: true });
-        console.log('CHARSET: String after flush: '+str);
         processor.postMessage({
             type: 'b64_ondata',
             requestId: details.requestId,
@@ -779,7 +776,7 @@ function bkSniffExtractEncoding(sniffString) {
     return null;
 }
 
-const SNIFF_SIZE = 2048;
+const SNIFF_SIZE = 2048; //Spec says 1024 but I've seen bad script headers exceed that prior to a declaration
 
 function TextDecoderWithSniffing(declType)
 {
@@ -849,7 +846,6 @@ function TextDecoderWithSniffing(declType)
         if(isFlush) {
             WJR_DEBUG && console.log('CHARSET: Empty buffer received, treating as flush. Sniff previously complete? '+self.isSniffComplete);
         }
-        WJR_DEBUG && console.log('CHARSET: Buffer '+buffer);
         if(!self.isSniffComplete) {
             try {
                 self.sniffBufferList.push(buffer);
