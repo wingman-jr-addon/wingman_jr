@@ -901,10 +901,6 @@ function TextDecoderWithSniffing(declType)
                     return '';
                 }
             } catch (ex) {
-                //WJR_DEBUG && console.warn('CHARSET: Falling back from '+self.currentType+' to utf-8 (Exception: '+ex+')');
-                //self.decoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-                //self.currentType = 'utf-8';
-
                 WJR_DEBUG && console.warn('CHARSET: Sniff exception, aborting. Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
                 self.decoder = new TextDecoder('iso-8859-1');
                 self.currentType = 'iso-8859-1';
