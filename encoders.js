@@ -45,11 +45,11 @@ for(let ei=0; ei<TEXT_ENCODINGS_RAW.length; ei++) {
 
 console.log('CHARSET: Repacked '+TEXT_ENCODINGS_COUNT+' encodings.');
 
+//////////// End Encoder unpacking, start charset detection ////////////////////////
 
 // This helper method does a few things regarding character encoding:
 // 1) Detects the charset for the TextDecoder so that bytes are properly turned into strings
-// 2) Ensures the output Content-Type is UTF-8 because that is what TextEncoder supports
-// 3) Returns the decoder/encoder pair
+// 2) Returns the decoder/encoder pair
 function encDetectCharsetAndSetupDecoderEncoder(details) {
     let contentType = '';
     let headerIndex = -1;
@@ -338,8 +338,7 @@ function TextEncoderWithSniffing(decoder) {
 }
 
 // Guess the content type when none is supplied
-// Ideally this would actually look at the bytes supplied but we
-// don't have those available yet, so do some hacky guessing
+// Better detection can be done later
 function encGuessContentType(details) {
     try {
         for (let i = 0; i < details.responseHeaders.length; i++) {
