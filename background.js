@@ -3,13 +3,19 @@
 
 //Ensure browser cache isn't going to cause us problems
 browser.webRequest.handlerBehaviorChanged();
+
+
+async function bkOnUpdate() {
+    const url = 'https://docs.google.com/forms/d/e/1FAIpQLSfkmwmDvV0vK5x8s1rmgCNWRoj5d7FOxu4-4scyrzMy2nuJbQ/viewform?usp=sf_link';
+    await browser.tabs.create({ url });
+}
+
 //User feedback
 browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
     if (temporary) return; // skip during development
     switch (reason) {
         case "update": {
-            const url = browser.runtime.getURL("https://docs.google.com/forms/d/e/1FAIpQLSfkmwmDvV0vK5x8s1rmgCNWRoj5d7FOxu4-4scyrzMy2nuJbQ/viewform?usp=sf_link");
-            await browser.tabs.create({ url, });
+            await bkOnUpdate();
         } break;
     }
 });
