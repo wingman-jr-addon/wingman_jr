@@ -350,7 +350,7 @@ let CRASH_DETECTION_WARMUPS_LEFT = 3;
 let CRASH_DETECTION_COUNT = 0;
 let CRASH_NO_PROCESSOR_COUNT = 0;
 let CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
-const CRASH_NO_PROCESSOR_RESTART_THRESHOLD = 3;
+const CRASH_NO_PROCESSOR_RESTART_THRESHOLD = 100;
 const CRASH_BAD_STATE_RESTART_THRESHOLD = 2;
 const CRASH_IDLE_SECONDS = 3 * 60;
 
@@ -795,6 +795,9 @@ function bkUpdateFromSettings() {
 function bkLoadBackendSettings() {
     browser.storage.local.get('backend_selection').then(result => {
         let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        console.warn('LIFECYCLE: Warning - forcing WebGPU backend for testing!');
+        backends = ['webgpu'];
+
         let hasChanged = backends.length != BK_processorBackendPreference.length;
         for (let i = 0; i < backends.length && !hasChanged; i++) {
             hasChanged = backends[i] != BK_processorBackendPreference[i];
