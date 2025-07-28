@@ -301,7 +301,7 @@ function ssSuggestThresholdStdDev(pageHost, fallbackThreshold) {
     return Math.min(suggested, fallbackThreshold);
 }
 
-function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackStdDev) {
+function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackStdDev, minThreshold) {
     //Gather scores
     let scores = [];
     for(let i=0; i<ssAllRecords.length; i++) {
@@ -333,8 +333,9 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
     
     let suggested = mean + suggestedPushFromMean;
     let balancedScore = rocEstimateBalancedScoreAtThreshold(suggested);
-    console.warn(`SO: threshold pick. ${pageHost} Mean ${mean} Stddev ${stddev} Scale ${scaleFactor} Suggested: ${suggested} (Balanced: ${balancedScore}) Fallback ${fallbackThreshold}`);
-    return Math.min(suggested, fallbackThreshold);
+    console.warn(`SO: threshold pick. ${pageHost} Mean ${mean} Stddev ${stddev} Scale ${scaleFactor} Suggested: ${suggested} (Balanced: ${balancedScore}) Fallback ${fallbackThreshold} MinThreshold ${minThreshold}`);
+    let threshold = Math.min(suggested, fallbackThreshold);
+    return Math.max(threshold, minThreshold);
 }
 
 function ssMedian(sortedValues) {
