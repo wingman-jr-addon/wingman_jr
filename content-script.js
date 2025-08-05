@@ -1,4 +1,6 @@
 const scoreByUrl = new Map();
+let currentSeverity = 0.47;
+
 browser.runtime.onMessage.addListener(msg => {
   if (msg.kind === "score") {
     console.log('Received score '+msg.score+' for '+msg.url);
@@ -8,21 +10,20 @@ browser.runtime.onMessage.addListener(msg => {
   }
 });
 
-// helper to turn the numeric score into a visual style
-function styleFor(score) {
-  const hue = 120 - score * 120;        // green → red
-  const opacity = 0.3 + score * 0.6;    // 0.3 … 0.9
-  return `filter:hue-rotate(${hue}deg) opacity(${opacity});`;
+function getScoreStyle(score) {
+    if(score < currentSeverity)
+        return '';
+    let scaledValue = (score - currentSeverity)/(1.0 - currentSeverity);
+    let dropLength = (scaledValue*3)+'px';
+    return `filter:blur(${(score - currentSeverity)*20}px) grayscale(${scaledValue}) drop-shadow(red ${dropLength} ${dropLength})`;
 }
 
-function styleForMore(score) {
-    const opacity = 0.3 + score * 0.6;    // 0.3 … 0.9
-    return `filter:grayscale(${Math.sqrt(score)}) opacity(${opacity});`;
-}
-
-function styleForMoar(score) {
-    const blur = score*10+'px';
-    return `filter:grayscale(${Math.sqrt(score)}) blur(${blur});`;
+function getScoreStyleSafe(score) {
+    if(score < currentSeverity)
+        return '';
+    let scaledValue = (score - currentSeverity)/(1.0 - currentSeverity);
+    let dropLength = (scaledValue*3)+'px';
+    return `filter:blur(${(score - currentSeverity)*30}px) grayscale(${scaledValue}) drop-shadow(red ${dropLength} ${dropLength}) contrast(0.8)`;
 }
 
 // will be invoked from the popup/browser-action
@@ -33,7 +34,7 @@ async function applyTint() {
     console.log('Applying tint for '+score+' URL '+ src);
     if (score != null) {
       img.dataset.score = score.toFixed(2);     // optional hook
-      img.style.cssText = styleForMoar(score);
+      img.style.cssText = getScoreStyleSafe(score);
     }
   }
 }
@@ -56,6 +57,7 @@ document.addEventListener('load', ev => {
 // listen for the popup toggle
 browser.runtime.onMessage.addListener(async msg => {
   if (msg.kind === "tint") {
+    currentSeverity = msg.severity;
     await applyTint();
   }
 });

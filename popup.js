@@ -1,12 +1,20 @@
+async function setTintSeverity() {
+    let severitySlider = document.getElementById('severitySlider');
+    let severity = severitySlider.value / 100.0;
+    const [tab] = await browser.tabs.query({active: true, currentWindow: true});
+    if (tab) {
+        browser.tabs.sendMessage(tab.id, {kind: "tint", severity: severity});
+    }
+}
+
 window.onload=function()
 {
     let testButton = document.getElementById('testButton');
-    testButton.addEventListener('click', async function() {
-        const [tab] = await browser.tabs.query({active: true, currentWindow: true});
-        if (tab) {
-            browser.tabs.sendMessage(tab.id, {kind: "tint"});
-        }
-    });
+    testButton.addEventListener('click', async() => setTintSeverity());
+
+    let severitySlider = document.getElementById('severitySlider');
+    severitySlider.addEventListener('input', async evt => await setTintSeverity());
+
 
     let rad = document.getElementById('popupForm').zone;
     for (var i = 0; i < rad.length; i++) {
