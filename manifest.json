@@ -18,6 +18,7 @@
       "proxy",
       "storage",
       "tabs",
+      "activeTab",
       "tabHide",
       "idle",
       "contextMenus"
@@ -48,6 +49,14 @@
           "whitelist.js"
         ]
     },
+
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["roc.js", "content-script.js"],
+        "run_at": "document_idle"
+      }
+    ],
 
     "options_ui": {
       "page": "options.html"

@@ -309,6 +309,9 @@ function ssSuggestThresholdStdDevAdaptive(pageHost, fallbackThreshold, fallbackS
             scores.push(ssAllRecords[i].score);
         }
     }
+    //TODO REMOVE
+    return 1.0;
+
     if(scores.length <= 50) {
         return fallbackThreshold;
     }

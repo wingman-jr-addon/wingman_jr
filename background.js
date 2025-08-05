@@ -177,6 +177,7 @@ function bkOnProcessorMessage(m) {
                 let filter = BK_openFilters[m.requestId];
                 filter.write(m.imageBytes);
                 filter.close();
+                browser.tabs.sendMessage(filter.details.tabId, {kind:"score", url: filter.details.url, score: m.rocScore});
                 delete BK_openFilters[m.requestId];
                 WJR_DEBUG && console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
             }
@@ -580,6 +581,7 @@ async function bkImageListenerNormal(details, mimeType) {
     filter.onstop = async event => {
         WJR_DEBUG && console.debug('WEBREQ: onstop '+details.requestId);
         filter.stopTime = performance.now();
+        filter.details = details;
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',

@@ -1,5 +1,13 @@
 window.onload=function()
 {
+    let testButton = document.getElementById('testButton');
+    testButton.addEventListener('click', async function() {
+        const [tab] = await browser.tabs.query({active: true, currentWindow: true});
+        if (tab) {
+            browser.tabs.sendMessage(tab.id, {kind: "tint"});
+        }
+    });
+
     let rad = document.getElementById('popupForm').zone;
     for (var i = 0; i < rad.length; i++) {
         rad[i].addEventListener('change', function(e) {
