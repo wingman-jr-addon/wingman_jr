@@ -3,104 +3,325 @@
     <head>
         <meta charset="utf-8">
         <style>
-            html
+            :root
             {
-                background-color: transparent;
+                color-scheme: light dark;
+                --trusted-color: #2ecc71;
+                --neutral-color: #f1c40f;
+                --untrusted-color: #e74c3c;
+                --surface: #ffffffee;
+                --surface-border: rgba(0, 0, 0, 0.08);
+                --surface-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+                font-family: 'Segoe UI', Tahoma, sans-serif;
+            }
+            html, body
+            {
+                margin: 0;
+                padding: 0;
             }
             body
             {
-                padding: 0px;
-                margin: 0px;
-                height: auto;
-                overflow-y: hidden;
-                background-color: lightgray;
+                min-width: 260px;
+                max-width: 320px;
+                background: #f3f4f6;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding: 12px 14px 14px;
+                box-sizing: border-box;
+                color: #1f2a44;
             }
-            label[for=trusted]
+            #popupForm
             {
-                background: #7ee884ff;
+                background: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                border-radius: 10px;
+                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                padding: 16px;
             }
-            label[for=neutral]
+            .filtering-control
             {
-                background: #c8c8c8ff;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                padding: 10px 12px;
+                border: 1px solid rgba(31, 42, 68, 0.12);
+                border-radius: 8px;
+                background: linear-gradient(135deg, rgba(47, 128, 237, 0.08), rgba(47, 128, 237, 0.02));
             }
-            label[for=untrusted]
+            .filtering-control.filtering-hidden
             {
-                background: #e87f7eff;
+                display: none;
+            }
+            .filtering-text
+            {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .filtering-text .title
+            {
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                color: #1f2a44cc;
+            }
+            .filtering-text .subtitle
+            {
+                font-size: 11px;
+                color: #4a5978;
+            }
+            label#isOnOffSection
+            {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 13px;
+                color: #1f2a44;
+                cursor: pointer;
+                font-weight: 600;
+            }
+            label#isOnOffSection input
+            {
+                position: absolute;
+                opacity: 0;
+            }
+            label#isOnOffSection span.toggle-track
+            {
+                position: relative;
+                width: 44px;
+                height: 24px;
+                border-radius: 12px;
+                background: rgba(31, 42, 68, 0.2);
+                transition: background 0.2s ease;
+            }
+            label#isOnOffSection span.toggle-track::after
+            {
+                content: '';
+                position: absolute;
+                top: 3px;
+                left: 3px;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: #fff;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+                transition: transform 0.2s ease;
+            }
+            label#isOnOffSection input:checked + span.toggle-track
+            {
+                background: #2f80ed;
+            }
+            label#isOnOffSection input:checked + span.toggle-track::after
+            {
+                transform: translateX(20px);
+            }
+            label#isOnOffSection span.toggle-label
+            {
+                display: none;
+            }
+            .switch_hidden
+            {
+                display: none !important;
+            }
+            fieldset
+            {
+                border: none;
+                padding: 0;
+                margin: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            fieldset legend
+            {
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.3px;
+                color: #1f2a44aa;
+            }
+            .zone-options
+            {
+                display: grid;
+                gap: 8px;
             }
             input[type=radio]
             {
                 position: absolute;
                 opacity: 0;
+            }
+            input[type=radio] + label
+            {
+                border-radius: 8px;
+                border: 1px solid rgba(31, 42, 68, 0.18);
+                padding: 10px;
+                display: grid;
+                grid-template-columns: auto 1fr;
+                align-items: center;
+                gap: 10px;
+                background: #fcfcff;
+                transition: border 0.15s ease, background 0.15s ease;
                 cursor: pointer;
-                height: 0;
-                width: 0;
             }
-            input[type=radio]+label,span#isZoneAutomaticWrapper
+            input[type=radio] + label:hover
             {
-                width:95px;
-                display: block;
-                padding: 1px;
-                border-radius: 3px;
-                border: 2px solid grey;
-                font-size: 17;
+                background: #f2f5ff;
             }
-            input[type=radio]:checked+label
+            input[type=radio]:checked + label
             {
-                border: 3px solid black;
-                padding: 0px;
+                border: 2px solid #2f80ed;
+                background: #eef3ff;
             }
-            input[type=radio]+label:hover
+            input[type=radio] + label img
             {
-                border: 3px dashed black;
-                padding: 0px;
+                width: 32px;
+                height: 32px;
             }
-            input[type=radio]+label>img
+            input[type=radio] + label span.zone-title
             {
-                width: 16px;
-                height: 16px;
-                padding-right: 5px;
-                visibility: hidden;
-            }
-            input[type=radio]:checked+label>img
-            {
-                visibility: visible;
-            }
-            input[type=radio]+label:hover>img
-            {
-                visibility: visible;
-                opacity: 0.2;
-            }
-            span#isZoneAutomaticWrapper
-            {
-                background: skyblue;
-            }
-            .switch_visible
-            {
+                font-size: 14px;
+                font-weight: 700;
                 display: block;
             }
-            .switch_hidden
+            input[type=radio] + label span.zone-description
             {
-                display: none;
+                font-size: 12px;
+                color: #1f2a44aa;
+                display: block;
             }
-            #feedback
+            label[for=trusted]
             {
-                padding-left: 15px;
+                border-left: 4px solid var(--trusted-color);
             }
-
+            label[for=neutral]
+            {
+                border-left: 4px solid var(--neutral-color);
+            }
+            label[for=untrusted]
+            {
+                border-left: 4px solid var(--untrusted-color);
+            }
+            #isZoneAutomaticWrapper
+            {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding-top: 10px;
+                border-top: 1px solid #d5dae6;
+                margin-top: 4px;
+            }
+            #isZoneAutomaticWrapper label
+            {
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                color: #2f3e7a;
+            }
+            #isZoneAutomaticWrapper .automatic-text
+            {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            #isZoneAutomaticWrapper .automatic-details
+            {
+                font-size: 11px;
+                color: #5a6478;
+                letter-spacing: 0.2px;
+            }
+            #isZoneAutomaticWrapper input
+            {
+                width: 18px;
+                height: 18px;
+                accent-color: #2f80ed;
+            }
+            .footer-links
+            {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 4px;
+            }
+            .footer-links a
+            {
+                font-size: 12px;
+                font-weight: 600;
+                text-decoration: none;
+                color: #2f80ed;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .footer-links a::before
+            {
+                content: '\1f4ac';
+                font-size: 13px;
+            }
+            .footer-links a:hover
+            {
+                text-decoration: underline;
+            }
         </style>
         <script src="popup.js"></script>
     </head>
     <body>
         <form id="popupForm">
-            <label id="isOnOffSection">
-                <input type="checkbox" id="isOnOff">
-                <span>On?</span>
-            </label>
-            <input type="radio" name="zone" id="trusted"><label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones."><img src="icons/wingman_icon_32_trusted.png" />Trusted</label>
-            <input type="radio" name="zone" id="neutral" checked><label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones."><img src="icons/wingman_icon_32_neutral.png" />Neutral</label>
-            <input type="radio" name="zone" id="untrusted"><label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well."><img src="icons/wingman_icon_32_untrusted.png" />Untrusted</label>
-            <span id="isZoneAutomaticWrapper" title="If set to automatic, the plugin will attempt to switch between zones automatically based on the number of blocked images. Selecting a specific zone will change this to manual."><input type="checkbox" name="zoneAuto" id="isZoneAutomatic"><label for="isZoneAutomatic">Automatic?</label></span>
+            <div class="filtering-control">
+                <div class="filtering-text">
+                    <span class="title">Filtering</span>
+                    <span class="subtitle">Quickly pause protection if you need a break.</span>
+                </div>
+                <label id="isOnOffSection">
+                    <span class="toggle-label">Filtering</span>
+                    <input type="checkbox" id="isOnOff">
+                    <span class="toggle-track"></span>
+                </label>
+            </div>
+            <fieldset>
+                <legend>Select trust level</legend>
+                <div class="zone-options">
+                    <input type="radio" name="zone" id="trusted">
+                    <label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones.">
+                        <img src="icons/wingman_icon_32_trusted.png" alt="Trusted level icon" />
+                        <span>
+                            <span class="zone-title">Trusted</span>
+                            <span class="zone-description">Light filtering for known safe sites.</span>
+                        </span>
+                    </label>
+                    <input type="radio" name="zone" id="neutral" checked>
+                    <label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones.">
+                        <img src="icons/wingman_icon_32_neutral.png" alt="Neutral level icon" />
+                        <span>
+                            <span class="zone-title">Neutral</span>
+                            <span class="zone-description">Balanced protection with smart blocking.</span>
+                        </span>
+                    </label>
+                    <input type="radio" name="zone" id="untrusted">
+                    <label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well.">
+                        <img src="icons/wingman_icon_32_untrusted.png" alt="Untrusted level icon" />
+                        <span>
+                            <span class="zone-title">Untrusted</span>
+                            <span class="zone-description">Maximum filtering on suspicious sites.</span>
+                        </span>
+                    </label>
+                </div>
+            </fieldset>
+            <span id="isZoneAutomaticWrapper" title="If set to automatic, the plugin will attempt to switch between zones automatically based on the number of blocked images. Selecting a specific zone will change this to manual.">
+                <span class="automatic-text">
+                    <label for="isZoneAutomatic">Adaptive mode</label>
+                    <span class="automatic-details">Automatically adjusts trust level when needed.</span>
+                </span>
+                <input type="checkbox" name="zoneAuto" id="isZoneAutomatic">
+            </span>
+            <div class="footer-links">
+                <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Share feedback</a>
+            </div>
         </form>
-        <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Feedback?</a>
     </body>
 </html>
