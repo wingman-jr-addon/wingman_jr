@@ -769,6 +769,7 @@ function bkSetEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Callback wireups changed!');
 }
 
+let BK_videoScanMode = 'quick';
 let BK_isVideoEnabled = true;
 function bkSetVideoEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Setting video enabled to '+isOn);
@@ -781,6 +782,22 @@ function bkSetVideoEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Video callback wireups changed!');
 }
 
+function bkNormalizeVideoScanMode(mode) {
+    if(mode === 'enabled' || mode === 'quick' || mode === 'disabled') {
+        return mode;
+    }
+    return 'quick';
+}
+
+function bkSetVideoScanMode(mode) {
+    let normalizedMode = bkNormalizeVideoScanMode(mode);
+    if(normalizedMode === BK_videoScanMode) {
+        return;
+    }
+    BK_videoScanMode = normalizedMode;
+    bkSetVideoEnabled(BK_videoScanMode !== 'disabled');
+}
+
 let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
@@ -788,8 +805,18 @@ function bkUpdateFromSettings() {
         bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get('is_on_off_shown').then(onOffResult =>
         BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
-    browser.storage.local.get('is_video_blocking_disabled').then(videoDisabledResult => {
-        bkSetVideoEnabled(!videoDisabledResult.is_video_blocking_disabled);
+    browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']).then(videoBlockingResult => {
+        let mode = videoBlockingResult.video_blocking_mode;
+        if(!mode) {
+            if(videoBlockingResult.is_video_blocking_disabled === true) {
+                mode = 'disabled';
+            } else if(videoBlockingResult.is_video_blocking_disabled === false) {
+                mode = 'enabled';
+            } else {
+                mode = 'quick';
+            }
+        }
+        bkSetVideoScanMode(mode);
     });
     browser.storage.local.get('is_silent_mode_enabled').then(silentModeEnabledResult => {
         BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
@@ -849,6 +876,9 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setVideoBlockingDisabled') {
+        bkUpdateFromSettings();
+    }
+    else if (request.type == 'setVideoBlockingMode') {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setSilentModeEnabled') {

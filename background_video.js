@@ -1,5 +1,6 @@
 let VID_PLACEHOLDER_MP4 = null;
 let VID_PLACEHOLDER_WEBM = null;
+const VID_QUICK_SCAN_MAX_FRAMES = 3;
 fetch('wingman_placeholder.mp4')
 .then(async r => VID_PLACEHOLDER_MP4 = await r.arrayBuffer());
 
@@ -34,6 +35,14 @@ function vidDetectType(u8Array) {
     } else {
         return 'video/*';
     }
+}
+
+function vidGetQuickScanMaxSteps(scanMaxSteps, totalScanCount) {
+    if (BK_videoScanMode !== 'quick') {
+        return scanMaxSteps;
+    }
+    let remaining = VID_QUICK_SCAN_MAX_FRAMES - totalScanCount;
+    return Math.max(0, Math.min(scanMaxSteps, remaining));
 }
 
 async function vidPrerequestListener(details) {
@@ -280,6 +289,15 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
                     WJR_DEBUG && console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                    let effectiveScanMaxSteps = vidGetQuickScanMaxSteps(scanMaxSteps, totalScanCount);
+                    if(effectiveScanMaxSteps <= 0) {
+                        status = 'pass';
+                        let disconnectBuffers = allBuffers.slice(flushIndexStart);
+                        disconnectBuffers.forEach(b=>filter.write(b));
+                        filter.disconnect();
+                        statusCompleteVideoCheck(details.requestId, status);
+                        return;
+                    }
                     let scanPerfStartTime = performance.now();
                     let scanResults = await vidPerformVideoScan(
                         processor,
@@ -292,7 +310,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         threshold,
                         flushScanStartTime,
                         scanStep,
-                        scanMaxSteps,
+                        effectiveScanMaxSteps,
                         scanBlockBailCount
                     );
                     let scanPerfTotalTime = performance.now() - scanPerfStartTime;
@@ -309,6 +327,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         totalErrorCount++;
                     }
                     let shouldError = totalErrorCount >= 5;
+                    let shouldQuickPass = (BK_videoScanMode === 'quick' && totalScanCount >= VID_QUICK_SCAN_MAX_FRAMES);
 
                     // Note that due the wonders of async, buffers may have data beyond
                     // what is in flushBuffers, so we need to flush everything so that
@@ -342,6 +361,13 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     } else if(shouldError) {
                         console.warn(`DEFV: ERROR ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'error';
+                        let disconnectBuffers = allBuffers.slice(flushIndexStart);
+                        disconnectBuffers.forEach(b=>filter.write(b));
+                        filter.disconnect();
+                        statusCompleteVideoCheck(details.requestId, status);
+                    } else if(shouldQuickPass) {
+                        WJR_DEBUG && console.log(`DEFV: Quick scan PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                        status = 'pass';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
                         filter.disconnect();
@@ -626,9 +652,19 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
             let maxScanGroupSteps = 15.0;
             let scanMaxSteps = fragments[0].wasMdatFallback ? maxScanGroupSteps : 10.0;
             let scanBlockBailCount = 4.0;
+            let effectiveScanMaxSteps = vidGetQuickScanMaxSteps(scanMaxSteps, dashGroup.scanCount);
 
             WJR_DEBUG && console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
             let processor = bkGetNextProcessor();
+            if(effectiveScanMaxSteps <= 0) {
+                status = 'pass';
+                dashGroup.status = 'pass';
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-quick'});
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+                statusCompleteVideoCheck(details.requestId, status);
+                return;
+            }
             let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
@@ -640,7 +676,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 threshold,
                 scanStart,
                 scanStep,
-                scanMaxSteps,
+                effectiveScanMaxSteps,
                 scanBlockBailCount
             );
             WJR_DEBUG && console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  for ${details.requestId} at range start ${range.start} for url ${url}`);
@@ -815,6 +851,17 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl, threshold) {
                 return;
             }
 
+            let scanMaxSteps = 10.0;
+            let effectiveScanMaxSteps = vidGetQuickScanMaxSteps(scanMaxSteps, youtubeGroup.scanCount);
+            if(effectiveScanMaxSteps <= 0) {
+                status = 'pass';
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+                fmp4.markFragments(fragments, status);
+                statusCompleteVideoCheck(details.requestId, status);
+                return;
+            }
+
             // 3. Setup scanning
             WJR_DEBUG && console.debug(`YTVMP4: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
@@ -823,7 +870,6 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl, threshold) {
 
             let scanStart = 0.5; //seconds
             let scanStep = 1.0;
-            let scanMaxSteps = 10.0;
             let scanBlockBailCount = 4.0;
 
             WJR_DEBUG && console.debug(`YTVMP4: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -839,7 +885,7 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl, threshold) {
                 threshold,
                 scanStart,
                 scanStep,
-                scanMaxSteps,
+                effectiveScanMaxSteps,
                 scanBlockBailCount
             );
             WJR_DEBUG && console.info(`YTVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -978,6 +1024,17 @@ async function vidYtWebmListener(details, mimeType, parsedUrl, threshold) {
                 return;
             }
 
+            let scanMaxSteps = 10.0;
+            let effectiveScanMaxSteps = vidGetQuickScanMaxSteps(scanMaxSteps, youtubeGroup.scanCount);
+            if(effectiveScanMaxSteps <= 0) {
+                status = 'pass';
+                buffers.forEach(b=>filter.write(b));
+                filter.disconnect();
+                webm.markFragments(fragments, status);
+                statusCompleteVideoCheck(details.requestId, status);
+                return;
+            }
+
             // 3. Setup scanning
             WJR_DEBUG && console.debug(`YTVWEBM: Setting up scan buffers for ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
             //Build up init ftyp moov (moof mdat)+   with possibly incomplete mdat
@@ -986,7 +1043,6 @@ async function vidYtWebmListener(details, mimeType, parsedUrl, threshold) {
 
             let scanStart = 0.5; //seconds
             let scanStep = 1.0;
-            let scanMaxSteps = 10.0;
             let scanBlockBailCount = 4.0;
 
             WJR_DEBUG && console.debug(`YTVWEBM: Scanning  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
@@ -1002,7 +1058,7 @@ async function vidYtWebmListener(details, mimeType, parsedUrl, threshold) {
                 threshold,
                 scanStart,
                 scanStep,
-                scanMaxSteps,
+                effectiveScanMaxSteps,
                 scanBlockBailCount
             );
             WJR_DEBUG && console.debug(`YTVWEBM: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  ${cpn} for ${details.requestId} at quality ${itag} at range start ${rangeStart}`);
