@@ -11,11 +11,11 @@ async function optSaveOptions() {
     });
     browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: isOnOffShown });
 
-    let isVideoBlockingDisabled = document.querySelector('input[name="is_video_blocking_disabled"]:checked').value == "is_video_blocking_disabled_yes";
+    let videoBlockingMode = document.querySelector('input[name="video_blocking_mode"]:checked').value;
     await browser.storage.local.set({
-        is_video_blocking_disabled: isVideoBlockingDisabled
+        video_blocking_mode: videoBlockingMode
     });
-    browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: isVideoBlockingDisabled });
+    browser.runtime.sendMessage({ type: 'setVideoBlockingMode', value: videoBlockingMode });
 
     let isSilentModeEnabled = document.querySelector('input[name="is_silent_mode_enabled"]:checked').value == "is_silent_mode_enabled_yes";
     await browser.storage.local.set({
@@ -61,14 +61,21 @@ function optRestoreOptions() {
     }
 
     function setCurrentVideoBlockingChoice(rawResult) {
-        let result = rawResult.is_video_blocking_disabled;
-        console.log('OPTION: Setting video blocking disabled switch to ' + result);
-        if (result) {
-            document.getElementById('is_video_blocking_disabled_yes').checked = true;
-        } else {
-            document.getElementById('is_video_blocking_disabled_no').checked = true;
+        let result = rawResult.video_blocking_mode;
+        let isVideoBlockingDisabled = rawResult.is_video_blocking_disabled;
+        let coercedResult = result;
+        if (!coercedResult) {
+            if (isVideoBlockingDisabled === true) {
+                coercedResult = 'disabled';
+            } else if (isVideoBlockingDisabled === false) {
+                coercedResult = 'enabled';
+            } else {
+                coercedResult = 'quick';
+            }
         }
-        browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: result });
+        console.log('OPTION: Setting video blocking mode to ' + coercedResult);
+        document.getElementById('video_blocking_mode_' + coercedResult).checked = true;
+        browser.runtime.sendMessage({ type: 'setVideoBlockingMode', value: coercedResult });
     }
 
     function setCurrentSilentModeEnabledChoice(rawResult) {
@@ -107,7 +114,7 @@ function optRestoreOptions() {
     let gettingOnOffShown = browser.storage.local.get('is_on_off_shown');
     gettingOnOffShown.then(setCurrentShowOnOffSwitchChoice, onError);
 
-    let gettingVideoBlocking = browser.storage.local.get('is_video_blocking_disabled');
+    let gettingVideoBlocking = browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']);
     gettingVideoBlocking.then(setCurrentVideoBlockingChoice, onError);
 
     let gettingSilentModeEnabled = browser.storage.local.get('is_silent_mode_enabled');
@@ -133,9 +140,9 @@ for (var i = 0, max = radiosOnOff.length; i < max; i++) {
         optSaveOptions();
     }
 }
-var radiosVideoBlockingDisabled = document.forms[0].elements["is_video_blocking_disabled"];
-for (var i = 0, max = radiosVideoBlockingDisabled.length; i < max; i++) {
-    radiosVideoBlockingDisabled[i].onclick = function () {
+var radiosVideoBlockingMode = document.forms[0].elements["video_blocking_mode"];
+for (var i = 0, max = radiosVideoBlockingMode.length; i < max; i++) {
+    radiosVideoBlockingMode[i].onclick = function () {
         optSaveOptions();
     }
 }
