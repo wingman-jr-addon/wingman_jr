@@ -82,7 +82,7 @@ function optRestoreOptions() {
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
         let result = rawResult.backend_selection;
         console.log('OPTION: Setting backend to ' + result);
-        let coercedResult = result || 'webgl';
+        let coercedResult = result || 'inprocwebgl';
         document.getElementById('backend_selection_' + coercedResult).checked = true;
         browser.runtime.sendMessage({ type: 'setBackendSelection', value: coercedResult });
     }

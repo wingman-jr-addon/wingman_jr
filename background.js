@@ -86,6 +86,29 @@ browser.runtime.onConnect.addListener(bkOnClientConnected);
 
 let BK_processorBackendPreference = [];
 
+function bkCanHideTabs() {
+    return !!(browser.tabs && browser.tabs.hide);
+}
+
+function bkCreateHiddenProcessorTab(backend) {
+    if (!browser.tabs || !browser.tabs.create) {
+        console.log('LIFECYCLE: tabs.create unavailable; skipping processor tab.');
+        return;
+    }
+    if (!bkCanHideTabs()) {
+        console.log('LIFECYCLE: tabs.hide unavailable; skipping processor tab to avoid visible tab.');
+        return;
+    }
+    browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+        .then(async tab => {
+            try {
+                await browser.tabs.hide(tab.id);
+            } catch (error) {
+                console.log('LIFECYCLE: Failed to hide processor tab.', error);
+            }
+        });
+}
+
 function bkReloadProcessors() {
     WJR_DEBUG && console.log('LIFECYCLE: Cleaning up old processors.');
     let keys = Object.keys(BK_connectedClients);
@@ -111,12 +134,10 @@ function bkReloadProcessors() {
             console.log(`LIFECYCLE: Probing for inprocwebgl backend`);
             if(!bkTryStartupBackgroundJsProcessor()) {
                 console.log(`LIFECYCLE: Probe for inprocwebgl failed, falling back to webgl`);
-                browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-                    .then(async tab=>await browser.tabs.hide(tab.id));
+                bkCreateHiddenProcessorTab(backend);
             }
         } else {
-            browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-                .then(async tab=>await browser.tabs.hide(tab.id));
+            bkCreateHiddenProcessorTab(backend);
         }
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
@@ -782,7 +803,7 @@ function bkUpdateFromSettings() {
 
 function bkLoadBackendSettings() {
     browser.storage.local.get('backend_selection').then(result => {
-        let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        let backends = result.backend_selection ? result.backend_selection.split('_') : ['inprocwebgl'];
         let hasChanged = backends.length != BK_processorBackendPreference.length;
         for (let i = 0; i < backends.length && !hasChanged; i++) {
             hasChanged = backends[i] != BK_processorBackendPreference[i];

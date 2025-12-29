@@ -1,12 +1,15 @@
 {
     "description": "Filter images transparently for kids",
     "manifest_version": 2,
-    "name": "Wingman Jr.",
+    "name": "Wingman Jr. - Android",
     "version": "3.7.0",
 
     "browser_specific_settings": {
       "gecko": {
         "strict_min_version": "91.1.0"
+      },
+      "gecko_android": {
+        "strict_min_version": "113.0"
       }
     },
   
@@ -14,12 +17,9 @@
       "webRequest",
       "webRequestBlocking",
       "<all_urls>",
-      "menus",
       "proxy",
       "storage",
-      "tabHide",
-      "idle",
-      "contextMenus"
+      "idle"
     ],
   
     "background": {
