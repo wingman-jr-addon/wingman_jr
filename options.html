@@ -34,24 +34,6 @@
     <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><label for="is_silent_mode_enabled_no">Disabled</label><br />
     <a href="silent_credits.html" target="_blank">View the image credits</a> <br />
     <br />
-    <h4>Use Cloudflare's "1.1.1.1 for Families" DNS-based blocking?</h4>
-    <input type="radio" name="dns_blocking" id="dns_blocking_yes" value="dns_blocking_yes"><label for="dns_blocking_yes">Yes</label>
-    <input type="radio" name="dns_blocking" id="dns_blocking_no" value="dns_blocking_no" checked><label for="dns_blocking_no">No</label><br /><br />
-    Read <a href="https://blog.cloudflare.com/introducing-1-1-1-1-for-families/" target="_blank">Cloudflare's post about "1.1.1.1 for Families"</a> for more info.<br />
-    When enabled, this plugin will first check to see if the domain the image is coming from is a known adult content provider before doing scanning via AI.<br />
-    There are advantages of enabling DNS blocking as an additional check:<br />
-    <ul>
-      <li>All videos are checked because they are simply blocked by domain.</li>
-      <li>Similarly, provides a second check on images.</li>
-      <li>Done as a pre-check, so if it is blocked the request to get the image is cancelled and the slower AI doesn't need to run.</li>
-    </ul>
-    There are, however, some disadvantages:<br />
-    <ul>
-      <li>Requires a call to Cloudflare's servers with the hostname (e.g. "google.com") of items being checked from your browsing session.</li>
-      <li>Because blocking is performed based on hostname, it can sometimes block all media for a website with many types of content.</li>
-    </ul>
-    Please make the choice that is right for you! <br />
-    <br />
     <h4>Which Tensorflow.js processing backend should be used? (Advanced option)</h4>
     <input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><label for="backend_selection_webgl">WebGL only</label> <br />
     <input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><label for="backend_selection_inprocwebgl">Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</label> <br />

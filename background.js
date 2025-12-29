@@ -549,47 +549,6 @@ async function bkDirectTypedUrlListener(details) {
     return details;
 }
 
-///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
-
-BK_shouldUseDnsBlocking = false;
-
-async function bkDnsBlockListener(details) {
-    let dnsResult = await dnsIsDomainOk(details.url);
-    if(!dnsResult) {
-        WJR_DEBUG && console.log('DNS: DNS Blocked '+details.url);
-        return { cancel: true };
-    }
-    return details;
-}
-
-function bkSetDnsBlocking(onOrOff) {
-    let effectiveOnOrOff = onOrOff && BK_isEnabled;
-    WJR_DEBUG && console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
-    let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(bkDnsBlockListener);
-    if (effectiveOnOrOff != isCurrentlyOn) {
-        BK_shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
-        if(effectiveOnOrOff && !isCurrentlyOn) {
-            WJR_DEBUG && console.log('CONFIG: DNS Adding DNS block listener')
-            browser.webRequest.onBeforeRequest.addListener(
-                bkDnsBlockListener,
-                { urls: ["<all_urls>"], types: ["image", "imageset", "media"] },
-                ["blocking"]
-            );
-        } else if (!effectiveOnOrOff && isCurrentlyOn) {
-            WJR_DEBUG && console.log('CONFIG: DNS Removing DNS block listener')
-            browser.webRequest.onBeforeRequest.removeListener(bkDnsBlockListener);
-        }
-        WJR_DEBUG && console.log('CONFIG: DNS blocking is now: '+onOrOff);
-    } else {
-        WJR_DEBUG && console.log('CONFIG: DNS blocking is already correctly set.');
-    }
-}
-
-//Use this if you change BK_isEnabled
-function bkRefreshDnsBlocking() {
-    bkSetDnsBlocking(BK_shouldUseDnsBlocking);
-}
-
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
 
 
@@ -748,7 +707,6 @@ function bkRefreshCallbackRegistration() {
     if (BK_isEnabled) {
         bkRegisterAllCallbacks();
     }
-    bkRefreshDnsBlocking();
     WJR_DEBUG && console.log('CONFIG: Callback wireup refresh complete!');
 }
 
@@ -765,7 +723,6 @@ function bkSetEnabled(isOn) {
         bkUnregisterAllCallbacks();
     }
     BK_isEnabled = isOn;
-    bkRefreshDnsBlocking();
     WJR_DEBUG && console.log('CONFIG: Callback wireups changed!');
 }
 
@@ -801,8 +758,6 @@ function bkSetVideoScanMode(mode) {
 let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
-    browser.storage.local.get('is_dns_blocking').then(dnsResult =>
-        bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get('is_on_off_shown').then(onOffResult =>
         BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
     browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']).then(videoBlockingResult => {
@@ -859,9 +814,6 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'getZoneAutomatic') {
         sendResponse({ isZoneAutomatic: BK_isZoneAutomatic });
-    }
-    else if (request.type == 'setDnsBlocking') {
-        bkUpdateFromSettings();
     }
     else if (request.type == 'getOnOff') {
         sendResponse({ onOff: BK_isEnabled ? 'on' : 'off' });
