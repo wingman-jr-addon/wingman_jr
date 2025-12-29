@@ -25,7 +25,6 @@
     "background": {
       "scripts": [
           "roc.js",
-          "dns_blocking.js",
           "mp4.js",
           "ebml.js",
           "status.js",
