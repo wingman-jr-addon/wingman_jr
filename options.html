@@ -35,8 +35,15 @@
       margin: 12px 0 6px;
     }
     label {
-      display: inline-block;
       margin: 2px 0;
+    }
+    .radio-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .radio-option.inline {
+      display: inline-flex;
     }
     input[type="radio"] {
       margin-right: 6px;
@@ -51,36 +58,36 @@
   <form>
     <h4>Which zone should be the default?</h4>
 	This addon uses the concept of "zones" to indicate how strictly it filters images. <br /> <br />
-    <input type="radio" name="default_zone" id="default_zone_automatic" value="automatic"><label for="default_zone_automatic"><b>Automatic</b> - Automatically change zones based on how many unsafe images have been detected recently</label> <br />
-    <input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><label for="default_zone_trusted"><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</label> <br />
-    <input type="radio" name="default_zone" id="default_zone_neutral" value="neutral" checked><label for="default_zone_neutral"><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</label><br />
-    <input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted" checked><label for="default_zone_untrusted"><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</label><br />
+    <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic"><span><b>Automatic</b> - Automatically change zones based on how many unsafe images have been detected recently</span></label> <br />
+    <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label> <br />
+    <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral" checked><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label><br />
+    <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted" checked><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label><br />
     <br />
     <h4>Show an on/off switch on the main menu?</h4>
 	Add a switch to turn filtering on and off quickly while browsing. <b>Note:</b> already-blocked images will only reappear when the cache is cleared - hit shift+refresh on the page to reload it fully. <br /> <br />
-    <input type="radio" name="on_off_shown" id="on_off_shown_yes" value="on_off_shown_yes"><label for="on_off_shown_yes">Yes</label>
-    <input type="radio" name="on_off_shown" id="on_off_shown_no" value="on_off_shown_no" checked><label for="on_off_shown_no">No</label><br />
+    <label class="radio-option inline" for="on_off_shown_yes"><input type="radio" name="on_off_shown" id="on_off_shown_yes" value="on_off_shown_yes"><span>Yes</span></label>
+    <label class="radio-option inline" for="on_off_shown_no"><input type="radio" name="on_off_shown" id="on_off_shown_no" value="on_off_shown_no" checked><span>No</span></label><br />
     <br />
     <h4>Video blocking?</h4>
 	Video blocking requires quite a bit of processing, and the accuracy is currently lower due to technical limitations. <br />
   Additionally, not all video sites are supported because video data is delivered to the browser in many ways.<br /> <br />
-    <input type="radio" name="video_blocking_mode" id="video_blocking_mode_enabled" value="enabled"><label for="video_blocking_mode_enabled">Enabled</label>
-    <input type="radio" name="video_blocking_mode" id="video_blocking_mode_quick" value="quick" checked><label for="video_blocking_mode_quick">Quick Scan</label>
-    <input type="radio" name="video_blocking_mode" id="video_blocking_mode_disabled" value="disabled"><label for="video_blocking_mode_disabled">Disabled</label><br />
+    <label class="radio-option inline" for="video_blocking_mode_enabled"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_enabled" value="enabled"><span>Enabled</span></label>
+    <label class="radio-option inline" for="video_blocking_mode_quick"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_quick" value="quick" checked><span>Quick Scan</span></label>
+    <label class="radio-option inline" for="video_blocking_mode_disabled"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_disabled" value="disabled"><span>Disabled</span></label><br />
     <br />
     Quick Scan will scan only a small selection of frames, but provides a lighter, balanced experience and is the default behavior. <br />
     <h4>Silent mode?</h4>
 	Instead of showing a blocked icon, instead choose a placeholder image. <br /> <br />
-    <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_yes" value="is_silent_mode_enabled_yes" checked><label for="is_silent_mode_enabled_yes">Enabled</label>
-    <input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><label for="is_silent_mode_enabled_no">Disabled</label><br />
+    <label class="radio-option inline" for="is_silent_mode_enabled_yes"><input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_yes" value="is_silent_mode_enabled_yes" checked><span>Enabled</span></label>
+    <label class="radio-option inline" for="is_silent_mode_enabled_no"><input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><span>Disabled</span></label><br />
     <a href="silent_credits.html" target="_blank">View the image credits</a> <br />
     <br />
     <h4>Which Tensorflow.js processing backend should be used? (Advanced option)</h4>
-    <input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><label for="backend_selection_webgl">WebGL only</label> <br />
-    <input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><label for="backend_selection_inprocwebgl">Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</label> <br />
-    <input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm"><label for="backend_selection_wasm">WASM only</label> <br />
-    <input type="radio" name="backend_selection" id="backend_selection_webgl_wasm" value="webgl_wasm"><label for="backend_selection_webgl_wasm">WebGL (primary) + WASM (secondary)</label> <br />
-    <input type="radio" name="backend_selection" id="backend_selection_wasm_webgl" value="wasm_webgl"><label for="backend_selection_wasm_webgl">WASM (primary) + WebGL (secondary)</label> <br />
+    <label class="radio-option" for="backend_selection_webgl"><input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><span>WebGL only</span></label> <br />
+    <label class="radio-option" for="backend_selection_inprocwebgl"><input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><span>Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</span></label> <br />
+    <label class="radio-option" for="backend_selection_wasm"><input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm"><span>WASM only</span></label> <br />
+    <label class="radio-option" for="backend_selection_webgl_wasm"><input type="radio" name="backend_selection" id="backend_selection_webgl_wasm" value="webgl_wasm"><span>WebGL (primary) + WASM (secondary)</span></label> <br />
+    <label class="radio-option" for="backend_selection_wasm_webgl"><input type="radio" name="backend_selection" id="backend_selection_wasm_webgl" value="wasm_webgl"><span>WASM (primary) + WebGL (secondary)</span></label> <br />
     <br />
     <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Feedback?</a> <br />
     <a id="github" href="https://github.com/wingman-jr-addon/wingman_jr/issues">Are you a developer? File issues/requests on GitHub</a>
