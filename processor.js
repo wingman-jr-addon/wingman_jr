@@ -227,24 +227,25 @@ async function procCommonLogImgGeneric(img, message, logger)
     logger('%c '+message, blockedCSS);
 }
 
-async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob)
+async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob, originalUrl)
 {
     let dataURL = (PROC_isInReviewMode || PROC_isRevealBlockedEnabled) ? await procReadFileAsDataURL(blob) : null;
-    return procCommonCreateSvg(img, sqrxrScore, dataURL);
+    return procCommonCreateSvg(img, sqrxrScore, dataURL, originalUrl);
 }
 
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 let PROC_isSilentModeEnabled = true;
 let PROC_isRevealBlockedEnabled = false;
-async function procCommonCreateSvg(img, sqrxrScore, dataURL)
+async function procCommonCreateSvg(img, sqrxrScore, dataURL, originalUrl)
 {
     let threshold = sqrxrScore[0][0];
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     let originalDataURL = PROC_isRevealBlockedEnabled ? dataURL : null;
+    let originalUrlForEmbed = PROC_isRevealBlockedEnabled ? originalUrl : null;
     if(PROC_isSilentModeEnabled) {
-        return await SM_getReplacementSVG(img, visibleScore, originalDataURL);
+        return await SM_getReplacementSVG(img, visibleScore, originalDataURL, originalUrlForEmbed);
     } else {
         let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
         +'<g transform="translate(20 20)">'
@@ -260,6 +261,7 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
         + '</g>'
         + (PROC_isInReviewMode ? '<image href="'+dataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" opacity="0.2" />' : '')
         + (originalDataURL ? '<image id="wingman-original" href="'+originalDataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" style="display:none" />' : '')
+        + (originalUrlForEmbed ? '<metadata id="wingman-original-url">'+encodeURIComponent(originalUrlForEmbed)+'</metadata>' : '')
         +'<text transform="translate(12 20)" font-size="20" fill="red">'+visibleScore+'</text>'
         +'</g>'
         +'</svg>';
@@ -319,7 +321,7 @@ async function procPerformFiltering(entry) {
                     result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
+                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob, entry.url);
                     procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
@@ -434,7 +436,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId
                         });
-                        let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
+                        let svgText = await procCommonCreateSvg(img, sqrxrScore, img.src, img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
                         WJR_DEBUG && console.log('ML: base64 filter Blocked: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                         procCommonWarnImg(img, 'BLOCKED IMG BASE64 '+procScoreToStr(sqrxrScore));

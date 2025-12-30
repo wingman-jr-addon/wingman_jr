@@ -74,6 +74,33 @@ function bkBroadcastMessageToProcessors(m) {
 
 let BK_isSilentModeEnabled = false;
 let BK_isRevealBlockedEnabled = false;
+let BK_revealAllowlist = {};
+const BK_REVEAL_ALLOWLIST_TTL_MS = 60 * 1000;
+
+function bkRevealAllowKey(tabId, url) {
+    return `${tabId}|${url}`;
+}
+
+function bkRegisterRevealAllow(tabId, url) {
+    if (!url) {
+        return;
+    }
+    BK_revealAllowlist[bkRevealAllowKey(tabId, url)] = Date.now() + BK_REVEAL_ALLOWLIST_TTL_MS;
+}
+
+function bkConsumeRevealAllow(tabId, url) {
+    let key = bkRevealAllowKey(tabId, url);
+    let expiresAt = BK_revealAllowlist[key];
+    if (!expiresAt) {
+        return false;
+    }
+    if (expiresAt < Date.now()) {
+        delete BK_revealAllowlist[key];
+        return false;
+    }
+    delete BK_revealAllowlist[key];
+    return true;
+}
 
 function bkBroadcastProcessorSettings() {
     bkBroadcastMessageToProcessors({
@@ -450,6 +477,10 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
+    if (bkConsumeRevealAllow(details.tabId, details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Reveal allowlist '+details.url);
+        return;
+    }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
@@ -678,15 +709,28 @@ if (browser.menus) {
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(svgText, "image/svg+xml");
                     const original = doc.getElementById("wingman-original");
-                    if (!original) {
+                    const originalUrlMeta = doc.getElementById("wingman-original-url");
+                    if (original) {
+                        const href = original.getAttribute("href") || original.getAttribute("xlink:href");
+                        if (!href) {
+                            return;
+                        }
+                        target.srcset = "";
+                        target.src = href;
                         return;
                     }
-                    const href = original.getAttribute("href") || original.getAttribute("xlink:href");
-                    if (!href) {
-                        return;
+                    if (originalUrlMeta) {
+                        const encodedUrl = originalUrlMeta.textContent || "";
+                        if (!encodedUrl) {
+                            return;
+                        }
+                        const revealUrl = decodeURIComponent(encodedUrl);
+                        browser.runtime.sendMessage({ type: "revealBlockedImage", url: revealUrl })
+                            .then(() => {
+                                target.srcset = "";
+                                target.src = revealUrl;
+                            });
                     }
-                    target.srcset = "";
-                    target.src = href;
                 })();`,
             });
         },
@@ -897,6 +941,11 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
+    }
+    else if (request.type == 'revealBlockedImage') {
+        if (BK_isRevealBlockedEnabled && sender.tab && request.url) {
+            bkRegisterRevealAllow(sender.tab.id, request.url);
+        }
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
