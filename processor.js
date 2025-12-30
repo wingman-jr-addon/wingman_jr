@@ -12,6 +12,8 @@ function procOnModelLoadProgress(percentage) {
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
+let PROC_SCALE_TENSOR;
+let PROC_SHIFT_TENSOR;
 const procWingmanStartup = async (backendRequested) => {
     WJR_DEBUG && console.log('LIFECYCLE: Launching TF.js!');
     WJR_DEBUG && console.log('LIFECYCLE: Backend requested '+backendRequested);
@@ -29,6 +31,8 @@ const procWingmanStartup = async (backendRequested) => {
         PROC_wingman = null;
         return;
     }
+    PROC_SCALE_TENSOR = PROC_SCALE_TENSOR || tf.scalar(127.5);
+    PROC_SHIFT_TENSOR = PROC_SHIFT_TENSOR || tf.scalar(1);
     WJR_DEBUG && console.log('LIFECYCLE: Loading model...');
     PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
     WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
@@ -141,28 +145,25 @@ async function procPredict(imgElement) {
         const drawStartTime = performance.now();
         tileImage(c, imgElement);
         WJR_DEBUG && (await procCommonLogImg(c.canvas, `TILE: Output`));
-        const rightSizeImageData = c.ctx.getImageData(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
         const startTime = performance.now();
-        const logits = tf.tidy(() => {
-            const rightSizeImageDataTF = tf.browser.fromPixels(rightSizeImageData);
+        const syncedResult = tf.tidy(() => {
+            const rightSizeImageDataTF = tf.browser.fromPixels(c.canvas);
             const floatImg = rightSizeImageDataTF.toFloat();
             //EfficientNet
             //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
             //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
             //MobileNet V2
-            const scaled = floatImg.div(tf.scalar(127.5));
-            const normalized = scaled.sub(tf.scalar(1));
+            const scaled = floatImg.div(PROC_SCALE_TENSOR);
+            const normalized = scaled.sub(PROC_SHIFT_TENSOR);
             // Reshape to a single-element batch so we can pass it to predict.
-            const batched = tf.stack([normalized]);
+            const batched = normalized.expandDims(0);
             const result = PROC_wingman.predict(batched, {batchSize: 1});
-
-            return result;
+            return [result[0].dataSync(), result[1].dataSync()];
         });
 
-        let syncedResult = [logits[0].dataSync(),logits[1].dataSync()];
         const totalTime = performance.now() - startTime;
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
