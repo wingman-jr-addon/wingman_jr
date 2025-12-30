@@ -134,7 +134,6 @@ for (var i = 0, max = radiosDefaultZone.length; i < max; i++) {
     }
 }
 
-
 var radiosBackendSelection = document.forms[0].elements["backend_selection"];
 for (var i = 0, max = radiosBackendSelection.length; i < max; i++) {
     radiosBackendSelection[i].onclick = function () {
