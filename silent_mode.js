@@ -139,7 +139,7 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
     return targetCanvas.toDataURL();
 }
 
-async function SM_getReplacementSVG(img, visibleScore) {
+async function SM_getReplacementSVG(img, visibleScore, originalDataURL) {
     WJR_DEBUG && console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
 
     let bestMatch = await SM_findBestMatchImage(img);
@@ -151,6 +151,7 @@ async function SM_getReplacementSVG(img, visibleScore) {
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
     +'<g>'
     + '<image href="'+replacementImageDataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" />'
+    + (originalDataURL ? '<image id="wingman-original" href="'+originalDataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" style="display:none" />' : '')
     +' <text transform="translate('+(img.width/2.0)+' '+(img.height/2.0)+')" font-size="'+fontSize+'" fill="grey" opacity="0.35">W'+visibleScore+'</text>'
     +'</g>'
     +'</svg>';

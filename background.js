@@ -73,11 +73,13 @@ function bkBroadcastMessageToProcessors(m) {
 }
 
 let BK_isSilentModeEnabled = false;
+let BK_isRevealBlockedEnabled = false;
 
 function bkBroadcastProcessorSettings() {
     bkBroadcastMessageToProcessors({
         type: 'settings',
-        isSilentModeEnabled: BK_isSilentModeEnabled
+        isSilentModeEnabled: BK_isSilentModeEnabled,
+        isRevealBlockedEnabled: BK_isRevealBlockedEnabled
     });
 }
 
@@ -637,6 +639,7 @@ async function bkBase64ContentListener(details) {
 
 if (browser.menus) {
     browser.menus.create({
+        id: 'wingman-hide-image',
         title: "Hide Image",
         documentUrlPatterns: ["*://*/*"],
         contexts: ["image"],
@@ -647,6 +650,47 @@ if (browser.menus) {
           });
         },
       });
+    browser.menus.create({
+        id: 'wingman-reveal-blocked-image',
+        title: "Reveal Blocked Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["image"],
+        visible: false,
+        onclick(info, tab) {
+            browser.tabs.executeScript(tab.id, {
+                frameId: info.frameId,
+                code: `(() => {
+                    const target = browser.menus.getTargetElement(${info.targetElementId});
+                    if (!target || !target.src || !target.src.startsWith("data:image/svg+xml")) {
+                        return;
+                    }
+                    const dataUrl = target.src;
+                    const parts = dataUrl.split(",");
+                    if (parts.length < 2) {
+                        return;
+                    }
+                    let svgText = "";
+                    if (dataUrl.startsWith("data:image/svg+xml;base64,")) {
+                        svgText = atob(parts[1]);
+                    } else {
+                        svgText = decodeURIComponent(parts.slice(1).join(","));
+                    }
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(svgText, "image/svg+xml");
+                    const original = doc.getElementById("wingman-original");
+                    if (!original) {
+                        return;
+                    }
+                    const href = original.getAttribute("href") || original.getAttribute("xlink:href");
+                    if (!href) {
+                        return;
+                    }
+                    target.srcset = "";
+                    target.src = href;
+                })();`,
+            });
+        },
+    });
 }
 
 ////////////////////////Actual Startup//////////////////////////////
@@ -756,10 +800,25 @@ function bkSetVideoScanMode(mode) {
 }
 
 let BK_isOnOffSwitchShown = false;
+function bkUpdateContextMenus() {
+    if (!browser.menus) {
+        return;
+    }
+    browser.menus.update('wingman-reveal-blocked-image', {
+        visible: BK_isRevealBlockedEnabled
+    });
+    if (browser.menus.refresh) {
+        browser.menus.refresh();
+    }
+}
 
 function bkUpdateFromSettings() {
-    browser.storage.local.get('is_on_off_shown').then(onOffResult =>
-        BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+    browser.storage.local.get('is_on_off_shown').then(result => {
+        BK_isOnOffSwitchShown = result.is_on_off_shown == true;
+        BK_isRevealBlockedEnabled = BK_isOnOffSwitchShown;
+        bkUpdateContextMenus();
+        bkBroadcastProcessorSettings();
+    });
     browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']).then(videoBlockingResult => {
         let mode = videoBlockingResult.video_blocking_mode;
         if(!mode) {

@@ -229,20 +229,22 @@ async function procCommonLogImgGeneric(img, message, logger)
 
 async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob)
 {
-    let dataURL = PROC_isInReviewMode ? await procReadFileAsDataURL(blob) : null;
+    let dataURL = (PROC_isInReviewMode || PROC_isRevealBlockedEnabled) ? await procReadFileAsDataURL(blob) : null;
     return procCommonCreateSvg(img, sqrxrScore, dataURL);
 }
 
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 let PROC_isSilentModeEnabled = true;
+let PROC_isRevealBlockedEnabled = false;
 async function procCommonCreateSvg(img, sqrxrScore, dataURL)
 {
     let threshold = sqrxrScore[0][0];
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
+    let originalDataURL = PROC_isRevealBlockedEnabled ? dataURL : null;
     if(PROC_isSilentModeEnabled) {
-        return await SM_getReplacementSVG(img, visibleScore);
+        return await SM_getReplacementSVG(img, visibleScore, originalDataURL);
     } else {
         let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
         +'<g transform="translate(20 20)">'
@@ -257,6 +259,7 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
         + '<circle cx="29.338" cy="87.549" r=".33705" stroke="#13151c" stroke-width=".093848"/>'
         + '</g>'
         + (PROC_isInReviewMode ? '<image href="'+dataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" opacity="0.2" />' : '')
+        + (originalDataURL ? '<image id="wingman-original" href="'+originalDataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" style="display:none" />' : '')
         +'<text transform="translate(12 20)" font-size="20" fill="red">'+visibleScore+'</text>'
         +'</g>'
         +'</svg>';
@@ -737,6 +740,7 @@ async function procOnPortMessage(m) {
         case 'settings' : {
             WJR_DEBUG && console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
             PROC_isSilentModeEnabled = m.isSilentModeEnabled;
+            PROC_isRevealBlockedEnabled = m.isRevealBlockedEnabled === true;
         }
         break;
         case 'start': {
