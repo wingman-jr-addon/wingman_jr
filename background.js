@@ -874,7 +874,7 @@ if (browser.menus) {
             return null;
         }
 
-        function wingmanRevealResolveTarget(target) {
+        function wingmanRevealResolveTarget(target, contextPoint) {
             const initial = wingmanRevealCandidateFromElement(target);
             if (initial) {
                 return initial;
@@ -889,6 +889,16 @@ if (browser.menus) {
                 }
                 current = current.parentElement;
                 depth += 1;
+            }
+
+            if (contextPoint && Number.isFinite(contextPoint.x) && Number.isFinite(contextPoint.y)) {
+                const elementsAtPoint = document.elementsFromPoint(contextPoint.x, contextPoint.y);
+                for (const element of elementsAtPoint) {
+                    const candidate = wingmanRevealCandidateFromElement(element);
+                    if (candidate) {
+                        return candidate;
+                    }
+                }
             }
 
             const points = wingmanRevealGetSearchPoints(target);
@@ -939,12 +949,24 @@ if (browser.menus) {
             tabId: tab?.id
         });
 
+        let contextPoint = null;
+        try {
+            contextPoint = await browser.tabs.sendMessage(
+                tab.id,
+                { type: 'wingmanRevealGetContextPoint' },
+                { frameId: info.frameId }
+            );
+        } catch (error) {
+            WJR_DEBUG && console.warn('REVEAL: Unable to read context point', error);
+        }
+
         const [targetInfo] = await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
             code: `(() => {
                 ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
                 const target = browser.menus.getTargetElement(${info.targetElementId});
-                const resolved = wingmanRevealResolveTarget(target);
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
                 if (!resolved || !resolved.src) {
                     return null;
                 }
@@ -963,8 +985,9 @@ if (browser.menus) {
                 frameId: info.frameId,
                 code: `(() => {
                     ${BK_REVEAL_TARGET_RESOLVER}
+                    const contextPoint = ${JSON.stringify(contextPoint)};
                     const target = browser.menus.getTargetElement(${info.targetElementId});
-                    const resolved = wingmanRevealResolveTarget(target);
+                    const resolved = wingmanRevealResolveTarget(target, contextPoint);
                     if (!resolved || resolved.kind !== 'img') {
                         return;
                     }
@@ -1013,8 +1036,9 @@ if (browser.menus) {
             frameId: info.frameId,
             code: `(() => {
                 ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
                 const target = browser.menus.getTargetElement(${info.targetElementId});
-                const resolved = wingmanRevealResolveTarget(target);
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
                 if (!resolved || !resolved.src) {
                     console.warn('REVEAL: Target missing during reload');
                     return;
