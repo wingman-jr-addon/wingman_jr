@@ -771,14 +771,8 @@ if (browser.menus) {
             return;
         }
 
-        try {
-            console.log('REVEAL: Sending reveal message', targetInfo.src);
-            await browser.runtime.sendMessage({ type: "revealBlockedImage", url: targetInfo.src });
-            console.log('REVEAL: Reveal message acknowledged');
-        } catch (error) {
-            console.warn('Failed to request reveal for blocked image', error);
-            return;
-        }
+        console.log('REVEAL: Allowlisting URL for reveal', targetInfo.src);
+        bkRememberRevealUrl(targetInfo.src);
 
         await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
