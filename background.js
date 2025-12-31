@@ -486,7 +486,6 @@ function bkIsRevealAllowed(url) {
         BK_revealAllowlist.delete(normalized);
         return false;
     }
-    BK_revealAllowlist.delete(normalized);
     console.log('REVEAL: Allowlist hit', normalized);
     return true;
 }
