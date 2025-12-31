@@ -797,9 +797,31 @@ if (browser.menus) {
                     return;
                 }
                 const originalSrc = target.src;
-                console.log('REVEAL: Reloading image', originalSrc);
-                target.src = '';
-                target.src = originalSrc;
+                const previousObjectUrl = target.dataset.wingmanRevealObjectUrl;
+                if (previousObjectUrl) {
+                    URL.revokeObjectURL(previousObjectUrl);
+                    delete target.dataset.wingmanRevealObjectUrl;
+                }
+                target.removeAttribute('srcset');
+                console.log('REVEAL: Fetching image with cache reload', originalSrc);
+                fetch(originalSrc, { cache: 'reload' })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('HTTP ' + response.status);
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const objectUrl = URL.createObjectURL(blob);
+                        target.dataset.wingmanRevealObjectUrl = objectUrl;
+                        target.src = objectUrl;
+                        console.log('REVEAL: Set image to fetched blob URL');
+                    })
+                    .catch(error => {
+                        console.warn('REVEAL: Fetch reload failed, resetting src', error);
+                        target.src = '';
+                        target.src = originalSrc;
+                    });
             })();`,
         });
     });
