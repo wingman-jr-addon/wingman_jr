@@ -718,6 +718,209 @@ async function bkBase64ContentListener(details) {
 ////////////////////////////Context Menu////////////////////////////
 
 if (browser.menus) {
+    const BK_REVEAL_TARGET_RESOLVER = `
+        const wingmanRevealDataAttributes = [
+            'data-src',
+            'data-original',
+            'data-lazy-src',
+            'data-lazy',
+            'data-image-src'
+        ];
+
+        function wingmanRevealExtractBackgroundUrl(element) {
+            if (!element) {
+                return null;
+            }
+            const style = getComputedStyle(element);
+            const backgroundImage = style?.backgroundImage;
+            if (!backgroundImage || backgroundImage === 'none') {
+                return null;
+            }
+            const match = backgroundImage.match(/url\\(["']?(.*?)["']?\\)/i);
+            return match?.[1] || null;
+        }
+
+        function wingmanRevealExtractFromAttributes(element) {
+            if (!element?.getAttribute) {
+                return null;
+            }
+            for (const attr of wingmanRevealDataAttributes) {
+                const value = element.getAttribute(attr);
+                if (value) {
+                    return value;
+                }
+            }
+            const srcset = element.getAttribute('srcset') || element.getAttribute('data-srcset');
+            if (srcset) {
+                const firstEntry = srcset.split(',')[0]?.trim();
+                if (firstEntry) {
+                    return firstEntry.split(/\s+/)[0];
+                }
+            }
+            return null;
+        }
+
+        function wingmanRevealFindImgSource(element) {
+            if (!element || element.tagName !== 'IMG') {
+                return null;
+            }
+            const directSrc = element.currentSrc || element.src;
+            if (directSrc) {
+                return directSrc;
+            }
+            return wingmanRevealExtractFromAttributes(element);
+        }
+
+        function wingmanRevealFindSourceElement(element) {
+            if (!element) {
+                return null;
+            }
+            if (element.tagName === 'SOURCE') {
+                return element;
+            }
+            return element.querySelector?.('source') || null;
+        }
+
+        function wingmanRevealCandidateFromElement(element) {
+            if (!element) {
+                return null;
+            }
+            const imgSrc = wingmanRevealFindImgSource(element);
+            if (imgSrc) {
+                return { element, src: imgSrc, kind: 'img' };
+            }
+
+            const descendantImg = element.querySelector?.('img') || element.shadowRoot?.querySelector?.('img');
+            if (descendantImg) {
+                const descendantSrc = wingmanRevealFindImgSource(descendantImg);
+                if (descendantSrc) {
+                    return { element: descendantImg, src: descendantSrc, kind: 'img' };
+                }
+            }
+
+            const sourceElement = wingmanRevealFindSourceElement(element);
+            if (sourceElement) {
+                const sourceSrc = wingmanRevealExtractFromAttributes(sourceElement);
+                if (sourceSrc) {
+                    const pictureImg = sourceElement.closest?.('picture')?.querySelector?.('img');
+                    return { element: pictureImg || sourceElement, src: sourceSrc, kind: 'img' };
+                }
+            }
+
+            const attributeSrc = wingmanRevealExtractFromAttributes(element);
+            if (attributeSrc) {
+                const kind = element.tagName === 'IMG' ? 'img' : 'background';
+                return { element, src: attributeSrc, kind };
+            }
+
+            const backgroundUrl = wingmanRevealExtractBackgroundUrl(element);
+            if (backgroundUrl) {
+                return { element, src: backgroundUrl, kind: 'background' };
+            }
+
+            return null;
+        }
+
+        function wingmanRevealGetSearchPoints(target) {
+            if (!target?.getBoundingClientRect) {
+                return [];
+            }
+            const rect = target.getBoundingClientRect();
+            if (!rect.width && !rect.height) {
+                return [];
+            }
+            const midX = rect.left + rect.width / 2;
+            const midY = rect.top + rect.height / 2;
+            const clampX = x => Math.max(0, Math.min(window.innerWidth - 1, x));
+            const clampY = y => Math.max(0, Math.min(window.innerHeight - 1, y));
+            const padding = 2;
+            return [
+                { x: clampX(midX), y: clampY(midY) },
+                { x: clampX(rect.left + padding), y: clampY(rect.top + padding) },
+                { x: clampX(rect.right - padding), y: clampY(rect.top + padding) },
+                { x: clampX(rect.left + padding), y: clampY(rect.bottom - padding) },
+                { x: clampX(rect.right - padding), y: clampY(rect.bottom - padding) },
+            ];
+        }
+
+        function wingmanRevealFindIntersectingImage(target) {
+            if (!target?.getBoundingClientRect) {
+                return null;
+            }
+            const targetRect = target.getBoundingClientRect();
+            if (!targetRect.width && !targetRect.height) {
+                return null;
+            }
+            const images = document.querySelectorAll('img');
+            for (const image of images) {
+                const imageRect = image.getBoundingClientRect();
+                if (!imageRect.width && !imageRect.height) {
+                    continue;
+                }
+                const intersects = !(
+                    imageRect.right < targetRect.left ||
+                    imageRect.left > targetRect.right ||
+                    imageRect.bottom < targetRect.top ||
+                    imageRect.top > targetRect.bottom
+                );
+                if (!intersects) {
+                    continue;
+                }
+                const src = wingmanRevealFindImgSource(image);
+                if (src) {
+                    return { element: image, src, kind: 'img' };
+                }
+            }
+            return null;
+        }
+
+        function wingmanRevealResolveTarget(target, contextPoint) {
+            const initial = wingmanRevealCandidateFromElement(target);
+            if (initial) {
+                return initial;
+            }
+
+            let current = target?.parentElement;
+            let depth = 0;
+            while (current && depth < 5) {
+                const candidate = wingmanRevealCandidateFromElement(current);
+                if (candidate) {
+                    return candidate;
+                }
+                current = current.parentElement;
+                depth += 1;
+            }
+
+            if (contextPoint && Number.isFinite(contextPoint.x) && Number.isFinite(contextPoint.y)) {
+                const elementsAtPoint = document.elementsFromPoint(contextPoint.x, contextPoint.y);
+                for (const element of elementsAtPoint) {
+                    const candidate = wingmanRevealCandidateFromElement(element);
+                    if (candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            const points = wingmanRevealGetSearchPoints(target);
+            for (const point of points) {
+                const elements = document.elementsFromPoint(point.x, point.y);
+                for (const element of elements) {
+                    const candidate = wingmanRevealCandidateFromElement(element);
+                    if (candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            const intersecting = wingmanRevealFindIntersectingImage(target);
+            if (intersecting) {
+                return intersecting;
+            }
+
+            return null;
+        }
+    `;
+
     browser.menus.create({
         title: "Hide Image",
         documentUrlPatterns: ["*://*/*"],
@@ -734,7 +937,7 @@ if (browser.menus) {
         id: "wingman-reveal-blocked-image",
         title: "Reveal Blocked Image",
         documentUrlPatterns: ["*://*/*"],
-        contexts: ["image"],
+        contexts: ["all"],
     });
 
     browser.menus.onClicked.addListener(async (info, tab) => {
@@ -746,14 +949,28 @@ if (browser.menus) {
             tabId: tab?.id
         });
 
+        let contextPoint = null;
+        try {
+            contextPoint = await browser.tabs.sendMessage(
+                tab.id,
+                { type: 'wingmanRevealGetContextPoint' },
+                { frameId: info.frameId }
+            );
+        } catch (error) {
+            WJR_DEBUG && console.warn('REVEAL: Unable to read context point', error);
+        }
+
         const [targetInfo] = await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
             code: `(() => {
+                ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
                 const target = browser.menus.getTargetElement(${info.targetElementId});
-                if (!target || !target.src) {
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                if (!resolved || !resolved.src) {
                     return null;
                 }
-                return { src: target.src };
+                return { src: resolved.src, kind: resolved.kind || 'img' };
             })();`,
         });
 
@@ -767,11 +984,18 @@ if (browser.menus) {
             await browser.tabs.executeScript(tab.id, {
                 frameId: info.frameId,
                 code: `(() => {
+                    ${BK_REVEAL_TARGET_RESOLVER}
+                    const contextPoint = ${JSON.stringify(contextPoint)};
                     const target = browser.menus.getTargetElement(${info.targetElementId});
-                    if (!target || !target.src || !target.src.startsWith('data:image/svg+xml')) {
+                    const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                    if (!resolved || resolved.kind !== 'img') {
                         return;
                     }
-                    const src = target.src;
+                    const resolvedTarget = resolved.element;
+                    if (!resolvedTarget?.src || !resolvedTarget.src.startsWith('data:image/svg+xml')) {
+                        return;
+                    }
+                    const src = resolvedTarget.src;
                     const commaIndex = src.indexOf(',');
                     if (commaIndex === -1) {
                         return;
@@ -788,13 +1012,13 @@ if (browser.menus) {
                     const imageNode = doc.querySelector('image');
                     const href = imageNode?.getAttribute('href') || imageNode?.getAttribute('xlink:href');
                     if (href) {
-                        target.src = href;
+                        resolvedTarget.src = href;
                         console.log('REVEAL: SVG href extracted', href);
                     } else {
                         const svgRoot = doc.documentElement;
                         const embeddedHref = svgRoot?.getAttribute('data-wingman-original-href');
                         if (embeddedHref) {
-                            target.src = embeddedHref;
+                            resolvedTarget.src = embeddedHref;
                             console.log('REVEAL: SVG embedded href extracted', embeddedHref);
                         } else {
                             console.warn('REVEAL: No href found in SVG');
@@ -811,18 +1035,26 @@ if (browser.menus) {
         await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
             code: `(() => {
+                ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
                 const target = browser.menus.getTargetElement(${info.targetElementId});
-                if (!target || !target.src) {
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                if (!resolved || !resolved.src) {
                     console.warn('REVEAL: Target missing during reload');
                     return;
                 }
-                const originalSrc = target.src;
-                const previousObjectUrl = target.dataset.wingmanRevealObjectUrl;
+                const resolvedTarget = resolved.element;
+                const originalSrc = resolved.src;
+                const isImage = resolved.kind === 'img';
+                const previousKey = isImage ? 'wingmanRevealObjectUrl' : 'wingmanRevealBackgroundObjectUrl';
+                const previousObjectUrl = resolvedTarget?.dataset?.[previousKey];
                 if (previousObjectUrl) {
                     URL.revokeObjectURL(previousObjectUrl);
-                    delete target.dataset.wingmanRevealObjectUrl;
+                    delete resolvedTarget.dataset[previousKey];
                 }
-                target.removeAttribute('srcset');
+                if (isImage) {
+                    resolvedTarget.removeAttribute('srcset');
+                }
                 console.log('REVEAL: Fetching image with cache reload', originalSrc);
                 fetch(originalSrc, { cache: 'reload' })
                     .then(response => {
@@ -833,14 +1065,24 @@ if (browser.menus) {
                     })
                     .then(blob => {
                         const objectUrl = URL.createObjectURL(blob);
-                        target.dataset.wingmanRevealObjectUrl = objectUrl;
-                        target.src = objectUrl;
+                        if (resolvedTarget?.dataset) {
+                            resolvedTarget.dataset[previousKey] = objectUrl;
+                        }
+                        if (isImage) {
+                            resolvedTarget.src = objectUrl;
+                        } else if (resolvedTarget?.style) {
+                            resolvedTarget.style.backgroundImage = \`url("\${objectUrl}")\`;
+                        }
                         console.log('REVEAL: Set image to fetched blob URL');
                     })
                     .catch(error => {
                         console.warn('REVEAL: Fetch reload failed, resetting src', error);
-                        target.src = '';
-                        target.src = originalSrc;
+                        if (isImage) {
+                            resolvedTarget.src = '';
+                            resolvedTarget.src = originalSrc;
+                        } else if (resolvedTarget?.style) {
+                            resolvedTarget.style.backgroundImage = \`url("\${originalSrc}")\`;
+                        }
                     });
             })();`,
         });
