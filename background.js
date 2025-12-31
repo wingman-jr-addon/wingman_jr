@@ -29,6 +29,10 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
+const BK_revealAllowlist = new Set();
+const BK_revealAllowlistQueue = [];
+const BK_revealAllowlistMaxSize = 1000;
+
 let BK_isInitialized = false;
 function bkInitialize() {
     statusOnLoaded();
@@ -444,12 +448,86 @@ function bkHandleCrashDetectionResult(m) {
 
 ///////////////// WATCHDOG END ////////////////////////////
 
+function bkNormalizeRevealUrl(url) {
+    if (!url || url.startsWith('data:')) {
+        return url;
+    }
+    try {
+        const parsed = new URL(url);
+        parsed.searchParams.delete('wingman_reveal');
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return url;
+    }
+}
+
+function bkHashUrl(url) {
+    let hash = 5381;
+    for (let i = 0; i < url.length; i++) {
+        hash = ((hash << 5) + hash) + url.charCodeAt(i);
+        hash = hash & 0xffffffff;
+    }
+    return (hash >>> 0).toString(16);
+}
+
+function bkRememberRevealUrl(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        console.warn('REVEAL: Unable to normalize URL', url);
+        return;
+    }
+    const hash = bkHashUrl(normalized);
+    if (BK_revealAllowlist.has(hash)) {
+        console.log('REVEAL: URL already allowlisted', { hash, url: normalized });
+        return;
+    }
+    BK_revealAllowlist.add(hash);
+    BK_revealAllowlistQueue.push(hash);
+    if (BK_revealAllowlistQueue.length > BK_revealAllowlistMaxSize) {
+        const evicted = BK_revealAllowlistQueue.shift();
+        if (evicted) {
+            BK_revealAllowlist.delete(evicted);
+            console.log('REVEAL: Evicted allowlist entry', evicted);
+        }
+    }
+    console.log('REVEAL: Allowlisted URL', { hash, url: normalized });
+}
+
+function bkIsRevealAllowed(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        return false;
+    }
+    const hash = bkHashUrl(normalized);
+    if (!BK_revealAllowlist.has(hash)) {
+        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', { hash, url: normalized });
+        return false;
+    }
+    console.log('REVEAL: Allowlist hit', { hash, url: normalized });
+    return true;
+}
+
+function bkRevealRedirectListener(details) {
+    if (bkIsRevealAllowed(details.url)) {
+        console.log('REVEAL: Allowlisting redirect', {
+            from: details.url,
+            to: details.redirectUrl
+        });
+        bkRememberRevealUrl(details.redirectUrl);
+    }
+}
+
 async function bkImageListener(details, shouldBlockSilently = false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
+        return;
+    }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -532,6 +610,10 @@ async function bkDirectTypedUrlListener(details) {
     }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
+        return;
+    }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Direct typed reveal whitelist '+details.url);
         return;
     }
     //Try to see if there is an image MIME type
@@ -647,6 +729,122 @@ if (browser.menus) {
           });
         },
       });
+
+    browser.menus.create({
+        id: "wingman-reveal-blocked-image",
+        title: "Reveal Blocked Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["image"],
+    });
+
+    browser.menus.onClicked.addListener(async (info, tab) => {
+        if (info.menuItemId !== "wingman-reveal-blocked-image") {
+            return;
+        }
+        console.log('REVEAL: Context menu clicked', {
+            frameId: info.frameId,
+            tabId: tab?.id
+        });
+
+        const [targetInfo] = await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                if (!target || !target.src) {
+                    return null;
+                }
+                return { src: target.src };
+            })();`,
+        });
+
+        if (!targetInfo || !targetInfo.src) {
+            console.warn('REVEAL: Missing target src');
+            return;
+        }
+
+        if (targetInfo.src.startsWith('data:image/svg+xml')) {
+            console.log('REVEAL: Handling SVG data URL');
+            await browser.tabs.executeScript(tab.id, {
+                frameId: info.frameId,
+                code: `(() => {
+                    const target = browser.menus.getTargetElement(${info.targetElementId});
+                    if (!target || !target.src || !target.src.startsWith('data:image/svg+xml')) {
+                        return;
+                    }
+                    const src = target.src;
+                    const commaIndex = src.indexOf(',');
+                    if (commaIndex === -1) {
+                        return;
+                    }
+                    const payload = src.slice(commaIndex + 1);
+                    let svgText = '';
+                    if (src.includes(';base64')) {
+                        svgText = atob(payload);
+                    } else {
+                        svgText = decodeURIComponent(payload);
+                    }
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+                    const imageNode = doc.querySelector('image');
+                    const href = imageNode?.getAttribute('href') || imageNode?.getAttribute('xlink:href');
+                    if (href) {
+                        target.src = href;
+                        console.log('REVEAL: SVG href extracted', href);
+                    } else {
+                        const svgRoot = doc.documentElement;
+                        const embeddedHref = svgRoot?.getAttribute('data-wingman-original-href');
+                        if (embeddedHref) {
+                            target.src = embeddedHref;
+                            console.log('REVEAL: SVG embedded href extracted', embeddedHref);
+                        } else {
+                            console.warn('REVEAL: No href found in SVG');
+                        }
+                    }
+                })();`,
+            });
+            return;
+        }
+
+        console.log('REVEAL: Allowlisting URL for reveal', targetInfo.src);
+        bkRememberRevealUrl(targetInfo.src);
+
+        await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                if (!target || !target.src) {
+                    console.warn('REVEAL: Target missing during reload');
+                    return;
+                }
+                const originalSrc = target.src;
+                const previousObjectUrl = target.dataset.wingmanRevealObjectUrl;
+                if (previousObjectUrl) {
+                    URL.revokeObjectURL(previousObjectUrl);
+                    delete target.dataset.wingmanRevealObjectUrl;
+                }
+                target.removeAttribute('srcset');
+                console.log('REVEAL: Fetching image with cache reload', originalSrc);
+                fetch(originalSrc, { cache: 'reload' })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('HTTP ' + response.status);
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const objectUrl = URL.createObjectURL(blob);
+                        target.dataset.wingmanRevealObjectUrl = objectUrl;
+                        target.src = objectUrl;
+                        console.log('REVEAL: Set image to fetched blob URL');
+                    })
+                    .catch(error => {
+                        console.warn('REVEAL: Fetch reload failed, resetting src', error);
+                        target.src = '';
+                        target.src = originalSrc;
+                    });
+            })();`,
+        });
+    });
 }
 
 ////////////////////////Actual Startup//////////////////////////////
@@ -657,6 +855,11 @@ function bkRegisterAllCallbacks() {
         bkImageListener,
         { urls: ["<all_urls>"], types: ["image", "imageset"] },
         ["blocking", "responseHeaders"]
+    );
+
+    browser.webRequest.onBeforeRedirect.addListener(
+        bkRevealRedirectListener,
+        { urls: ["<all_urls>"], types: ["image", "imageset"] }
     );
 
     browser.webRequest.onHeadersReceived.addListener(
@@ -693,6 +896,7 @@ function bkRegisterAllCallbacks() {
 
 function bkUnregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(bkImageListener);
+    browser.webRequest.onBeforeRedirect.removeListener(bkRevealRedirectListener);
     browser.webRequest.onHeadersReceived.removeListener(bkDirectTypedUrlListener);
     browser.webRequest.onHeadersReceived.removeListener(bkBase64ContentListener);
 
@@ -838,6 +1042,11 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
+    }
+    else if (request.type == 'revealBlockedImage') {
+        console.log('REVEAL: Message received', request.url);
+        bkRememberRevealUrl(request.url);
+        sendResponse({ ok: true });
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
