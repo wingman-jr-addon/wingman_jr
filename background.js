@@ -30,6 +30,7 @@ let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
 const BK_revealAllowlist = new Map();
+const BK_revealAllowlistByTab = new Map();
 const BK_revealAllowlistTtlMs = 30 * 1000;
 
 let BK_isInitialized = false;
@@ -461,7 +462,7 @@ function bkNormalizeRevealUrl(url) {
     }
 }
 
-function bkRememberRevealUrl(url) {
+function bkRememberRevealUrl(url, tabId) {
     const normalized = bkNormalizeRevealUrl(url);
     if (!normalized) {
         console.warn('REVEAL: Unable to normalize URL', url);
@@ -469,17 +470,31 @@ function bkRememberRevealUrl(url) {
     }
     BK_revealAllowlist.set(normalized, Date.now() + BK_revealAllowlistTtlMs);
     console.log('REVEAL: Allowlisted URL', normalized);
+    if (tabId !== null && tabId !== undefined && tabId >= 0) {
+        BK_revealAllowlistByTab.set(tabId, Date.now() + BK_revealAllowlistTtlMs);
+        console.log('REVEAL: Allowlisted tab', tabId);
+    }
 }
 
-function bkIsRevealAllowed(url) {
+function bkIsRevealAllowed(url, tabId) {
     const normalized = bkNormalizeRevealUrl(url);
     if (!normalized) {
         return false;
     }
     const expiresAt = BK_revealAllowlist.get(normalized);
     if (!expiresAt) {
-        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', normalized);
-        return false;
+        const tabExpiresAt = BK_revealAllowlistByTab.get(tabId);
+        if (!tabExpiresAt) {
+            WJR_DEBUG && console.log('REVEAL: URL not allowlisted', normalized);
+            return false;
+        }
+        if (Date.now() > tabExpiresAt) {
+            console.log('REVEAL: Tab allowlist expired', tabId);
+            BK_revealAllowlistByTab.delete(tabId);
+            return false;
+        }
+        console.log('REVEAL: Allowlist hit by tab', { tabId, url: normalized });
+        return true;
     }
     if (Date.now() > expiresAt) {
         console.log('REVEAL: Allowlist expired', normalized);
@@ -498,7 +513,7 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
-    if (bkIsRevealAllowed(details.url)) {
+    if (bkIsRevealAllowed(details.url, details.tabId)) {
         WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
@@ -584,7 +599,7 @@ async function bkDirectTypedUrlListener(details) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
-    if (bkIsRevealAllowed(details.url)) {
+    if (bkIsRevealAllowed(details.url, details.tabId)) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed reveal whitelist '+details.url);
         return;
     }
@@ -771,7 +786,7 @@ if (browser.menus) {
         }
 
         console.log('REVEAL: Allowlisting URL for reveal', targetInfo.src);
-        bkRememberRevealUrl(targetInfo.src);
+        bkRememberRevealUrl(targetInfo.src, tab?.id);
 
         await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
@@ -982,7 +997,7 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'revealBlockedImage') {
         console.log('REVEAL: Message received', request.url);
-        bkRememberRevealUrl(request.url);
+        bkRememberRevealUrl(request.url, sender?.tab?.id);
         sendResponse({ ok: true });
     }
 }
