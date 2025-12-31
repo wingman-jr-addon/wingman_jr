@@ -647,6 +647,88 @@ if (browser.menus) {
           });
         },
       });
+
+    browser.menus.create({
+        id: "wingman-reveal-blocked-image",
+        title: "Reveal Blocked Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["image"],
+    });
+
+    browser.menus.onClicked.addListener(async (info, tab) => {
+        if (info.menuItemId !== "wingman-reveal-blocked-image") {
+            return;
+        }
+
+        const [targetInfo] = await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                if (!target || !target.src) {
+                    return null;
+                }
+                return { src: target.src };
+            })();`,
+        });
+
+        if (!targetInfo || !targetInfo.src) {
+            return;
+        }
+
+        if (targetInfo.src.startsWith('data:image/svg+xml')) {
+            await browser.tabs.executeScript(tab.id, {
+                frameId: info.frameId,
+                code: `(() => {
+                    const target = browser.menus.getTargetElement(${info.targetElementId});
+                    if (!target || !target.src || !target.src.startsWith('data:image/svg+xml')) {
+                        return;
+                    }
+                    const src = target.src;
+                    const commaIndex = src.indexOf(',');
+                    if (commaIndex === -1) {
+                        return;
+                    }
+                    const payload = src.slice(commaIndex + 1);
+                    let svgText = '';
+                    if (src.includes(';base64')) {
+                        svgText = atob(payload);
+                    } else {
+                        svgText = decodeURIComponent(payload);
+                    }
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+                    const imageNode = doc.querySelector('image');
+                    const href = imageNode?.getAttribute('href') || imageNode?.getAttribute('xlink:href');
+                    if (href) {
+                        target.src = href;
+                    }
+                })();`,
+            });
+            return;
+        }
+
+        try {
+            await browser.runtime.sendMessage({ type: "revealBlockedImage", url: targetInfo.src });
+        } catch (error) {
+            console.warn('Failed to request reveal for blocked image', error);
+            return;
+        }
+
+        const cacheBustedUrl = targetInfo.src.includes('?')
+            ? `${targetInfo.src}&wingman_reveal=1`
+            : `${targetInfo.src}?wingman_reveal=1`;
+
+        await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                if (!target) {
+                    return;
+                }
+                target.src = ${JSON.stringify(cacheBustedUrl)};
+            })();`,
+        });
+    });
 }
 
 ////////////////////////Actual Startup//////////////////////////////
