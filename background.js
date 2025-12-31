@@ -843,6 +843,37 @@ if (browser.menus) {
             ];
         }
 
+        function wingmanRevealFindIntersectingImage(target) {
+            if (!target?.getBoundingClientRect) {
+                return null;
+            }
+            const targetRect = target.getBoundingClientRect();
+            if (!targetRect.width && !targetRect.height) {
+                return null;
+            }
+            const images = document.querySelectorAll('img');
+            for (const image of images) {
+                const imageRect = image.getBoundingClientRect();
+                if (!imageRect.width && !imageRect.height) {
+                    continue;
+                }
+                const intersects = !(
+                    imageRect.right < targetRect.left ||
+                    imageRect.left > targetRect.right ||
+                    imageRect.bottom < targetRect.top ||
+                    imageRect.top > targetRect.bottom
+                );
+                if (!intersects) {
+                    continue;
+                }
+                const src = wingmanRevealFindImgSource(image);
+                if (src) {
+                    return { element: image, src, kind: 'img' };
+                }
+            }
+            return null;
+        }
+
         function wingmanRevealResolveTarget(target) {
             const initial = wingmanRevealCandidateFromElement(target);
             if (initial) {
@@ -869,6 +900,11 @@ if (browser.menus) {
                         return candidate;
                     }
                 }
+            }
+
+            const intersecting = wingmanRevealFindIntersectingImage(target);
+            if (intersecting) {
+                return intersecting;
             }
 
             return null;
