@@ -471,8 +471,17 @@ function bkRememberRevealUrl(url, tabId) {
     BK_revealAllowlist.set(normalized, Date.now() + BK_revealAllowlistTtlMs);
     console.log('REVEAL: Allowlisted URL', normalized);
     if (tabId !== null && tabId !== undefined && tabId >= 0) {
-        BK_revealAllowlistByTab.set(tabId, Date.now() + BK_revealAllowlistTtlMs);
-        console.log('REVEAL: Allowlisted tab', tabId);
+        let origin = null;
+        try {
+            origin = new URL(normalized).origin;
+        } catch {
+            origin = null;
+        }
+        BK_revealAllowlistByTab.set(tabId, {
+            expiresAt: Date.now() + BK_revealAllowlistTtlMs,
+            origin: origin
+        });
+        console.log('REVEAL: Allowlisted tab', { tabId, origin: origin });
     }
 }
 
@@ -483,17 +492,33 @@ function bkIsRevealAllowed(url, tabId) {
     }
     const expiresAt = BK_revealAllowlist.get(normalized);
     if (!expiresAt) {
-        const tabExpiresAt = BK_revealAllowlistByTab.get(tabId);
-        if (!tabExpiresAt) {
+        const tabAllow = BK_revealAllowlistByTab.get(tabId);
+        if (!tabAllow) {
             WJR_DEBUG && console.log('REVEAL: URL not allowlisted', normalized);
             return false;
         }
-        if (Date.now() > tabExpiresAt) {
+        if (Date.now() > tabAllow.expiresAt) {
             console.log('REVEAL: Tab allowlist expired', tabId);
             BK_revealAllowlistByTab.delete(tabId);
             return false;
         }
-        console.log('REVEAL: Allowlist hit by tab', { tabId, url: normalized });
+        if (tabAllow.origin) {
+            let currentOrigin = null;
+            try {
+                currentOrigin = new URL(normalized).origin;
+            } catch {
+                currentOrigin = null;
+            }
+            if (currentOrigin !== tabAllow.origin) {
+                WJR_DEBUG && console.log('REVEAL: Tab allowlist origin mismatch', {
+                    tabId,
+                    expected: tabAllow.origin,
+                    actual: currentOrigin
+                });
+                return false;
+            }
+        }
+        console.log('REVEAL: Allowlist hit by tab', { tabId, url: normalized, origin: tabAllow.origin });
         return true;
     }
     if (Date.now() > expiresAt) {
