@@ -740,6 +740,26 @@ if (browser.menus) {
             return match?.[1] || null;
         }
 
+        function wingmanRevealExtractFromAttributes(element) {
+            if (!element?.getAttribute) {
+                return null;
+            }
+            for (const attr of wingmanRevealDataAttributes) {
+                const value = element.getAttribute(attr);
+                if (value) {
+                    return value;
+                }
+            }
+            const srcset = element.getAttribute('srcset') || element.getAttribute('data-srcset');
+            if (srcset) {
+                const firstEntry = srcset.split(',')[0]?.trim();
+                if (firstEntry) {
+                    return firstEntry.split(/\s+/)[0];
+                }
+            }
+            return null;
+        }
+
         function wingmanRevealFindImgSource(element) {
             if (!element || element.tagName !== 'IMG') {
                 return null;
@@ -748,13 +768,17 @@ if (browser.menus) {
             if (directSrc) {
                 return directSrc;
             }
-            for (const attr of wingmanRevealDataAttributes) {
-                const value = element.getAttribute(attr);
-                if (value) {
-                    return value;
-                }
+            return wingmanRevealExtractFromAttributes(element);
+        }
+
+        function wingmanRevealFindSourceElement(element) {
+            if (!element) {
+                return null;
             }
-            return null;
+            if (element.tagName === 'SOURCE') {
+                return element;
+            }
+            return element.querySelector?.('source') || null;
         }
 
         function wingmanRevealCandidateFromElement(element) {
@@ -766,12 +790,27 @@ if (browser.menus) {
                 return { element, src: imgSrc, kind: 'img' };
             }
 
-            const descendantImg = element.querySelector?.('img');
+            const descendantImg = element.querySelector?.('img') || element.shadowRoot?.querySelector?.('img');
             if (descendantImg) {
                 const descendantSrc = wingmanRevealFindImgSource(descendantImg);
                 if (descendantSrc) {
                     return { element: descendantImg, src: descendantSrc, kind: 'img' };
                 }
+            }
+
+            const sourceElement = wingmanRevealFindSourceElement(element);
+            if (sourceElement) {
+                const sourceSrc = wingmanRevealExtractFromAttributes(sourceElement);
+                if (sourceSrc) {
+                    const pictureImg = sourceElement.closest?.('picture')?.querySelector?.('img');
+                    return { element: pictureImg || sourceElement, src: sourceSrc, kind: 'img' };
+                }
+            }
+
+            const attributeSrc = wingmanRevealExtractFromAttributes(element);
+            if (attributeSrc) {
+                const kind = element.tagName === 'IMG' ? 'img' : 'background';
+                return { element, src: attributeSrc, kind };
             }
 
             const backgroundUrl = wingmanRevealExtractBackgroundUrl(element);
