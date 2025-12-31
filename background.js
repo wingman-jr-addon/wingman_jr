@@ -464,9 +464,11 @@ function bkNormalizeRevealUrl(url) {
 function bkRememberRevealUrl(url) {
     const normalized = bkNormalizeRevealUrl(url);
     if (!normalized) {
+        console.warn('REVEAL: Unable to normalize URL', url);
         return;
     }
     BK_revealAllowlist.set(normalized, Date.now() + BK_revealAllowlistTtlMs);
+    console.log('REVEAL: Allowlisted URL', normalized);
 }
 
 function bkIsRevealAllowed(url) {
@@ -476,13 +478,16 @@ function bkIsRevealAllowed(url) {
     }
     const expiresAt = BK_revealAllowlist.get(normalized);
     if (!expiresAt) {
+        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', normalized);
         return false;
     }
     if (Date.now() > expiresAt) {
+        console.log('REVEAL: Allowlist expired', normalized);
         BK_revealAllowlist.delete(normalized);
         return false;
     }
     BK_revealAllowlist.delete(normalized);
+    console.log('REVEAL: Allowlist hit', normalized);
     return true;
 }
 
@@ -709,6 +714,10 @@ if (browser.menus) {
         if (info.menuItemId !== "wingman-reveal-blocked-image") {
             return;
         }
+        console.log('REVEAL: Context menu clicked', {
+            frameId: info.frameId,
+            tabId: tab?.id
+        });
 
         const [targetInfo] = await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
@@ -722,10 +731,12 @@ if (browser.menus) {
         });
 
         if (!targetInfo || !targetInfo.src) {
+            console.warn('REVEAL: Missing target src');
             return;
         }
 
         if (targetInfo.src.startsWith('data:image/svg+xml')) {
+            console.log('REVEAL: Handling SVG data URL');
             await browser.tabs.executeScript(tab.id, {
                 frameId: info.frameId,
                 code: `(() => {
@@ -751,6 +762,9 @@ if (browser.menus) {
                     const href = imageNode?.getAttribute('href') || imageNode?.getAttribute('xlink:href');
                     if (href) {
                         target.src = href;
+                        console.log('REVEAL: SVG href extracted', href);
+                    } else {
+                        console.warn('REVEAL: No href found in SVG');
                     }
                 })();`,
             });
@@ -758,7 +772,9 @@ if (browser.menus) {
         }
 
         try {
+            console.log('REVEAL: Sending reveal message', targetInfo.src);
             await browser.runtime.sendMessage({ type: "revealBlockedImage", url: targetInfo.src });
+            console.log('REVEAL: Reveal message acknowledged');
         } catch (error) {
             console.warn('Failed to request reveal for blocked image', error);
             return;
@@ -769,9 +785,11 @@ if (browser.menus) {
             code: `(() => {
                 const target = browser.menus.getTargetElement(${info.targetElementId});
                 if (!target || !target.src) {
+                    console.warn('REVEAL: Target missing during reload');
                     return;
                 }
                 const originalSrc = target.src;
+                console.log('REVEAL: Reloading image', originalSrc);
                 target.src = '';
                 target.src = originalSrc;
             })();`,
@@ -970,6 +988,7 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkUpdateFromSettings();
     }
     else if (request.type == 'revealBlockedImage') {
+        console.log('REVEAL: Message received', request.url);
         bkRememberRevealUrl(request.url);
         sendResponse({ ok: true });
     }
