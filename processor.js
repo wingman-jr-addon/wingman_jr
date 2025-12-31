@@ -242,9 +242,11 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     if(PROC_isSilentModeEnabled) {
-        return await SM_getReplacementSVG(img, visibleScore);
+        return await SM_getReplacementSVG(img, visibleScore, dataURL);
     } else {
-        let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+        let escapedDataUrl = dataURL ? dataURL.replace(/"/g, '&quot;') : null;
+        let originalAttr = escapedDataUrl ? ` data-wingman-original-href="${escapedDataUrl}"` : '';
+        let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'+originalAttr+'>'
         +'<g transform="translate(20 20)">'
         + '<g transform="matrix(1.123 0 0 1.123 -10.412 -76.993)">'
         + '<g transform="translate(-.18271)" stroke="#000" stroke-width=".24169px">'

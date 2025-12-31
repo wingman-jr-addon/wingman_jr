@@ -29,8 +29,9 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
-const BK_revealAllowlist = new Map();
-const BK_revealAllowlistTtlMs = 30 * 1000;
+const BK_revealAllowlist = new Set();
+const BK_revealAllowlistQueue = [];
+const BK_revealAllowlistMaxSize = 1000;
 
 let BK_isInitialized = false;
 function bkInitialize() {
@@ -461,14 +462,36 @@ function bkNormalizeRevealUrl(url) {
     }
 }
 
+function bkHashUrl(url) {
+    let hash = 5381;
+    for (let i = 0; i < url.length; i++) {
+        hash = ((hash << 5) + hash) + url.charCodeAt(i);
+        hash = hash & 0xffffffff;
+    }
+    return (hash >>> 0).toString(16);
+}
+
 function bkRememberRevealUrl(url) {
     const normalized = bkNormalizeRevealUrl(url);
     if (!normalized) {
         console.warn('REVEAL: Unable to normalize URL', url);
         return;
     }
-    BK_revealAllowlist.set(normalized, Date.now() + BK_revealAllowlistTtlMs);
-    console.log('REVEAL: Allowlisted URL', normalized);
+    const hash = bkHashUrl(normalized);
+    if (BK_revealAllowlist.has(hash)) {
+        console.log('REVEAL: URL already allowlisted', { hash, url: normalized });
+        return;
+    }
+    BK_revealAllowlist.add(hash);
+    BK_revealAllowlistQueue.push(hash);
+    if (BK_revealAllowlistQueue.length > BK_revealAllowlistMaxSize) {
+        const evicted = BK_revealAllowlistQueue.shift();
+        if (evicted) {
+            BK_revealAllowlist.delete(evicted);
+            console.log('REVEAL: Evicted allowlist entry', evicted);
+        }
+    }
+    console.log('REVEAL: Allowlisted URL', { hash, url: normalized });
 }
 
 function bkIsRevealAllowed(url) {
@@ -476,17 +499,12 @@ function bkIsRevealAllowed(url) {
     if (!normalized) {
         return false;
     }
-    const expiresAt = BK_revealAllowlist.get(normalized);
-    if (!expiresAt) {
-        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', normalized);
+    const hash = bkHashUrl(normalized);
+    if (!BK_revealAllowlist.has(hash)) {
+        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', { hash, url: normalized });
         return false;
     }
-    if (Date.now() > expiresAt) {
-        console.log('REVEAL: Allowlist expired', normalized);
-        BK_revealAllowlist.delete(normalized);
-        return false;
-    }
-    console.log('REVEAL: Allowlist hit', normalized);
+    console.log('REVEAL: Allowlist hit', { hash, url: normalized });
     return true;
 }
 
@@ -773,7 +791,14 @@ if (browser.menus) {
                         target.src = href;
                         console.log('REVEAL: SVG href extracted', href);
                     } else {
-                        console.warn('REVEAL: No href found in SVG');
+                        const svgRoot = doc.documentElement;
+                        const embeddedHref = svgRoot?.getAttribute('data-wingman-original-href');
+                        if (embeddedHref) {
+                            target.src = embeddedHref;
+                            console.log('REVEAL: SVG embedded href extracted', embeddedHref);
+                        } else {
+                            console.warn('REVEAL: No href found in SVG');
+                        }
                     }
                 })();`,
             });
