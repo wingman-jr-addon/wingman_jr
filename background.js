@@ -29,6 +29,9 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
+const BK_revealAllowlist = new Map();
+const BK_revealAllowlistTtlMs = 30 * 1000;
+
 let BK_isInitialized = false;
 function bkInitialize() {
     statusOnLoaded();
@@ -444,12 +447,55 @@ function bkHandleCrashDetectionResult(m) {
 
 ///////////////// WATCHDOG END ////////////////////////////
 
+function bkNormalizeRevealUrl(url) {
+    if (!url || url.startsWith('data:')) {
+        return url;
+    }
+    try {
+        const parsed = new URL(url);
+        parsed.searchParams.delete('wingman_reveal');
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return url;
+    }
+}
+
+function bkRememberRevealUrl(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        return;
+    }
+    BK_revealAllowlist.set(normalized, Date.now() + BK_revealAllowlistTtlMs);
+}
+
+function bkIsRevealAllowed(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        return false;
+    }
+    const expiresAt = BK_revealAllowlist.get(normalized);
+    if (!expiresAt) {
+        return false;
+    }
+    if (Date.now() > expiresAt) {
+        BK_revealAllowlist.delete(normalized);
+        return false;
+    }
+    BK_revealAllowlist.delete(normalized);
+    return true;
+}
+
 async function bkImageListener(details, shouldBlockSilently = false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
+        return;
+    }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -532,6 +578,10 @@ async function bkDirectTypedUrlListener(details) {
     }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
+        return;
+    }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Direct typed reveal whitelist '+details.url);
         return;
     }
     //Try to see if there is an image MIME type
@@ -714,18 +764,16 @@ if (browser.menus) {
             return;
         }
 
-        const cacheBustedUrl = targetInfo.src.includes('?')
-            ? `${targetInfo.src}&wingman_reveal=1`
-            : `${targetInfo.src}?wingman_reveal=1`;
-
         await browser.tabs.executeScript(tab.id, {
             frameId: info.frameId,
             code: `(() => {
                 const target = browser.menus.getTargetElement(${info.targetElementId});
-                if (!target) {
+                if (!target || !target.src) {
                     return;
                 }
-                target.src = ${JSON.stringify(cacheBustedUrl)};
+                const originalSrc = target.src;
+                target.src = '';
+                target.src = originalSrc;
             })();`,
         });
     });
@@ -920,6 +968,10 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
+    }
+    else if (request.type == 'revealBlockedImage') {
+        bkRememberRevealUrl(request.url);
+        sendResponse({ ok: true });
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
