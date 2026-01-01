@@ -32,8 +32,24 @@ let BK_openVidFilters = {};
 const BK_revealAllowlist = new Set();
 const BK_revealAllowlistQueue = [];
 const BK_revealAllowlistMaxSize = 1000;
+let BK_isRevealMenuCreated = false;
+let BK_isOnOffSwitchShown = false;
 
 let BK_isInitialized = false;
+function bkUpdateRevealMenuVisibility(isVisible) {
+    if (!browser?.menus?.update) {
+        return;
+    }
+    if (!BK_isRevealMenuCreated) {
+        return;
+    }
+    browser.menus.update("wingman-reveal-blocked-image", { visible: !!isVisible })
+        .then(() => browser.menus.refresh())
+        .catch(error => {
+            WJR_DEBUG && console.warn('REVEAL: Unable to update menu visibility', error);
+        });
+}
+
 function bkInitialize() {
     statusOnLoaded();
     bkUpdateFromSettings();
@@ -938,7 +954,10 @@ if (browser.menus) {
         title: "Reveal Blocked Image",
         documentUrlPatterns: ["*://*/*"],
         contexts: ["all"],
+        visible: BK_isOnOffSwitchShown,
     });
+    BK_isRevealMenuCreated = true;
+    bkUpdateRevealMenuVisibility(BK_isOnOffSwitchShown);
 
     browser.menus.onClicked.addListener(async (info, tab) => {
         if (info.menuItemId !== "wingman-reveal-blocked-image") {
@@ -1201,11 +1220,12 @@ function bkSetVideoScanMode(mode) {
     bkSetVideoEnabled(BK_videoScanMode !== 'disabled');
 }
 
-let BK_isOnOffSwitchShown = false;
-
 function bkUpdateFromSettings() {
     browser.storage.local.get('is_on_off_shown').then(onOffResult =>
-        BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
+        {
+            BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true;
+            bkUpdateRevealMenuVisibility(BK_isOnOffSwitchShown);
+        });
     browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']).then(videoBlockingResult => {
         let mode = videoBlockingResult.video_blocking_mode;
         if(!mode) {
