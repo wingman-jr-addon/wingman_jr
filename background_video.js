@@ -339,6 +339,9 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                     // for any condition where we disconnect we don't have any stragglers
                     // causing "holes"
                     if(shouldBlock) {
+                        if(isQuickScanBlock) {
+                            console.warn(`DEFV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked frames`);
+                        }
                         console.warn(`DEFV: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
 
@@ -697,6 +700,9 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
             let isThisGroupBlock = (dashGroup.scanCount >= 20 && dashGroup.blockCount / dashGroup.scanCount >= 0.15);
             WJR_DEBUG && console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
             if(isQuickScanBlock || isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                if(isQuickScanBlock) {
+                    console.warn(`DASHVMP4/MLV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked frames for url ${url}`);
+                }
                 console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                 status = 'block';
                 dashGroup.status = 'block';
@@ -907,6 +913,9 @@ async function vidYtMp4Listener(details, mimeType, parsedUrl, threshold) {
             let isThisGroupBlock = (youtubeGroup.scanCount >= 20 && youtubeGroup.blockCount / youtubeGroup.scanCount >= 0.15);
             WJR_DEBUG && console.log(`YTVMP4/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
             if(isQuickScanBlock || isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                if(isQuickScanBlock) {
+                    console.warn(`YTVMP4/MLV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked frames (CPN ${cpn})`);
+                }
                 status = 'block';
                 youtubeGroup.status = 'block';
                 filter.write(VID_PLACEHOLDER_MP4);
@@ -1081,6 +1090,9 @@ async function vidYtWebmListener(details, mimeType, parsedUrl, threshold) {
             let isThisGroupBlock = (youtubeGroup.scanCount >= 20 && youtubeGroup.blockCount / youtubeGroup.scanCount >= 0.15);
             WJR_DEBUG && console.log(`YTVWEBM/MLV: Scan status for CPN ${cpn}, ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${webm.blockCount}/${webm.scanCount} < ${youtubeGroup.blockCount}/${youtubeGroup.scanCount}`);
             if(isQuickScanBlock || isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                if(isQuickScanBlock) {
+                    console.warn(`YTVWEBM/MLV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked frames (CPN ${cpn})`);
+                }
                 status = 'block';
                 youtubeGroup.status = 'block';
                 filter.write(VID_PLACEHOLDER_WEBM);
