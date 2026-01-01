@@ -33,6 +33,7 @@ const BK_revealAllowlist = new Set();
 const BK_revealAllowlistQueue = [];
 const BK_revealAllowlistMaxSize = 1000;
 let BK_isRevealMenuCreated = false;
+let BK_isOnOffSwitchShown = false;
 
 let BK_isInitialized = false;
 function bkUpdateRevealMenuVisibility(isVisible) {
@@ -1218,8 +1219,6 @@ function bkSetVideoScanMode(mode) {
     BK_videoScanMode = normalizedMode;
     bkSetVideoEnabled(BK_videoScanMode !== 'disabled');
 }
-
-let BK_isOnOffSwitchShown = false;
 
 function bkUpdateFromSettings() {
     browser.storage.local.get('is_on_off_shown').then(onOffResult =>
