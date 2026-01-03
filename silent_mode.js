@@ -1,11 +1,3 @@
-const SM_THUMB_SIZE = 16;
-let SM_thumbCanvas = document.createElement('canvas');
-SM_thumbCanvas.width = SM_THUMB_SIZE;
-SM_thumbCanvas.height = SM_THUMB_SIZE;
-let SM_thumbCtx = SM_thumbCanvas.getContext('2d', { alpha: false});
-SM_thumbCtx.imageSmoothingEnabled = true;
-SM_thumbCtx.globalCompositeOperation = "copy";
-
 const smLoadImagePromise = url => new Promise( (resolve, reject) => {
     const img = new Image()
     img.onerror = e => reject(e)
@@ -14,80 +6,76 @@ const smLoadImagePromise = url => new Promise( (resolve, reject) => {
     img.src = url
 });
 
-let SM_bestMatchHistory = [];
+const SM_CUSTOM_COLLECTIONS_KEY = 'silent_custom_collections';
+const SM_CUSTOM_ACTIVE_KEY = 'silent_custom_active_collection_id';
+const SM_BUILTIN_COLLECTION_ID = 'builtin';
 
-async function SM_findBestMatchImage(img) {
-    let startTime = performance.now();
+let SM_customCollections = [];
+let SM_activeCollectionId = SM_BUILTIN_COLLECTION_ID;
+let SM_collectionIndexes = new Map();
 
-    //Generate thumb
-    SM_thumbCtx.drawImage(img, 0, 0, SM_THUMB_SIZE, SM_THUMB_SIZE);
-    let data = SM_thumbCtx.getImageData(0,0,SM_THUMB_SIZE,SM_THUMB_SIZE).data;
-    let greyThumb = [];
-    let colorThumb = [];
+async function SM_loadCustomCollections() {
+    try {
+        let result = await browser.storage.local.get([SM_CUSTOM_COLLECTIONS_KEY, SM_CUSTOM_ACTIVE_KEY]);
+        SM_customCollections = result[SM_CUSTOM_COLLECTIONS_KEY] || [];
+        SM_activeCollectionId = result[SM_CUSTOM_ACTIVE_KEY] || SM_BUILTIN_COLLECTION_ID;
+    } catch (error) {
+        WJR_DEBUG && console.warn(`SILENT: Failed to load custom collections: ${error}`);
+        SM_customCollections = [];
+        SM_activeCollectionId = SM_BUILTIN_COLLECTION_ID;
+    }
+}
 
-    for(let y=0; y<SM_THUMB_SIZE; y++) {
-        for(let x=0; x<SM_THUMB_SIZE; x++) {
-            let i = ((y*SM_THUMB_SIZE)+x)*4;
-            let r = data[i+0];
-            let g = data[i+1];
-            let b = data[i+2];
-
-            colorThumb.push([r,g,b]);
-            let grey = 0.30*r + 0.59*g + 0.11*b; //float in [0-255], input is int [0-255]
-            greyThumb.push(grey);
+if (typeof browser !== 'undefined' && browser.storage && browser.storage.onChanged) {
+    browser.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') {
+            return;
         }
+        if (changes[SM_CUSTOM_COLLECTIONS_KEY] || changes[SM_CUSTOM_ACTIVE_KEY]) {
+            SM_loadCustomCollections();
+        }
+    });
+}
+
+SM_loadCustomCollections();
+
+function SM_getNextIndex(collectionId, length) {
+    if (!length) {
+        return 0;
+    }
+    let current = SM_collectionIndexes.get(collectionId);
+    if (current === undefined) {
+        current = -1;
+    }
+    current = (current + 1) % length;
+    SM_collectionIndexes.set(collectionId, current);
+    return current;
+}
+
+function SM_getActiveCollection() {
+    if (SM_activeCollectionId === SM_BUILTIN_COLLECTION_ID) {
+        return null;
+    }
+    return SM_customCollections.find(collection => collection.id === SM_activeCollectionId) || null;
+}
+
+function SM_pickReplacementSource() {
+    const customCollection = SM_getActiveCollection();
+    if (customCollection && customCollection.images && customCollection.images.length > 0) {
+        const index = SM_getNextIndex(customCollection.id, customCollection.images.length);
+        const entry = customCollection.images[index];
+        return {
+            src: entry.dataUrl,
+            label: `custom-${customCollection.name}`
+        };
     }
 
-    //Find best match
-    let isLandscape = img.width > img.height;
-
-    let bestMatch = null;
-    let bestScore = 99999999999999999999;
-
-    for(let smi = 0; smi < SM_DATA.length; smi++) {
-        let match = SM_DATA[smi];
-        let isMatchLandscape = match.w > match.h;
-        if(isLandscape != isMatchLandscape) {
-            continue;
-        }
-
-        if(SM_bestMatchHistory.indexOf(match) != -1) {
-            continue;
-        }
-
-        let greyScore = 0;
-        let colorScore = 0;
-        for(let y=0; y<SM_THUMB_SIZE; y++) {
-            for(let x=0; x<SM_THUMB_SIZE; x++) {
-                let i = y*SM_THUMB_SIZE+x;
-                let greyDiff = greyThumb[i] - match.greyThumb[i];
-                greyScore += greyDiff*greyDiff;
-                let colorDiffR = colorThumb[i][0] - match.colorThumb[i][0];
-                let colorDiffG = colorThumb[i][1] - match.colorThumb[i][1];
-                let colorDiffB = colorThumb[i][2] - match.colorThumb[i][2];
-                colorScore += colorDiffR*colorDiffR + colorDiffG*colorDiffG + colorDiffB*colorDiffB;
-            }
-        }
-
-        greyScore = Math.sqrt(greyScore);
-        colorScore = Math.sqrt(colorScore) / 3; //Normalize by channel count so grey and color start on even footing
-
-        let totalScore = greyScore*0.7 + colorScore*0.3;
-        if(totalScore < bestScore) {
-            bestScore = totalScore;
-            bestMatch = match;
-        }
-    }
-
-    SM_bestMatchHistory.push(bestMatch);
-    if(SM_bestMatchHistory.length > 10) {
-        SM_bestMatchHistory.shift();
-    }
-
-    let totalTimeMs = performance.now()-startTime;
-    WJR_DEBUG && console.debug(`SILENT: Found best match in ${totalTimeMs}ms for image ${img.width}x${img.height} using best match ${bestMatch.w}x${bestMatch.h} of name ${bestMatch.file}`);
-
-    return bestMatch;
+    const index = SM_getNextIndex(SM_BUILTIN_COLLECTION_ID, SM_DATA.length);
+    const entry = SM_DATA[index];
+    return {
+        src: entry.file,
+        label: entry.file
+    };
 }
 
 //Do best to format the image with matching dimensions
@@ -100,41 +88,13 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
 
     targetCtx.clearRect(0,0,targetWidth,targetHeight);
 
-    let isSrcLandscape = srcImg.width > srcImg.height;
-    let isTargetLandscape = targetWidth > targetHeight;
-    if(isSrcLandscape != isTargetLandscape) {
-        throw 'Expected images to be same orientation';
-    }
-
-    //Now make the long sides match in proportion and let the rest of the image be clipped or empty
-    if(isSrcLandscape) {
-        let scale = targetWidth / srcImg.width;
-        let targetSrcHeight = targetHeight / scale;
-        let srcTargetHeight = srcImg.height * scale;
-        //Source height is greater
-        if(srcImg.height > targetSrcHeight) {
-            WJR_DEBUG && console.debug(`SILENT: Format Landscape, src height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
-            let srcHeightDiff = srcImg.height - targetSrcHeight;
-            targetCtx.drawImage(srcImg, 0, srcHeightDiff/2.0, srcImg.width, srcImg.height-srcHeightDiff, 0, 0, targetWidth, targetHeight);
-        } else {
-            WJR_DEBUG && console.debug(`SILENT: Format Landscape, target height greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
-            let targetHeightDiff = targetHeight - srcTargetHeight;
-            targetCtx.drawImage(srcImg, 0, targetHeightDiff/2.0, targetWidth, targetHeight - targetHeightDiff); 
-        }
-    } else {
-        let scale = targetHeight / srcImg.height;
-        let targetSrcWidth = targetWidth / scale;
-        let srcTargetWidth = srcImg.width * scale;
-        if(srcImg.width > targetSrcWidth) {
-            WJR_DEBUG && console.debug(`SILENT: Format portrait, src width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
-            let srcWidthDiff = srcImg.width - targetSrcWidth;
-            targetCtx.drawImage(srcImg, srcWidthDiff/2.0, 0, srcImg.width-srcWidthDiff, srcImg.height, 0, 0, targetWidth, targetHeight);
-        } else {
-            WJR_DEBUG && console.debug(`SILENT: Format portrait, target width greater, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
-            let targetWidthDiff = targetWidth - srcTargetWidth;
-            targetCtx.drawImage(srcImg, targetWidthDiff/2.0, 0, targetWidth-targetWidthDiff, targetHeight);
-        }
-    }
+    let scale = Math.max(targetWidth / srcImg.width, targetHeight / srcImg.height);
+    let scaledWidth = srcImg.width * scale;
+    let scaledHeight = srcImg.height * scale;
+    let offsetX = (targetWidth - scaledWidth) / 2.0;
+    let offsetY = (targetHeight - scaledHeight) / 2.0;
+    WJR_DEBUG && console.debug(`SILENT: Format image, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
+    targetCtx.drawImage(srcImg, offsetX, offsetY, scaledWidth, scaledHeight);
 
     return targetCanvas.toDataURL();
 }
@@ -142,8 +102,8 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
 async function SM_getReplacementSVG(img, visibleScore, originalDataURL) {
     WJR_DEBUG && console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
 
-    let bestMatch = await SM_findBestMatchImage(img);
-    let replacementRawImage = await smLoadImagePromise(bestMatch.file);
+    let replacementSource = SM_pickReplacementSource();
+    let replacementRawImage = await smLoadImagePromise(replacementSource.src);
     let replacementImageDataURL = await smFormatImage(replacementRawImage, img.width, img.height, visibleScore);
 
     let fontSize = Math.round(img.height*0.08);
