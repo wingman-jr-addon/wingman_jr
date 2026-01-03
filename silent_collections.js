@@ -617,7 +617,7 @@ function renderSearchResults() {
               Select
             </label>
             <div class=\"search-info\">
-              <strong>${result.title}</strong>
+              <strong class=\"search-title\">${result.title}</strong>
               <span>Creator: ${creatorHtml}</span>
               <span>${sourceHtml}</span>
               <span>License: ${licenseHtml}</span>
@@ -855,11 +855,10 @@ searchAddEl.addEventListener('click', async () => {
         }
         searchSelectedIds = new Set();
         searchResults = [];
-        searchHasMore = false;
-        searchNextPage = 0;
         renderSearchResults();
-        searchMoreEl.disabled = true;
-        await performSearch({ loadNext: true });
+        if (searchHasMore) {
+            await performSearch({ loadNext: true });
+        }
     } catch (error) {
         setStatus(`Import failed: ${error.message}`, true);
     } finally {
