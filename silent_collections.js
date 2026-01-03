@@ -813,9 +813,11 @@ searchAddEl.addEventListener('click', async () => {
             try {
                 await throttleRequests();
                 await throttleDownloads();
-                const response = await fetchWithRetry(result.fullUrl, { credentials: 'omit' });
+                const importUrl = result.importUrl || result.fullUrl;
+                const response = await fetchWithRetry(importUrl, { credentials: 'omit' });
                 if (!response.ok) {
                     errors.push(`Failed to download ${result.title} (${response.status}).`);
+                    console.warn('Import download failed', { title: result.title, status: response.status, url: importUrl });
                     continue;
                 }
                 const blob = await response.blob();
@@ -837,6 +839,7 @@ searchAddEl.addEventListener('click', async () => {
                 }
             } catch (error) {
                 errors.push(`Failed to download ${result.title}.`);
+                console.warn('Import download error', { title: result.title, error });
             }
         }
         if (sources.length === 0) {
