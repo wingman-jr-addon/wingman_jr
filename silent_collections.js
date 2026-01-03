@@ -34,7 +34,7 @@ const licenseLinksEl = document.getElementById('license-links');
 
 let searchResults = [];
 let searchSelectedIds = new Set();
-let searchPage = 0;
+let searchNextPage = 0;
 let searchHasMore = false;
 let searchInFlight = false;
 let lastSearchAt = 0;
@@ -585,6 +585,40 @@ function updateSearchMeta() {
     searchSelectAllEl.disabled = searchResults.length === 0;
 }
 
+function getDuplicateKey(entry) {
+    if (!entry) {
+        return '';
+    }
+    const sourceUrl = entry.attribution && entry.attribution.sourceUrl;
+    if (sourceUrl) {
+        return sourceUrl;
+    }
+    return '';
+}
+
+function buildDuplicateSet(collection) {
+    const duplicates = new Set();
+    if (!collection || !collection.images) {
+        return duplicates;
+    }
+    collection.images.forEach(image => {
+        const key = getDuplicateKey(image);
+        if (key) {
+            duplicates.add(key);
+        }
+    });
+    return duplicates;
+}
+
+function markDuplicates(results) {
+    const collection = collections.find(item => item.id === selectedCollectionId);
+    const duplicateKeys = buildDuplicateSet(collection);
+    results.forEach(result => {
+        const key = result.sourceUrl || result.fullUrl;
+        result.isDuplicate = Boolean(key && duplicateKeys.has(key));
+    });
+}
+
 function renderSearchResults() {
     searchResultsEl.innerHTML = '';
     if (searchResults.length === 0) {
@@ -606,11 +640,12 @@ function renderSearchResults() {
             ? `<a href=\"${licenseInfo.url}\" target=\"_blank\">${licenseInfo.label}</a>`
             : licenseInfo.label;
         const checked = searchSelectedIds.has(result.id) ? 'checked' : '';
+        const disabled = result.isDuplicate ? 'disabled' : '';
         card.innerHTML = `
             <img src=\"${result.thumbnailUrl}\" alt=\"${result.title}\">
             <label class=\"select-overlay\">
-              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked}>
-              Select
+              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked} ${disabled}>
+              ${result.isDuplicate ? 'Already added' : 'Select'}
             </label>
             <div class=\"search-info\">
               <strong>${result.title}</strong>
@@ -624,7 +659,7 @@ function renderSearchResults() {
     updateSearchMeta();
 }
 
-async function performSearch({ append }) {
+async function performSearch({ loadNext }) {
     const query = normalizeName(searchQueryEl.value || '');
     if (!query) {
         setStatus('Enter a theme to search for images.', true);
@@ -652,24 +687,21 @@ async function performSearch({ append }) {
     searchMoreEl.disabled = true;
     setStatus('');
     try {
-        if (!append) {
-            searchPage = 0;
+        if (!loadNext) {
+            searchNextPage = 0;
             searchResults = [];
-            searchSelectedIds = new Set();
         }
         const providerId = searchProviderEl.value;
         const provider = SilentImageSearch.providers[providerId];
         if (!provider) {
             throw new Error('No search provider available.');
         }
-        const response = await provider.search(query, searchPage);
+        const response = await provider.search(query, searchNextPage);
         searchHasMore = response.nextPage !== null;
-        searchPage = response.nextPage ?? searchPage;
-        if (append) {
-            searchResults = [...searchResults, ...response.results];
-        } else {
-            searchResults = response.results;
-        }
+        searchNextPage = response.nextPage ?? searchNextPage;
+        searchResults = response.results;
+        searchSelectedIds = new Set();
+        markDuplicates(searchResults);
         renderSearchResults();
         if (searchResults.length === 0) {
             setStatus('No results matched the allowed licenses. Try another theme.', true);
@@ -702,15 +734,20 @@ searchResultsEl.addEventListener('change', event => {
 });
 
 searchSubmitEl.addEventListener('click', () => {
-    performSearch({ append: false });
+    performSearch({ loadNext: false });
 });
 
 searchMoreEl.addEventListener('click', () => {
-    performSearch({ append: true });
+    if (!searchHasMore) {
+        return;
+    }
+    performSearch({ loadNext: true });
 });
 
 searchSelectAllEl.addEventListener('click', () => {
-    searchSelectedIds = new Set(searchResults.map(result => result.id));
+    const selectableIds = searchResults.filter(result => !result.isDuplicate).map(result => result.id);
+    const allSelected = selectableIds.length > 0 && selectableIds.every(id => searchSelectedIds.has(id));
+    searchSelectedIds = allSelected ? new Set() : new Set(selectableIds);
     renderSearchResults();
 });
 
@@ -749,7 +786,11 @@ searchAddEl.addEventListener('click', async () => {
         }
         await addImagesToCollection(selectedCollectionId, sources);
         searchSelectedIds = new Set();
-        updateSearchMeta();
+        searchResults = [];
+        searchHasMore = false;
+        searchNextPage = 0;
+        renderSearchResults();
+        searchMoreEl.disabled = true;
     } catch (error) {
         setStatus(`Import failed: ${error.message}`, true);
     }
@@ -758,7 +799,7 @@ searchAddEl.addEventListener('click', async () => {
 searchQueryEl.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
         event.preventDefault();
-        performSearch({ append: false });
+        performSearch({ loadNext: false });
     }
 });
 
