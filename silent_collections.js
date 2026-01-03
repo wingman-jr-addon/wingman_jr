@@ -250,6 +250,7 @@ function renderDetail(collection) {
         const licenseHtml = attribution.license.url
             ? `<a href="${attribution.license.url}" target="_blank">${attribution.license.label}</a>`
             : attribution.license.label;
+        const titleAttr = attribution.title ? `title="${attribution.title.replace(/"/g, '&quot;')}"` : '';
         card.innerHTML = `
             <img src="${image.dataUrl}" alt="Custom silent image">
             <div class="image-actions">
@@ -257,7 +258,7 @@ function renderDetail(collection) {
               ${isBuiltin ? '' : `<button class="danger" data-action="remove-image" data-id="${collection.id}" data-image-id="${image.id}">Remove</button>`}
             </div>
             <div class="image-attribution">
-              ${attribution.title ? `<span>${attribution.title}</span>` : ''}
+              ${attribution.title ? `<span class="image-title" ${titleAttr}>${attribution.title}</span>` : ''}
               <span>Creator: ${creatorHtml}</span>
               <span>Source: ${sourceHtml}</span>
               <span>License: ${licenseHtml}</span>
@@ -856,6 +857,7 @@ searchAddEl.addEventListener('click', async () => {
         searchSelectedIds = new Set();
         searchResults = [];
         renderSearchResults();
+        searchPanelEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         if (searchHasMore) {
             await performSearch({ loadNext: true });
         }
