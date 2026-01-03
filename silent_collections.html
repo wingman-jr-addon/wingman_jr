@@ -48,6 +48,9 @@
       gap: 12px;
       align-items: center;
     }
+    .row.spaced {
+      margin-bottom: 10px;
+    }
     input[type="text"] {
       padding: 8px 10px;
       border-radius: 8px;
@@ -166,6 +169,130 @@
       font-size: 12px;
       color: #4b5b75;
     }
+    .image-card .image-attribution {
+      padding: 0 8px 8px;
+      font-size: 12px;
+      color: #42516a;
+      display: grid;
+      gap: 2px;
+    }
+    .image-card .image-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .image-card .image-attribution a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .image-card .image-attribution a:hover {
+      text-decoration: underline;
+    }
+    .search-panel {
+      margin-top: 16px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+      padding-top: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .search-panel .helper-row {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: #5d6f8c;
+    }
+    .search-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      font-size: 14px;
+      background: #ffffff;
+    }
+    .search-results {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .search-card {
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      background: #ffffff;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .search-card img {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      background: #edf1f7;
+    }
+    .search-card .select-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 999px;
+      padding: 4px 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: #2f3b52;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    .search-card .search-info {
+      padding: 8px;
+      font-size: 12px;
+      color: #4b5b75;
+      display: grid;
+      gap: 4px;
+    }
+    .search-card .search-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .search-card .search-info a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .search-card .search-info a:hover {
+      text-decoration: underline;
+    }
+    .license-box {
+      font-size: 12px;
+      color: #5d6f8c;
+      border-left: 3px solid rgba(47, 128, 237, 0.25);
+      padding-left: 10px;
+    }
+    .license-box p {
+      margin-bottom: 6px;
+    }
+    .license-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .license-list a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .license-list a:hover {
+      text-decoration: underline;
+    }
     .muted {
       color: #5d6f8c;
       font-size: 13px;
@@ -183,7 +310,7 @@
       Just close this window when you're done managing the collections.
     </p>
     <p class="muted">
-      Each collection is capped at about 3 MB. Images are resized to a maximum of 512 pixels on
+      Each collection is capped at about 8 MB. Images are resized to a maximum of 512 pixels on
       the longest side and compressed to JPEG to keep them small (around 100 KB each). If your
       browser denies storage access or runs out of space, you will see an error below.
     </p>
@@ -205,23 +332,57 @@
 
     <section id="detail" class="card detail">
       <h2 id="detail-title"></h2>
+      <h3>Add your own images</h3>
       <p class="muted">
-        Drag and drop images below to add them. You can add more images later. Removing an image
+        Add images from your device or search for licensed images to import. Removing an image
         only affects this collection and does not delete files from your computer.
       </p>
       <div id="drop-zone" class="drop-zone">
         Drop images here or use the button below to select files.
       </div>
-      <div class="row">
+      <div class="row spaced">
         <button id="add-images" class="secondary">Add images</button>
         <button id="set-active">Use this collection for silent mode</button>
         <span id="detail-meta" class="muted"></span>
       </div>
       <input id="file-input" type="file" accept="image/*" multiple hidden>
       <div id="image-grid" class="image-grid"></div>
+      <div id="search-panel" class="search-panel">
+        <h3>Or search for images to import</h3>
+        <p class="muted">
+          Search using one of the services below. Your search keywords and returned results will of course be
+          visible to that service - but once the images are imported, only your local storage is consulted.
+        </p>
+        <div class="license-box">
+          <p>
+            Images in each collection remain subject to their original licenses. Imported results only
+            include licenses that allow reuse. Review the license before using an image elsewhere.
+          </p>
+          <ul id="license-links" class="license-list"></ul>
+        </div>
+        <div class="search-actions">
+          <label>
+            <span class="muted">Provider</span><br>
+            <select id="search-provider"></select>
+          </label>
+          <label>
+            <span class="muted">Theme</span><br>
+            <input id="search-query" type="text" placeholder="e.g., waterfalls, city skylines">
+          </label>
+          <button id="search-submit">Search</button>
+          <button id="search-more" class="secondary" disabled>Load more</button>
+          <button id="search-select-all" class="secondary" disabled>Select all</button>
+          <button id="search-add" disabled>Add selected to collection</button>
+          <span id="search-meta" class="muted"></span>
+        </div>
+        <div id="search-results" class="search-results"></div>
+      </div>
     </section>
   </main>
 
+  <script src="silent_licenses.js"></script>
+  <script src="silent_image_search.js"></script>
+  <script src="silent_data/index.js"></script>
   <script src="silent_collections.js"></script>
 </body>
 
