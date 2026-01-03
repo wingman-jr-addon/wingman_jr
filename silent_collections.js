@@ -39,6 +39,8 @@ let searchHasMore = false;
 let searchInFlight = false;
 let lastSearchAt = 0;
 let lastRequestDelay = 0;
+let lastDownloadAt = 0;
+const DOWNLOAD_THROTTLE_MS = 1000;
 
 function setStatus(message, isError = false) {
     if (!message) {
@@ -774,6 +776,17 @@ async function throttleRequests() {
     }
 }
 
+async function throttleDownloads() {
+    const now = Date.now();
+    if (lastDownloadAt > 0) {
+        const elapsed = now - lastDownloadAt;
+        if (elapsed < DOWNLOAD_THROTTLE_MS) {
+            await new Promise(resolve => setTimeout(resolve, DOWNLOAD_THROTTLE_MS - elapsed));
+        }
+    }
+    lastDownloadAt = Date.now();
+}
+
 searchAddEl.addEventListener('click', async () => {
     if (!selectedCollectionId || selectedCollectionId === 'builtin') {
         setStatus('Select a custom collection before importing.', true);
@@ -799,6 +812,7 @@ searchAddEl.addEventListener('click', async () => {
             }
             try {
                 await throttleRequests();
+                await throttleDownloads();
                 const response = await fetchWithRetry(result.fullUrl, { credentials: 'omit' });
                 if (!response.ok) {
                     errors.push(`Failed to download ${result.title} (${response.status}).`);

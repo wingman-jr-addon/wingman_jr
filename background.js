@@ -538,6 +538,11 @@ async function bkImageListener(details, shouldBlockSilently = false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
+    const originUrl = details.originUrl || details.documentUrl || '';
+    if (originUrl.includes('silent_collections.html')) {
+        WJR_DEBUG && console.log('WEBREQ: Skipping filtering for silent collections preview', details.url);
+        return;
+    }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
