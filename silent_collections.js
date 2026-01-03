@@ -38,6 +38,7 @@ let searchNextPage = 0;
 let searchHasMore = false;
 let searchInFlight = false;
 let lastSearchAt = 0;
+let lastRequestDelay = 0;
 
 function setStatus(message, isError = false) {
     if (!message) {
@@ -585,40 +586,6 @@ function updateSearchMeta() {
     searchSelectAllEl.disabled = searchResults.length === 0;
 }
 
-function getDuplicateKey(entry) {
-    if (!entry) {
-        return '';
-    }
-    const sourceUrl = entry.attribution && entry.attribution.sourceUrl;
-    if (sourceUrl) {
-        return sourceUrl;
-    }
-    return '';
-}
-
-function buildDuplicateSet(collection) {
-    const duplicates = new Set();
-    if (!collection || !collection.images) {
-        return duplicates;
-    }
-    collection.images.forEach(image => {
-        const key = getDuplicateKey(image);
-        if (key) {
-            duplicates.add(key);
-        }
-    });
-    return duplicates;
-}
-
-function markDuplicates(results) {
-    const collection = collections.find(item => item.id === selectedCollectionId);
-    const duplicateKeys = buildDuplicateSet(collection);
-    results.forEach(result => {
-        const key = result.sourceUrl || result.fullUrl;
-        result.isDuplicate = Boolean(key && duplicateKeys.has(key));
-    });
-}
-
 function renderSearchResults() {
     searchResultsEl.innerHTML = '';
     if (searchResults.length === 0) {
@@ -640,12 +607,11 @@ function renderSearchResults() {
             ? `<a href=\"${licenseInfo.url}\" target=\"_blank\">${licenseInfo.label}</a>`
             : licenseInfo.label;
         const checked = searchSelectedIds.has(result.id) ? 'checked' : '';
-        const disabled = result.isDuplicate ? 'disabled' : '';
         card.innerHTML = `
             <img src=\"${result.thumbnailUrl}\" alt=\"${result.title}\">
             <label class=\"select-overlay\">
-              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked} ${disabled}>
-              ${result.isDuplicate ? 'Already added' : 'Select'}
+              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked}>
+              Select
             </label>
             <div class=\"search-info\">
               <strong>${result.title}</strong>
@@ -701,7 +667,6 @@ async function performSearch({ loadNext }) {
         searchNextPage = response.nextPage ?? searchNextPage;
         searchResults = response.results;
         searchSelectedIds = new Set();
-        markDuplicates(searchResults);
         renderSearchResults();
         if (searchResults.length === 0) {
             setStatus('No results matched the allowed licenses. Try another theme.', true);
@@ -745,11 +710,69 @@ searchMoreEl.addEventListener('click', () => {
 });
 
 searchSelectAllEl.addEventListener('click', () => {
-    const selectableIds = searchResults.filter(result => !result.isDuplicate).map(result => result.id);
+    const selectableIds = searchResults.map(result => result.id);
     const allSelected = selectableIds.length > 0 && selectableIds.every(id => searchSelectedIds.has(id));
     searchSelectedIds = allSelected ? new Set() : new Set(selectableIds);
     renderSearchResults();
 });
+
+function getDuplicateKey(entry) {
+    if (!entry) {
+        return '';
+    }
+    const sourceUrl = entry.attribution && entry.attribution.sourceUrl;
+    if (sourceUrl) {
+        return sourceUrl;
+    }
+    return '';
+}
+
+function buildDuplicateSet(collection) {
+    const duplicates = new Set();
+    if (!collection || !collection.images) {
+        return duplicates;
+    }
+    collection.images.forEach(image => {
+        const key = getDuplicateKey(image);
+        if (key) {
+            duplicates.add(key);
+        }
+    });
+    return duplicates;
+}
+
+function getRetryDelayMs(response, attempt) {
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter) {
+        const parsed = Number(retryAfter);
+        if (!Number.isNaN(parsed)) {
+            return parsed * 1000;
+        }
+    }
+    const baseDelay = 700;
+    return Math.min(5000, baseDelay * Math.pow(2, attempt));
+}
+
+async function fetchWithRetry(url, options = {}) {
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const response = await fetch(url, options);
+        if (response.status !== 429) {
+            return response;
+        }
+        const delay = getRetryDelayMs(response, attempt);
+        lastRequestDelay = delay;
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    return fetch(url, options);
+}
+
+async function throttleRequests() {
+    if (lastRequestDelay > 0) {
+        await new Promise(resolve => setTimeout(resolve, lastRequestDelay));
+        lastRequestDelay = 0;
+    }
+}
 
 searchAddEl.addEventListener('click', async () => {
     if (!selectedCollectionId || selectedCollectionId === 'builtin') {
@@ -764,27 +787,52 @@ searchAddEl.addEventListener('click', async () => {
     setStatus('Downloading and importing selected images...');
     try {
         const sources = [];
+        const collection = collections.find(item => item.id === selectedCollectionId);
+        const duplicateKeys = buildDuplicateSet(collection);
+        const batchKeys = new Set();
+        const errors = [];
         for (const result of selectedResults) {
-            const response = await fetch(result.fullUrl, { credentials: 'omit' });
-            if (!response.ok) {
-                throw new Error(`Failed to download image from ${result.provider}.`);
+            const duplicateKey = result.sourceUrl || result.fullUrl;
+            if (duplicateKey && (duplicateKeys.has(duplicateKey) || batchKeys.has(duplicateKey))) {
+                errors.push(`Skipped duplicate: ${result.title}`);
+                continue;
             }
-            const blob = await response.blob();
-            const file = new File([blob], `${result.id}.jpg`, { type: blob.type || 'image/jpeg' });
-            sources.push({
-                file,
-                attribution: {
-                    creatorLabel: result.creator,
-                    creatorUrl: result.creatorUrl,
-                    sourceLabel: result.provider === 'commons' ? 'Wikimedia Commons' : 'Openverse',
-                    sourceUrl: result.sourceUrl,
-                    title: result.title,
-                    licenseId: result.licenseId,
-                    licenseUrl: result.licenseUrl
+            try {
+                await throttleRequests();
+                const response = await fetchWithRetry(result.fullUrl, { credentials: 'omit' });
+                if (!response.ok) {
+                    errors.push(`Failed to download ${result.title} (${response.status}).`);
+                    continue;
                 }
-            });
+                const blob = await response.blob();
+                const file = new File([blob], `${result.id}.jpg`, { type: blob.type || 'image/jpeg' });
+                sources.push({
+                    file,
+                    attribution: {
+                        creatorLabel: result.creator,
+                        creatorUrl: result.creatorUrl,
+                        sourceLabel: result.provider === 'commons' ? 'Wikimedia Commons' : 'Openverse',
+                        sourceUrl: result.sourceUrl,
+                        title: result.title,
+                        licenseId: result.licenseId,
+                        licenseUrl: result.licenseUrl
+                    }
+                });
+                if (duplicateKey) {
+                    batchKeys.add(duplicateKey);
+                }
+            } catch (error) {
+                errors.push(`Failed to download ${result.title}.`);
+            }
+        }
+        if (sources.length === 0) {
+            setStatus(errors.join(' ') || 'No images were imported.', true);
+            return;
         }
         await addImagesToCollection(selectedCollectionId, sources);
+        if (errors.length > 0) {
+            setStatus(errors.join(' '), true);
+        }
         searchSelectedIds = new Set();
         searchResults = [];
         searchHasMore = false;
