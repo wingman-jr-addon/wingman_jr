@@ -26,6 +26,7 @@ const searchProviderEl = document.getElementById('search-provider');
 const searchQueryEl = document.getElementById('search-query');
 const searchSubmitEl = document.getElementById('search-submit');
 const searchMoreEl = document.getElementById('search-more');
+const searchSelectAllEl = document.getElementById('search-select-all');
 const searchAddEl = document.getElementById('search-add');
 const searchResultsEl = document.getElementById('search-results');
 const searchMetaEl = document.getElementById('search-meta');
@@ -581,6 +582,7 @@ function updateSearchMeta() {
         ? `${selectedCount} selected`
         : '';
     searchAddEl.disabled = selectedCount === 0 || !selectedCollectionId || selectedCollectionId === 'builtin';
+    searchSelectAllEl.disabled = searchResults.length === 0;
 }
 
 function renderSearchResults() {
@@ -606,16 +608,16 @@ function renderSearchResults() {
         const checked = searchSelectedIds.has(result.id) ? 'checked' : '';
         card.innerHTML = `
             <img src=\"${result.thumbnailUrl}\" alt=\"${result.title}\">
+            <label class=\"select-overlay\">
+              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked}>
+              Select
+            </label>
             <div class=\"search-info\">
               <strong>${result.title}</strong>
               <span>Creator: ${creatorHtml}</span>
               <span>${sourceHtml}</span>
               <span>License: ${licenseHtml}</span>
             </div>
-            <label class=\"search-select\">
-              <input type=\"checkbox\" data-id=\"${result.id}\" ${checked}>
-              Select
-            </label>
         `;
         searchResultsEl.appendChild(card);
     });
@@ -705,6 +707,11 @@ searchSubmitEl.addEventListener('click', () => {
 
 searchMoreEl.addEventListener('click', () => {
     performSearch({ append: true });
+});
+
+searchSelectAllEl.addEventListener('click', () => {
+    searchSelectedIds = new Set(searchResults.map(result => result.id));
+    renderSearchResults();
 });
 
 searchAddEl.addEventListener('click', async () => {

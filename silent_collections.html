@@ -187,6 +187,12 @@
       display: grid;
       gap: 12px;
     }
+    .search-panel .helper-row {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: #5d6f8c;
+    }
     .search-actions {
       display: flex;
       flex-wrap: wrap;
@@ -212,12 +218,27 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
     }
     .search-card img {
       width: 100%;
       height: 120px;
       object-fit: cover;
       background: #edf1f7;
+    }
+    .search-card .select-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 999px;
+      padding: 4px 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: #2f3b52;
+      border: 1px solid rgba(0, 0, 0, 0.1);
     }
     .search-card .search-info {
       padding: 8px;
@@ -233,13 +254,14 @@
     .search-card .search-info a:hover {
       text-decoration: underline;
     }
-    .search-card .search-select {
-      padding: 6px 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+    .license-box {
       font-size: 12px;
+      color: #5d6f8c;
+      border-left: 3px solid rgba(47, 128, 237, 0.25);
+      padding-left: 10px;
+    }
+    .license-box p {
+      margin-bottom: 6px;
     }
     .license-list {
       margin: 0;
@@ -292,7 +314,7 @@
     <section id="detail" class="card detail">
       <h2 id="detail-title"></h2>
       <p class="muted">
-        Drag and drop images below to add them. You can add more images later. Removing an image
+        Add images from your device or search for licensed images to import. Removing an image
         only affects this collection and does not delete files from your computer.
       </p>
       <div id="drop-zone" class="drop-zone">
@@ -312,8 +334,8 @@
           terms and may log which results you request while importing. This is only used once for
           import, not on a recurring basis.
         </p>
-        <div>
-          <p class="muted">
+        <div class="license-box">
+          <p>
             Images in each collection remain subject to their original licenses. Imported results only
             include licenses that allow reuse. Review the license before using an image elsewhere.
           </p>
@@ -330,6 +352,7 @@
           </label>
           <button id="search-submit">Search</button>
           <button id="search-more" class="secondary" disabled>Load more</button>
+          <button id="search-select-all" class="secondary" disabled>Select all</button>
           <button id="search-add" disabled>Add selected to collection</button>
           <span id="search-meta" class="muted"></span>
         </div>
