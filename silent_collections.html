@@ -48,6 +48,9 @@
       gap: 12px;
       align-items: center;
     }
+    .row.spaced {
+      margin-bottom: 10px;
+    }
     input[type="text"] {
       padding: 8px 10px;
       border-radius: 8px;
@@ -197,7 +200,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
-      align-items: center;
+      align-items: flex-end;
     }
     select {
       padding: 8px 10px;
@@ -320,7 +323,7 @@
       <div id="drop-zone" class="drop-zone">
         Drop images here or use the button below to select files.
       </div>
-      <div class="row">
+      <div class="row spaced">
         <button id="add-images" class="secondary">Add images</button>
         <button id="set-active">Use this collection for silent mode</button>
         <span id="detail-meta" class="muted"></span>

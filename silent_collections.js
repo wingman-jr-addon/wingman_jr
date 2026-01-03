@@ -30,6 +30,7 @@ const searchSelectAllEl = document.getElementById('search-select-all');
 const searchAddEl = document.getElementById('search-add');
 const searchResultsEl = document.getElementById('search-results');
 const searchMetaEl = document.getElementById('search-meta');
+const defaultSearchAddLabel = searchAddEl.textContent;
 const licenseLinksEl = document.getElementById('license-links');
 
 let searchResults = [];
@@ -798,6 +799,8 @@ searchAddEl.addEventListener('click', async () => {
         return;
     }
     setStatus('Downloading and importing selected images...');
+    searchAddEl.disabled = true;
+    searchAddEl.textContent = 'Importing...';
     try {
         const sources = [];
         const collection = collections.find(item => item.id === selectedCollectionId);
@@ -856,8 +859,12 @@ searchAddEl.addEventListener('click', async () => {
         searchNextPage = 0;
         renderSearchResults();
         searchMoreEl.disabled = true;
+        await performSearch({ loadNext: true });
     } catch (error) {
         setStatus(`Import failed: ${error.message}`, true);
+    } finally {
+        searchAddEl.textContent = defaultSearchAddLabel;
+        updateSearchMeta();
     }
 });
 
