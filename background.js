@@ -29,7 +29,27 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
+const BK_revealAllowlist = new Set();
+const BK_revealAllowlistQueue = [];
+const BK_revealAllowlistMaxSize = 1000;
+let BK_isRevealMenuCreated = false;
+let BK_isOnOffSwitchShown = false;
+
 let BK_isInitialized = false;
+function bkUpdateRevealMenuVisibility(isVisible) {
+    if (!browser?.menus?.update) {
+        return;
+    }
+    if (!BK_isRevealMenuCreated) {
+        return;
+    }
+    browser.menus.update("wingman-reveal-blocked-image", { visible: !!isVisible })
+        .then(() => browser.menus.refresh())
+        .catch(error => {
+            WJR_DEBUG && console.warn('REVEAL: Unable to update menu visibility', error);
+        });
+}
+
 function bkInitialize() {
     statusOnLoaded();
     bkUpdateFromSettings();
@@ -499,12 +519,91 @@ function bkHandleCrashDetectionResult(m) {
 
 ///////////////// WATCHDOG END ////////////////////////////
 
+function bkNormalizeRevealUrl(url) {
+    if (!url || url.startsWith('data:')) {
+        return url;
+    }
+    try {
+        const parsed = new URL(url);
+        parsed.searchParams.delete('wingman_reveal');
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return url;
+    }
+}
+
+function bkHashUrl(url) {
+    let hash = 5381;
+    for (let i = 0; i < url.length; i++) {
+        hash = ((hash << 5) + hash) + url.charCodeAt(i);
+        hash = hash & 0xffffffff;
+    }
+    return (hash >>> 0).toString(16);
+}
+
+function bkRememberRevealUrl(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        console.warn('REVEAL: Unable to normalize URL', url);
+        return;
+    }
+    const hash = bkHashUrl(normalized);
+    if (BK_revealAllowlist.has(hash)) {
+        console.log('REVEAL: URL already allowlisted', { hash, url: normalized });
+        return;
+    }
+    BK_revealAllowlist.add(hash);
+    BK_revealAllowlistQueue.push(hash);
+    if (BK_revealAllowlistQueue.length > BK_revealAllowlistMaxSize) {
+        const evicted = BK_revealAllowlistQueue.shift();
+        if (evicted) {
+            BK_revealAllowlist.delete(evicted);
+            console.log('REVEAL: Evicted allowlist entry', evicted);
+        }
+    }
+    console.log('REVEAL: Allowlisted URL', { hash, url: normalized });
+}
+
+function bkIsRevealAllowed(url) {
+    const normalized = bkNormalizeRevealUrl(url);
+    if (!normalized) {
+        return false;
+    }
+    const hash = bkHashUrl(normalized);
+    if (!BK_revealAllowlist.has(hash)) {
+        WJR_DEBUG && console.log('REVEAL: URL not allowlisted', { hash, url: normalized });
+        return false;
+    }
+    console.log('REVEAL: Allowlist hit', { hash, url: normalized });
+    return true;
+}
+
+function bkRevealRedirectListener(details) {
+    if (bkIsRevealAllowed(details.url)) {
+        console.log('REVEAL: Allowlisting redirect', {
+            from: details.url,
+            to: details.redirectUrl
+        });
+        bkRememberRevealUrl(details.redirectUrl);
+    }
+}
+
 async function bkImageListener(details, shouldBlockSilently = false) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
+    const originUrl = details.originUrl || details.documentUrl || '';
+    if (originUrl.includes('silent_collections.html')) {
+        WJR_DEBUG && console.log('WEBREQ: Skipping filtering for silent collections preview', details.url);
+        return;
+    }
     if (whtIsWhitelisted(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
+        return;
+    }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -597,6 +696,10 @@ async function bkDirectTypedUrlListener(details) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
+    if (bkIsRevealAllowed(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Direct typed reveal whitelist '+details.url);
+        return;
+    }
     //Try to see if there is an image MIME type
     for (let i = 0; i < details.responseHeaders.length; i++) {
         let header = details.responseHeaders[i];
@@ -610,47 +713,6 @@ async function bkDirectTypedUrlListener(details) {
     }
     //Otherwise do nothing...
     return details;
-}
-
-///////////////////////////////////////////////// DNS Lookup Tie-in /////////////////////////////////////////////////////////////
-
-BK_shouldUseDnsBlocking = false;
-
-async function bkDnsBlockListener(details) {
-    let dnsResult = await dnsIsDomainOk(details.url);
-    if(!dnsResult) {
-        WJR_DEBUG && console.log('DNS: DNS Blocked '+details.url);
-        return { cancel: true };
-    }
-    return details;
-}
-
-function bkSetDnsBlocking(onOrOff) {
-    let effectiveOnOrOff = onOrOff && BK_isEnabled;
-    WJR_DEBUG && console.log('CONFIG: DNS blocking set request: '+onOrOff+', effective value '+effectiveOnOrOff);
-    let isCurrentlyOn = browser.webRequest.onBeforeRequest.hasListener(bkDnsBlockListener);
-    if (effectiveOnOrOff != isCurrentlyOn) {
-        BK_shouldUseDnsBlocking = onOrOff; //Store the requested, not effective value
-        if(effectiveOnOrOff && !isCurrentlyOn) {
-            WJR_DEBUG && console.log('CONFIG: DNS Adding DNS block listener')
-            browser.webRequest.onBeforeRequest.addListener(
-                bkDnsBlockListener,
-                { urls: ["<all_urls>"], types: ["image", "imageset", "media"] },
-                ["blocking"]
-            );
-        } else if (!effectiveOnOrOff && isCurrentlyOn) {
-            WJR_DEBUG && console.log('CONFIG: DNS Removing DNS block listener')
-            browser.webRequest.onBeforeRequest.removeListener(bkDnsBlockListener);
-        }
-        WJR_DEBUG && console.log('CONFIG: DNS blocking is now: '+onOrOff);
-    } else {
-        WJR_DEBUG && console.log('CONFIG: DNS blocking is already correctly set.');
-    }
-}
-
-//Use this if you change BK_isEnabled
-function bkRefreshDnsBlocking() {
-    bkSetDnsBlocking(BK_shouldUseDnsBlocking);
 }
 
 ////////////////////////////////base64 IMAGE SEARCH SPECIFIC STUFF BELOW, BOO HISS!!!! ///////////////////////////////////////////
@@ -742,6 +804,209 @@ async function bkBase64ContentListener(details) {
 ////////////////////////////Context Menu////////////////////////////
 
 if (browser.menus) {
+    const BK_REVEAL_TARGET_RESOLVER = `
+        const wingmanRevealDataAttributes = [
+            'data-src',
+            'data-original',
+            'data-lazy-src',
+            'data-lazy',
+            'data-image-src'
+        ];
+
+        function wingmanRevealExtractBackgroundUrl(element) {
+            if (!element) {
+                return null;
+            }
+            const style = getComputedStyle(element);
+            const backgroundImage = style?.backgroundImage;
+            if (!backgroundImage || backgroundImage === 'none') {
+                return null;
+            }
+            const match = backgroundImage.match(/url\\(["']?(.*?)["']?\\)/i);
+            return match?.[1] || null;
+        }
+
+        function wingmanRevealExtractFromAttributes(element) {
+            if (!element?.getAttribute) {
+                return null;
+            }
+            for (const attr of wingmanRevealDataAttributes) {
+                const value = element.getAttribute(attr);
+                if (value) {
+                    return value;
+                }
+            }
+            const srcset = element.getAttribute('srcset') || element.getAttribute('data-srcset');
+            if (srcset) {
+                const firstEntry = srcset.split(',')[0]?.trim();
+                if (firstEntry) {
+                    return firstEntry.split(/\s+/)[0];
+                }
+            }
+            return null;
+        }
+
+        function wingmanRevealFindImgSource(element) {
+            if (!element || element.tagName !== 'IMG') {
+                return null;
+            }
+            const directSrc = element.currentSrc || element.src;
+            if (directSrc) {
+                return directSrc;
+            }
+            return wingmanRevealExtractFromAttributes(element);
+        }
+
+        function wingmanRevealFindSourceElement(element) {
+            if (!element) {
+                return null;
+            }
+            if (element.tagName === 'SOURCE') {
+                return element;
+            }
+            return element.querySelector?.('source') || null;
+        }
+
+        function wingmanRevealCandidateFromElement(element) {
+            if (!element) {
+                return null;
+            }
+            const imgSrc = wingmanRevealFindImgSource(element);
+            if (imgSrc) {
+                return { element, src: imgSrc, kind: 'img' };
+            }
+
+            const descendantImg = element.querySelector?.('img') || element.shadowRoot?.querySelector?.('img');
+            if (descendantImg) {
+                const descendantSrc = wingmanRevealFindImgSource(descendantImg);
+                if (descendantSrc) {
+                    return { element: descendantImg, src: descendantSrc, kind: 'img' };
+                }
+            }
+
+            const sourceElement = wingmanRevealFindSourceElement(element);
+            if (sourceElement) {
+                const sourceSrc = wingmanRevealExtractFromAttributes(sourceElement);
+                if (sourceSrc) {
+                    const pictureImg = sourceElement.closest?.('picture')?.querySelector?.('img');
+                    return { element: pictureImg || sourceElement, src: sourceSrc, kind: 'img' };
+                }
+            }
+
+            const attributeSrc = wingmanRevealExtractFromAttributes(element);
+            if (attributeSrc) {
+                const kind = element.tagName === 'IMG' ? 'img' : 'background';
+                return { element, src: attributeSrc, kind };
+            }
+
+            const backgroundUrl = wingmanRevealExtractBackgroundUrl(element);
+            if (backgroundUrl) {
+                return { element, src: backgroundUrl, kind: 'background' };
+            }
+
+            return null;
+        }
+
+        function wingmanRevealGetSearchPoints(target) {
+            if (!target?.getBoundingClientRect) {
+                return [];
+            }
+            const rect = target.getBoundingClientRect();
+            if (!rect.width && !rect.height) {
+                return [];
+            }
+            const midX = rect.left + rect.width / 2;
+            const midY = rect.top + rect.height / 2;
+            const clampX = x => Math.max(0, Math.min(window.innerWidth - 1, x));
+            const clampY = y => Math.max(0, Math.min(window.innerHeight - 1, y));
+            const padding = 2;
+            return [
+                { x: clampX(midX), y: clampY(midY) },
+                { x: clampX(rect.left + padding), y: clampY(rect.top + padding) },
+                { x: clampX(rect.right - padding), y: clampY(rect.top + padding) },
+                { x: clampX(rect.left + padding), y: clampY(rect.bottom - padding) },
+                { x: clampX(rect.right - padding), y: clampY(rect.bottom - padding) },
+            ];
+        }
+
+        function wingmanRevealFindIntersectingImage(target) {
+            if (!target?.getBoundingClientRect) {
+                return null;
+            }
+            const targetRect = target.getBoundingClientRect();
+            if (!targetRect.width && !targetRect.height) {
+                return null;
+            }
+            const images = document.querySelectorAll('img');
+            for (const image of images) {
+                const imageRect = image.getBoundingClientRect();
+                if (!imageRect.width && !imageRect.height) {
+                    continue;
+                }
+                const intersects = !(
+                    imageRect.right < targetRect.left ||
+                    imageRect.left > targetRect.right ||
+                    imageRect.bottom < targetRect.top ||
+                    imageRect.top > targetRect.bottom
+                );
+                if (!intersects) {
+                    continue;
+                }
+                const src = wingmanRevealFindImgSource(image);
+                if (src) {
+                    return { element: image, src, kind: 'img' };
+                }
+            }
+            return null;
+        }
+
+        function wingmanRevealResolveTarget(target, contextPoint) {
+            const initial = wingmanRevealCandidateFromElement(target);
+            if (initial) {
+                return initial;
+            }
+
+            let current = target?.parentElement;
+            let depth = 0;
+            while (current && depth < 5) {
+                const candidate = wingmanRevealCandidateFromElement(current);
+                if (candidate) {
+                    return candidate;
+                }
+                current = current.parentElement;
+                depth += 1;
+            }
+
+            if (contextPoint && Number.isFinite(contextPoint.x) && Number.isFinite(contextPoint.y)) {
+                const elementsAtPoint = document.elementsFromPoint(contextPoint.x, contextPoint.y);
+                for (const element of elementsAtPoint) {
+                    const candidate = wingmanRevealCandidateFromElement(element);
+                    if (candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            const points = wingmanRevealGetSearchPoints(target);
+            for (const point of points) {
+                const elements = document.elementsFromPoint(point.x, point.y);
+                for (const element of elements) {
+                    const candidate = wingmanRevealCandidateFromElement(element);
+                    if (candidate) {
+                        return candidate;
+                    }
+                }
+            }
+
+            const intersecting = wingmanRevealFindIntersectingImage(target);
+            if (intersecting) {
+                return intersecting;
+            }
+
+            return null;
+        }
+    `;
+
     browser.menus.create({
         title: "Hide Image",
         documentUrlPatterns: ["*://*/*"],
@@ -753,6 +1018,164 @@ if (browser.menus) {
           });
         },
       });
+
+    browser.menus.create({
+        id: "wingman-reveal-blocked-image",
+        title: "Reveal Blocked Image",
+        documentUrlPatterns: ["*://*/*"],
+        contexts: ["all"],
+        visible: BK_isOnOffSwitchShown,
+    });
+    BK_isRevealMenuCreated = true;
+    bkUpdateRevealMenuVisibility(BK_isOnOffSwitchShown);
+
+    browser.menus.onClicked.addListener(async (info, tab) => {
+        if (info.menuItemId !== "wingman-reveal-blocked-image") {
+            return;
+        }
+        console.log('REVEAL: Context menu clicked', {
+            frameId: info.frameId,
+            tabId: tab?.id
+        });
+
+        let contextPoint = null;
+        try {
+            contextPoint = await browser.tabs.sendMessage(
+                tab.id,
+                { type: 'wingmanRevealGetContextPoint' },
+                { frameId: info.frameId }
+            );
+        } catch (error) {
+            WJR_DEBUG && console.warn('REVEAL: Unable to read context point', error);
+        }
+
+        const [targetInfo] = await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                if (!resolved || !resolved.src) {
+                    return null;
+                }
+                return { src: resolved.src, kind: resolved.kind || 'img' };
+            })();`,
+        });
+
+        if (!targetInfo || !targetInfo.src) {
+            console.warn('REVEAL: Missing target src');
+            return;
+        }
+
+        if (targetInfo.src.startsWith('data:image/svg+xml')) {
+            console.log('REVEAL: Handling SVG data URL');
+            await browser.tabs.executeScript(tab.id, {
+                frameId: info.frameId,
+                code: `(() => {
+                    ${BK_REVEAL_TARGET_RESOLVER}
+                    const contextPoint = ${JSON.stringify(contextPoint)};
+                    const target = browser.menus.getTargetElement(${info.targetElementId});
+                    const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                    if (!resolved || resolved.kind !== 'img') {
+                        return;
+                    }
+                    const resolvedTarget = resolved.element;
+                    if (!resolvedTarget?.src || !resolvedTarget.src.startsWith('data:image/svg+xml')) {
+                        return;
+                    }
+                    const src = resolvedTarget.src;
+                    const commaIndex = src.indexOf(',');
+                    if (commaIndex === -1) {
+                        return;
+                    }
+                    const payload = src.slice(commaIndex + 1);
+                    let svgText = '';
+                    if (src.includes(';base64')) {
+                        svgText = atob(payload);
+                    } else {
+                        svgText = decodeURIComponent(payload);
+                    }
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+                    const imageNode = doc.querySelector('image');
+                    const href = imageNode?.getAttribute('href') || imageNode?.getAttribute('xlink:href');
+                    if (href) {
+                        resolvedTarget.src = href;
+                        console.log('REVEAL: SVG href extracted', href);
+                    } else {
+                        const svgRoot = doc.documentElement;
+                        const embeddedHref = svgRoot?.getAttribute('data-wingman-original-href');
+                        if (embeddedHref) {
+                            resolvedTarget.src = embeddedHref;
+                            console.log('REVEAL: SVG embedded href extracted', embeddedHref);
+                        } else {
+                            console.warn('REVEAL: No href found in SVG');
+                        }
+                    }
+                })();`,
+            });
+            return;
+        }
+
+        console.log('REVEAL: Allowlisting URL for reveal', targetInfo.src);
+        bkRememberRevealUrl(targetInfo.src);
+
+        await browser.tabs.executeScript(tab.id, {
+            frameId: info.frameId,
+            code: `(() => {
+                ${BK_REVEAL_TARGET_RESOLVER}
+                const contextPoint = ${JSON.stringify(contextPoint)};
+                const target = browser.menus.getTargetElement(${info.targetElementId});
+                const resolved = wingmanRevealResolveTarget(target, contextPoint);
+                if (!resolved || !resolved.src) {
+                    console.warn('REVEAL: Target missing during reload');
+                    return;
+                }
+                const resolvedTarget = resolved.element;
+                const originalSrc = resolved.src;
+                const isImage = resolved.kind === 'img';
+                const previousKey = isImage ? 'wingmanRevealObjectUrl' : 'wingmanRevealBackgroundObjectUrl';
+                const previousObjectUrl = resolvedTarget?.dataset?.[previousKey];
+                if (previousObjectUrl) {
+                    URL.revokeObjectURL(previousObjectUrl);
+                    delete resolvedTarget.dataset[previousKey];
+                }
+                if (isImage) {
+                    resolvedTarget.removeAttribute('srcset');
+                }
+                console.log('REVEAL: Fetching image with cache reload', originalSrc);
+                fetch(originalSrc, { cache: 'reload' })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('HTTP ' + response.status);
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const objectUrl = URL.createObjectURL(blob);
+                        if (resolvedTarget?.dataset) {
+                            resolvedTarget.dataset[previousKey] = objectUrl;
+                        }
+                        if (isImage) {
+                            resolvedTarget.src = objectUrl;
+                        } else if (resolvedTarget?.style) {
+                            resolvedTarget.style.backgroundImage = \`url("\${objectUrl}")\`;
+                        }
+                        console.log('REVEAL: Set image to fetched blob URL');
+                    })
+                    .catch(error => {
+                        console.warn('REVEAL: Fetch reload failed, resetting src', error);
+                        if (isImage) {
+                            resolvedTarget.src = '';
+                            resolvedTarget.src = originalSrc;
+                        } else if (resolvedTarget?.style) {
+                            resolvedTarget.style.backgroundImage = \`url("\${originalSrc}")\`;
+                        }
+                    });
+            })();`,
+        });
+    });
 }
 
 
@@ -805,6 +1228,11 @@ function bkRegisterAllCallbacks() {
         ["blocking", "responseHeaders"]
     );
 
+    browser.webRequest.onBeforeRedirect.addListener(
+        bkRevealRedirectListener,
+        { urls: ["<all_urls>"], types: ["image", "imageset"] }
+    );
+
     browser.webRequest.onHeadersReceived.addListener(
         bkDirectTypedUrlListener,
         { urls: ["<all_urls>"], types: ["main_frame"] },
@@ -839,6 +1267,7 @@ function bkRegisterAllCallbacks() {
 
 function bkUnregisterAllCallbacks() {
     browser.webRequest.onHeadersReceived.removeListener(bkImageListener);
+    browser.webRequest.onBeforeRedirect.removeListener(bkRevealRedirectListener);
     browser.webRequest.onHeadersReceived.removeListener(bkDirectTypedUrlListener);
     browser.webRequest.onHeadersReceived.removeListener(bkBase64ContentListener);
 
@@ -853,7 +1282,6 @@ function bkRefreshCallbackRegistration() {
     if (BK_isEnabled) {
         bkRegisterAllCallbacks();
     }
-    bkRefreshDnsBlocking();
     WJR_DEBUG && console.log('CONFIG: Callback wireup refresh complete!');
 }
 
@@ -870,10 +1298,10 @@ function bkSetEnabled(isOn) {
         bkUnregisterAllCallbacks();
     }
     BK_isEnabled = isOn;
-    bkRefreshDnsBlocking();
     WJR_DEBUG && console.log('CONFIG: Callback wireups changed!');
 }
 
+let BK_videoScanMode = 'quick';
 let BK_isVideoEnabled = true;
 function bkSetVideoEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Setting video enabled to '+isOn);
@@ -886,15 +1314,40 @@ function bkSetVideoEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Video callback wireups changed!');
 }
 
-let BK_isOnOffSwitchShown = false;
+function bkNormalizeVideoScanMode(mode) {
+    if(mode === 'enabled' || mode === 'quick' || mode === 'disabled') {
+        return mode;
+    }
+    return 'quick';
+}
+
+function bkSetVideoScanMode(mode) {
+    let normalizedMode = bkNormalizeVideoScanMode(mode);
+    if(normalizedMode === BK_videoScanMode) {
+        return;
+    }
+    BK_videoScanMode = normalizedMode;
+    bkSetVideoEnabled(BK_videoScanMode !== 'disabled');
+}
 
 function bkUpdateFromSettings() {
-    browser.storage.local.get('is_dns_blocking').then(dnsResult =>
-        bkSetDnsBlocking(dnsResult.is_dns_blocking == true));
     browser.storage.local.get('is_on_off_shown').then(onOffResult =>
-        BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true);
-    browser.storage.local.get('is_video_blocking_disabled').then(videoDisabledResult => {
-        bkSetVideoEnabled(!videoDisabledResult.is_video_blocking_disabled);
+        {
+            BK_isOnOffSwitchShown = onOffResult.is_on_off_shown == true;
+            bkUpdateRevealMenuVisibility(BK_isOnOffSwitchShown);
+        });
+    browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']).then(videoBlockingResult => {
+        let mode = videoBlockingResult.video_blocking_mode;
+        if(!mode) {
+            if(videoBlockingResult.is_video_blocking_disabled === true) {
+                mode = 'disabled';
+            } else if(videoBlockingResult.is_video_blocking_disabled === false) {
+                mode = 'enabled';
+            } else {
+                mode = 'quick';
+            }
+        }
+        bkSetVideoScanMode(mode);
     });
     browser.storage.local.get('is_silent_mode_enabled').then(silentModeEnabledResult => {
         BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
@@ -938,9 +1391,6 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'getZoneAutomatic') {
         sendResponse({ isZoneAutomatic: BK_isZoneAutomatic });
     }
-    else if (request.type == 'setDnsBlocking') {
-        bkUpdateFromSettings();
-    }
     else if (request.type == 'getOnOff') {
         sendResponse({ onOff: BK_isEnabled ? 'on' : 'off' });
     }
@@ -956,11 +1406,19 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'setVideoBlockingDisabled') {
         bkUpdateFromSettings();
     }
+    else if (request.type == 'setVideoBlockingMode') {
+        bkUpdateFromSettings();
+    }
     else if (request.type == 'setSilentModeEnabled') {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
+    }
+    else if (request.type == 'revealBlockedImage') {
+        console.log('REVEAL: Message received', request.url);
+        bkRememberRevealUrl(request.url);
+        sendResponse({ ok: true });
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);

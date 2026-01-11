@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Wingman Jr. - Image Collections</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      -webkit-text-size-adjust: 100%;
+    }
+    body {
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #f6f7fb;
+      color: #1f2a44;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+    main {
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    h1, h2, h3 {
+      margin: 0 0 12px;
+    }
+    p {
+      margin: 0 0 12px;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    .row.spaced {
+      margin-bottom: 10px;
+    }
+    input[type="text"] {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      min-width: 220px;
+      font-size: 14px;
+    }
+    button {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background: #2f80ed;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button.secondary {
+      background: #e0e7f2;
+      color: #1f2a44;
+    }
+    button.danger {
+      background: #d84b4b;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      background: #eff6ff;
+      border: 1px solid rgba(47, 128, 237, 0.2);
+    }
+    .status.error {
+      background: #ffecec;
+      border-color: rgba(216, 75, 75, 0.3);
+      color: #9b1c1c;
+    }
+    .collection-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .collection-card {
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fbfcff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .collection-card.active {
+      border-color: rgba(47, 128, 237, 0.6);
+      box-shadow: 0 0 0 2px rgba(47, 128, 237, 0.15);
+    }
+    .collection-meta {
+      font-size: 13px;
+      color: #4b5b75;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .preview-grid img {
+      width: 100%;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #f0f2f8;
+    }
+    .detail {
+      display: none;
+    }
+    .detail.active {
+      display: block;
+    }
+    .drop-zone {
+      border: 2px dashed rgba(47, 128, 237, 0.5);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      background: #f6f9ff;
+      color: #2f80ed;
+      margin-bottom: 12px;
+    }
+    .drop-zone.dragover {
+      background: #e8f1ff;
+      border-color: #2f80ed;
+    }
+    .image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .image-card {
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      background: #ffffff;
+    }
+    .image-card img {
+      width: 100%;
+      height: 100px;
+      object-fit: cover;
+      display: block;
+    }
+    .image-card .image-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: #4b5b75;
+    }
+    .image-card .image-attribution {
+      padding: 0 8px 8px;
+      font-size: 12px;
+      color: #42516a;
+      display: grid;
+      gap: 2px;
+    }
+    .image-card .image-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .image-card .image-attribution a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .image-card .image-attribution a:hover {
+      text-decoration: underline;
+    }
+    .search-panel {
+      margin-top: 16px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+      padding-top: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .search-panel .helper-row {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: #5d6f8c;
+    }
+    .search-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      font-size: 14px;
+      background: #ffffff;
+    }
+    .search-results {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .search-card {
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      background: #ffffff;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .search-card img {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      background: #edf1f7;
+    }
+    .search-card .select-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 999px;
+      padding: 4px 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: #2f3b52;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    .search-card .search-info {
+      padding: 8px;
+      font-size: 12px;
+      color: #4b5b75;
+      display: grid;
+      gap: 4px;
+    }
+    .search-card .search-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .search-card .search-info a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .search-card .search-info a:hover {
+      text-decoration: underline;
+    }
+    .license-box {
+      font-size: 12px;
+      color: #5d6f8c;
+      border-left: 3px solid rgba(47, 128, 237, 0.25);
+      padding-left: 10px;
+    }
+    .license-box p {
+      margin-bottom: 6px;
+    }
+    .license-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .license-list a {
+      color: #2f80ed;
+      text-decoration: none;
+    }
+    .license-list a:hover {
+      text-decoration: underline;
+    }
+    .muted {
+      color: #5d6f8c;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Silent image collections</h1>
+    <p>
+      Silent mode can swap blocked images with safe placeholders. Create your own collections
+      here and pick which one silent mode should cycle through. Images are stored locally in
+      your browser and may be cleared if storage is wiped or the extension is removed.
+      Just close this window when you're done managing the collections.
+    </p>
+    <p class="muted">
+      Each collection is capped at about 8 MB. Images are resized to a maximum of 512 pixels on
+      the longest side and compressed to JPEG to keep them small (around 100 KB each). If your
+      browser denies storage access or runs out of space, you will see an error below.
+    </p>
+
+    <div id="status" class="status" hidden></div>
+
+    <section class="card">
+      <h2>Create a new collection</h2>
+      <div class="row">
+        <input id="collection-name" type="text" placeholder="Collection name" maxlength="60">
+        <button id="create-collection">Create collection</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Available collections</h2>
+      <div id="collection-list" class="collection-list"></div>
+    </section>
+
+    <section id="detail" class="card detail">
+      <h2 id="detail-title"></h2>
+      <h3>Add your own images</h3>
+      <p class="muted">
+        Add images from your device or search for licensed images to import. Removing an image
+        only affects this collection and does not delete files from your computer.
+      </p>
+      <div id="drop-zone" class="drop-zone">
+        Drop images here or use the button below to select files.
+      </div>
+      <div class="row spaced">
+        <button id="add-images" class="secondary">Add images</button>
+        <button id="set-active">Use this collection for silent mode</button>
+        <span id="detail-meta" class="muted"></span>
+      </div>
+      <input id="file-input" type="file" accept="image/*" multiple hidden>
+      <div id="image-grid" class="image-grid"></div>
+      <div id="search-panel" class="search-panel">
+        <h3>Or search for images to import</h3>
+        <p class="muted">
+          Search using one of the services below. Your search keywords and returned results will of course be
+          visible to that service - but once the images are imported, only your local storage is consulted.
+        </p>
+        <div class="license-box">
+          <p>
+            Images in each collection remain subject to their original licenses. Imported results only
+            include licenses that allow reuse. Review the license before using an image elsewhere.
+          </p>
+          <ul id="license-links" class="license-list"></ul>
+        </div>
+        <div class="search-actions">
+          <label>
+            <span class="muted">Provider</span><br>
+            <select id="search-provider"></select>
+          </label>
+          <label>
+            <span class="muted">Theme</span><br>
+            <input id="search-query" type="text" placeholder="e.g., waterfalls, city skylines">
+          </label>
+          <button id="search-submit">Search</button>
+          <button id="search-more" class="secondary" disabled>Load more</button>
+          <button id="search-select-all" class="secondary" disabled>Select all</button>
+          <button id="search-add" disabled>Add selected to collection</button>
+          <span id="search-meta" class="muted"></span>
+        </div>
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="silent_licenses.js"></script>
+  <script src="silent_image_search.js"></script>
+  <script src="silent_data/index.js"></script>
+  <script src="silent_collections.js"></script>
+</body>
+
+</html>

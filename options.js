@@ -1,21 +1,15 @@
 async function optSaveOptions() {
-    let isDnsBlocking = document.querySelector('input[name="dns_blocking"]:checked').value == "dns_blocking_yes";
-    await browser.storage.local.set({
-        is_dns_blocking: isDnsBlocking
-    });
-    browser.runtime.sendMessage({ type: 'setDnsBlocking', value: isDnsBlocking });
-
     let isOnOffShown = document.querySelector('input[name="on_off_shown"]:checked').value == "on_off_shown_yes";
     await browser.storage.local.set({
         is_on_off_shown: isOnOffShown
     });
     browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: isOnOffShown });
 
-    let isVideoBlockingDisabled = document.querySelector('input[name="is_video_blocking_disabled"]:checked').value == "is_video_blocking_disabled_yes";
+    let videoBlockingMode = document.querySelector('input[name="video_blocking_mode"]:checked').value;
     await browser.storage.local.set({
-        is_video_blocking_disabled: isVideoBlockingDisabled
+        video_blocking_mode: videoBlockingMode
     });
-    browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: isVideoBlockingDisabled });
+    browser.runtime.sendMessage({ type: 'setVideoBlockingMode', value: videoBlockingMode });
 
     let isSilentModeEnabled = document.querySelector('input[name="is_silent_mode_enabled"]:checked').value == "is_silent_mode_enabled_yes";
     await browser.storage.local.set({
@@ -38,17 +32,6 @@ async function optSaveOptions() {
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
 
-    function setCurrentDnsBlockingChoice(rawResult) {
-        let result = rawResult.is_dns_blocking;
-        console.log('OPTION: Setting DNS to ' + result);
-        if (result) {
-            document.getElementById('dns_blocking_yes').checked = true;
-        } else {
-            document.getElementById('dns_blocking_no').checked = true;
-        }
-        browser.runtime.sendMessage({ type: 'setDnsBlocking', value: result });
-    }
-
     function setCurrentShowOnOffSwitchChoice(rawResult) {
         let result = rawResult.is_on_off_shown;
         console.log('OPTION: Setting visibility of on/off switch to ' + result);
@@ -61,14 +44,21 @@ function optRestoreOptions() {
     }
 
     function setCurrentVideoBlockingChoice(rawResult) {
-        let result = rawResult.is_video_blocking_disabled;
-        console.log('OPTION: Setting video blocking disabled switch to ' + result);
-        if (result) {
-            document.getElementById('is_video_blocking_disabled_yes').checked = true;
-        } else {
-            document.getElementById('is_video_blocking_disabled_no').checked = true;
+        let result = rawResult.video_blocking_mode;
+        let isVideoBlockingDisabled = rawResult.is_video_blocking_disabled;
+        let coercedResult = result;
+        if (!coercedResult) {
+            if (isVideoBlockingDisabled === true) {
+                coercedResult = 'disabled';
+            } else if (isVideoBlockingDisabled === false) {
+                coercedResult = 'enabled';
+            } else {
+                coercedResult = 'quick';
+            }
         }
-        browser.runtime.sendMessage({ type: 'setVideoBlockingDisabled', value: result });
+        console.log('OPTION: Setting video blocking mode to ' + coercedResult);
+        document.getElementById('video_blocking_mode_' + coercedResult).checked = true;
+        browser.runtime.sendMessage({ type: 'setVideoBlockingMode', value: coercedResult });
     }
 
     function setCurrentSilentModeEnabledChoice(rawResult) {
@@ -101,13 +91,10 @@ function optRestoreOptions() {
         console.log(`Error restoring: ${error}`);
     }
 
-    let getting = browser.storage.local.get('is_dns_blocking');
-    getting.then(setCurrentDnsBlockingChoice, onError);
-
     let gettingOnOffShown = browser.storage.local.get('is_on_off_shown');
     gettingOnOffShown.then(setCurrentShowOnOffSwitchChoice, onError);
 
-    let gettingVideoBlocking = browser.storage.local.get('is_video_blocking_disabled');
+    let gettingVideoBlocking = browser.storage.local.get(['video_blocking_mode', 'is_video_blocking_disabled']);
     gettingVideoBlocking.then(setCurrentVideoBlockingChoice, onError);
 
     let gettingSilentModeEnabled = browser.storage.local.get('is_silent_mode_enabled');
@@ -121,21 +108,15 @@ function optRestoreOptions() {
 }
 
 document.addEventListener("DOMContentLoaded", optRestoreOptions);
-var radios = document.forms[0].elements["dns_blocking"];
-for (var i = 0, max = radios.length; i < max; i++) {
-    radios[i].onclick = function () {
-        optSaveOptions();
-    }
-}
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for (var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function () {
         optSaveOptions();
     }
 }
-var radiosVideoBlockingDisabled = document.forms[0].elements["is_video_blocking_disabled"];
-for (var i = 0, max = radiosVideoBlockingDisabled.length; i < max; i++) {
-    radiosVideoBlockingDisabled[i].onclick = function () {
+var radiosVideoBlockingMode = document.forms[0].elements["video_blocking_mode"];
+for (var i = 0, max = radiosVideoBlockingMode.length; i < max; i++) {
+    radiosVideoBlockingMode[i].onclick = function () {
         optSaveOptions();
     }
 }

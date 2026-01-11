@@ -2,11 +2,14 @@
     "description": "Filter images transparently for kids",
     "manifest_version": 2,
     "name": "Wingman Jr.",
-    "version": "3.5.0",
+    "version": "3.8.0",
 
     "browser_specific_settings": {
       "gecko": {
-        "strict_min_version": "91.1.0"
+        "strict_min_version": "91.1.0",
+        "data_collection_permissions": {
+          "required": ["none"]
+        }
       }
     },
   
@@ -26,7 +29,6 @@
     "background": {
       "scripts": [
           "roc.js",
-          "dns_blocking.js",
           "mp4.js",
           "ebml.js",
           "status.js",
@@ -61,5 +63,14 @@
       "default_popup" :  "popup.html"
     },
 
-    "content_security_policy": "script-src 'self' 'unsafe-eval';  object-src 'self' blob:; img-src blob: data:;"
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["reveal_context.js"],
+        "run_at": "document_start",
+        "all_frames": true
+      }
+    ],
+
+    "content_security_policy": "script-src 'self' 'unsafe-eval';  object-src 'self' blob:; img-src blob: data: https:;"
   }

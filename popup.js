@@ -60,7 +60,14 @@ window.onload=function()
         function(message)
         {
             console.log('Restoring on/off shown state to '+message.isOnOffSwitchShown);
-            document.getElementById('isOnOffSection').className = message.isOnOffSwitchShown ? 'switch_visible' : 'switch_hidden';
+            const toggle = document.getElementById('isOnOffSection');
+            const filteringControl = document.querySelector('.filtering-control');
+            const stateClass = message.isOnOffSwitchShown ? 'switch_visible' : 'switch_hidden';
+            toggle.className = stateClass;
+            if (filteringControl)
+            {
+                filteringControl.classList.toggle('filtering-hidden', !message.isOnOffSwitchShown);
+            }
         },
         function(error)
         {
