@@ -79,9 +79,10 @@ function ssSuggestAdaptiveThreshold(pageHost, fallbackThreshold, fallbackStdDev,
 
     const scaleFactor = 1 + 8.0 / Math.pow(scores.length, 0.75);
     const pushFromMean = Math.max(stddev * scaleFactor, fallbackStdDev * 2);
-    const suggested = mean + pushFromMean;
+    const suggestedLinear = mean + pushFromMean;
+    const mappedThreshold = rocFindThresholdForLinearScore(suggestedLinear);
 
-    let threshold = Math.min(suggested, maxThreshold);
+    let threshold = Math.min(mappedThreshold ?? suggestedLinear, maxThreshold);
     threshold = Math.max(threshold, minThreshold);
     console.info('[SS] threshold_calc ' + JSON.stringify({
         pageHost: pageHost,
@@ -90,7 +91,8 @@ function ssSuggestAdaptiveThreshold(pageHost, fallbackThreshold, fallbackStdDev,
         stddev: stddev,
         scaleFactor: scaleFactor,
         pushFromMean: pushFromMean,
-        suggested: suggested,
+        suggestedLinear: suggestedLinear,
+        mappedThreshold: mappedThreshold,
         minThreshold: minThreshold,
         maxThreshold: maxThreshold,
         threshold: threshold

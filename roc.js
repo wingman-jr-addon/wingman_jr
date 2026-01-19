@@ -44,6 +44,29 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
     return (fpr + fnr) / 2.0;
 }
 
+// Inverse lookup: pick the ROC threshold that best matches a target linear score.
+function rocFindThresholdForLinearScore(targetLinearScore) {
+    if (targetLinearScore === null || targetLinearScore === undefined) {
+        return null;
+    }
+    if (!ROC_VALUES || ROC_VALUES.length === 0) {
+        return null;
+    }
+    let bestThreshold = ROC_VALUES[0].threshold;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < ROC_VALUES.length; i++) {
+        let entry = ROC_VALUES[i];
+        let fnr = 1.0 - entry.tpr;
+        let linearScore = (entry.fpr + fnr) / 2.0;
+        let delta = Math.abs(linearScore - targetLinearScore);
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            bestThreshold = entry.threshold;
+        }
+    }
+    return bestThreshold;
+}
+
 function rocFindRocEntryByFpr(desiredFPR) {
     let bestMatch = ROC_VALUES[0];
     for(let i=ROC_VALUES.length-1; i>=0; i--) {
