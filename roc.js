@@ -13,9 +13,9 @@ function rocFindConfidence(threshold) {
     return 1.0-bestMatch.tpr;
 }
 
-// Converts a raw ROC threshold into an approximately linear "risk" score.
-// We approximate balanced error rate: (FPR + FNR) / 2 using linear interpolation
-// across adjacent ROC entries to smooth between sample thresholds.
+// Converts a raw ROC threshold into a semantic score based on FPR anchors.
+// We interpolate FPR for the given threshold, then map it through a piecewise
+// linear score in log10(FPR) space anchored to trusted/neutral/untrusted FPRs.
 function rocEstimateLinearScoreAtThreshold(threshold) {
     if (threshold === null || threshold === undefined) {
         return null;
@@ -32,16 +32,40 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
             break;
         }
     }
-    if (upper.threshold === lower.threshold) {
-        let fpr = lower.fpr;
-        let fnr = 1.0 - lower.tpr;
-        return (fpr + fnr) / 2.0;
+    let fpr = lower.fpr;
+    if (upper.threshold !== lower.threshold) {
+        let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
+        fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
     }
-    let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
-    let fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
-    let tpr = lower.tpr + (upper.tpr - lower.tpr) * ratio;
-    let fnr = 1.0 - tpr;
-    return (fpr + fnr) / 2.0;
+
+    const fT = 0.004;
+    const fN = 0.015;
+    const fU = 0.10;
+    const scoreTrusted = 20;
+    const scoreNeutral = 50;
+    const scoreUntrusted = 80;
+    const minScore = 0;
+    const maxScore = 100;
+    const eps = 1e-12;
+
+    if (fpr <= fT) {
+        return minScore;
+    }
+    if (fpr >= fU) {
+        return maxScore;
+    }
+
+    const x = Math.log10(fpr + eps);
+    const xT = Math.log10(fT);
+    const xN = Math.log10(fN);
+    const xU = Math.log10(fU);
+
+    if (fpr <= fN) {
+        let t = (x - xT) / (xN - xT);
+        return Math.min(maxScore, Math.max(minScore, scoreTrusted + (scoreNeutral - scoreTrusted) * t));
+    }
+    let t = (x - xN) / (xU - xN);
+    return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
 }
 
 // Inverse lookup: pick the ROC threshold that best matches a target linear score.
