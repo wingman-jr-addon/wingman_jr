@@ -274,6 +274,10 @@ function procScoreToStr(sqrxrScore) {
         sqrxrScore[1][3].toFixed(2)+')';
 }
 
+function procGetRocScore(sqrxrScore) {
+    return sqrxrScore?.[0]?.[0] ?? null;
+}
+
 function procIsSafe(sqrxrScore, threshold) {
     return sqrxrScore[0][0] < threshold;
 }
@@ -293,7 +297,9 @@ async function procPerformFiltering(entry) {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
-        result: null
+        result: null,
+        rocScore: null,
+        opaque: entry.opaque
     };
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
@@ -311,11 +317,11 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
+                result.rocScore = procGetRocScore(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
-                    result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
@@ -420,18 +426,23 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     let sqrxrScore = await procPredict(img);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
+                    let rocScore = procGetRocScore(sqrxrScore);
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
-                            requestId: b64Filter.requestId+'_'+imageId
+                            rocScore: rocScore,
+                            requestId: b64Filter.requestId+'_'+imageId,
+                            opaque: b64Filter.opaque
                         });
                         WJR_DEBUG && console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
                         outputPort.postMessage({
                             type:'stat',
                             result:'block',
-                            requestId: b64Filter.requestId+'_'+imageId
+                            rocScore: rocScore,
+                            requestId: b64Filter.requestId+'_'+imageId,
+                            opaque: b64Filter.opaque
                         });
                         let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
@@ -453,7 +464,9 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     outputPort.postMessage({
                         type:'stat',
                         result:'tiny',
-                        requestId: b64Filter.requestId+'_'+imageId
+                        rocScore: null,
+                        requestId: b64Filter.requestId+'_'+imageId,
+                        opaque: b64Filter.opaque
                     });
                     WJR_DEBUG && console.debug('WEBREQ: base64 skipping image with small dimensions: '+imageId);
                 }
@@ -463,7 +476,9 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                 outputPort.postMessage({
                     type:'stat',
                     result:'error',
-                    requestId: b64Filter.requestId+'_'+imageId
+                    rocScore: null,
+                    requestId: b64Filter.requestId+'_'+imageId,
+                    opaque: b64Filter.opaque
                 });
                 console.error('WEBREQ: base64 check failure for '+imageId+': '+e);
             }
@@ -531,7 +546,9 @@ async function procCheckProcess() {
             PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
-                requestId: toProcess.requestId
+                rocScore: result.rocScore,
+                requestId: toProcess.requestId,
+                opaque: result.opaque
             });
         } catch(e) {
             console.error('ERROR: Processor failed to communicate to background: '+e);
@@ -747,6 +764,7 @@ async function procOnPortMessage(m) {
                 url: m.url,
                 mimeType: m.mimeType,
                 threshold: m.threshold,
+                opaque: m.opaque,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -759,11 +777,14 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'onerror': {
+            let failedRequest = PROC_openRequests[m.requestId];
             delete PROC_openRequests[m.requestId];
             PROC_port.postMessage({
                 type:'stat',
                 result: 'error',
-                requestId: m.requestId
+                rocScore: null,
+                requestId: m.requestId,
+                opaque: failedRequest?.opaque
             });
         }
         break;
@@ -796,6 +817,7 @@ async function procOnPortMessage(m) {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
                 threshold: m.threshold,
+                opaque: m.opaque,
                 startTime: performance.now(),
                 fullStr: ''
             };

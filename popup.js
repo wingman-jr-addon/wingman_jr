@@ -1,14 +1,26 @@
 window.onload=function()
 {
+    let activeTabUrlPromise = browser.tabs.query({ active: true, currentWindow: true })
+        .then(tabs => tabs[0]?.url ?? null);
     let rad = document.getElementById('popupForm').zone;
     for (var i = 0; i < rad.length; i++) {
         rad[i].addEventListener('change', function(e) {
-            browser.runtime.sendMessage({ type: 'setZone', zone: e.target.id });
-            browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: false });
+            activeTabUrlPromise.then(pageUrl => {
+                if (!pageUrl) {
+                    return;
+                }
+                browser.runtime.sendMessage({ type: 'setZone', zone: e.target.id, pageUrl });
+                browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: false, pageUrl });
+            });
             window.close();
         });
     }
-    let sending = browser.runtime.sendMessage({type:'getZone'});
+    let sending = activeTabUrlPromise.then(pageUrl => {
+        if (!pageUrl) {
+            throw new Error('No active tab URL');
+        }
+        return browser.runtime.sendMessage({type:'getZone', pageUrl});
+    });
     sending.then(
         function(message)
         {
@@ -22,10 +34,20 @@ window.onload=function()
     )
     let autoBox = document.getElementById('popupForm').zoneAuto;
     autoBox.addEventListener('change', function(e) {
-        browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: e.target.checked });
+        activeTabUrlPromise.then(pageUrl => {
+            if (!pageUrl) {
+                return;
+            }
+            browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: e.target.checked, pageUrl });
+        });
         window.close();
     });
-    let automatic = browser.runtime.sendMessage({type:'getZoneAutomatic'});
+    let automatic = activeTabUrlPromise.then(pageUrl => {
+        if (!pageUrl) {
+            throw new Error('No active tab URL');
+        }
+        return browser.runtime.sendMessage({type:'getZoneAutomatic', pageUrl});
+    });
     automatic.then(
         function(message)
         {

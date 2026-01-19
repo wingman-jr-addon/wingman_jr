@@ -28,6 +28,7 @@ let BK_connectedClients = {};
 let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
+const BK_requestIdToTabId = new Map();
 
 const BK_revealAllowlist = new Set();
 const BK_revealAllowlistQueue = [];
@@ -103,6 +104,36 @@ function bkBroadcastProcessorSettings() {
 
 browser.runtime.onConnect.addListener(bkOnClientConnected);
 
+function bkExtractRootDomain(url) {
+    try {
+        let parsedUrl = new URL(url);
+        let parts = parsedUrl.hostname.split('.');
+        if (parts.length <= 2) {
+            return parsedUrl.hostname;
+        }
+        let root = parts[parts.length - 2] + '.' + parts[parts.length - 1];
+        if (parts[parts.length - 2].length == 2) {
+            root = parts[parts.length - 3] + '.' + root;
+        }
+        return root;
+    } catch (ex) {
+        console.warn('SO: Could not extract root domain because ' + ex + ' for ' + url);
+        return 'undefined';
+    }
+}
+
+function bkGetTopmostUrl(details) {
+    let result = 'undefined';
+    if (details.frameAncestors !== undefined && details.frameAncestors.length > 0) {
+        result = details.frameAncestors[details.frameAncestors.length - 1].url;
+    } else if (details.documentUrl) {
+        result = details.documentUrl;
+    } else {
+        result = details.originUrl;
+    }
+    return result;
+}
+
 
 let BK_processorBackendPreference = [];
 
@@ -142,6 +173,16 @@ function bkReloadProcessors() {
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
 
+function bkGetTabIdForRequest(requestId) {
+    if (BK_requestIdToTabId.has(requestId)) {
+        return BK_requestIdToTabId.get(requestId);
+    }
+    let prefix = requestId.split('_')[0];
+    if (BK_requestIdToTabId.has(prefix)) {
+        return BK_requestIdToTabId.get(prefix);
+    }
+    return null;
+}
 
 function bkOnProcessorMessage(m) {
     switch (m.type) {
@@ -180,16 +221,21 @@ function bkOnProcessorMessage(m) {
             break;
         case 'stat': {
             WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
-            statusCompleteImageCheck(m.requestId, m.result);
-            switch (m.result) {
-                case 'pass': {
-                    bkIncrementPassCount();
+            let tabId = bkGetTabIdForRequest(m.requestId);
+            statusCompleteImageCheck(m.requestId, m.result, tabId);
+            BK_requestIdToTabId.delete(m.requestId);
+            if (m.opaque && m.opaque.type !== 'pseudo') {
+                ssAddRequestRecord({
+                    timestamp: Date.now(),
+                    pageHost: m.opaque.pageHost,
+                    contentHost: m.opaque.contentHost,
+                    threshold: m.opaque.threshold,
+                    rocScore: m.rocScore,
+                    modelVersion: ssGetModelVersion()
+                });
+                if (tabId !== null) {
+                    bkUpdateTabVisuals(tabId);
                 }
-                    break;
-                case 'block': {
-                    bkIncrementBlockCount();
-                }
-                //could also be tiny or error
             }
         }
             break;
@@ -204,123 +250,87 @@ function bkOnProcessorMessage(m) {
 }
 
 /////////// ZONE START /////////////////////////
-var BK_isZoneAutomatic = true;
-var BK_predictionBufferBlockCount = 0;
-var BK_predictionBuffer = [];
-var BK_estimatedTruePositivePercentage = 0;
-var BK_isEstimateValid = false;
-
-function bkAddToPredictionBuffer(prediction) {
-    BK_predictionBuffer.push(prediction);
-    if (prediction > 0) {
-        BK_predictionBufferBlockCount++;
-    }
-    if (BK_predictionBuffer.length > 200) {
-        let oldPrediction = BK_predictionBuffer.shift();
-        if (oldPrediction > 0) {
-            BK_predictionBufferBlockCount--;
-        }
-    }
-    if (BK_predictionBuffer.length > 50) {
-        let estimatedTruePositiveCount = BK_zonePrecision * BK_predictionBufferBlockCount;
-        BK_estimatedTruePositivePercentage = estimatedTruePositiveCount / BK_predictionBuffer.length;
-        BK_isEstimateValid = true;
-    } else {
-        BK_estimatedTruePositivePercentage = 0;
-        BK_isEstimateValid = false;
-    }
-}
-
-function bkClearPredictionBuffer() {
-    BK_predictionBufferBlockCount = 0;
-    BK_predictionBuffer = [];
-    BK_estimatedTruePositivePercentage = 0;
-}
-
-function bkIncrementBlockCount() {
-    bkAddToPredictionBuffer(1);
-    bkCheckZone();
-}
-
-function bkIncrementPassCount() {
-    bkAddToPredictionBuffer(0);
-    bkCheckZone();
-}
-
-function bkSetZoneAutomatic(isAutomatic) {
-    BK_isZoneAutomatic = isAutomatic;
-}
+const BK_siteSettings = new Map();
+let BK_defaultZone = 'neutral';
+let BK_defaultIsAutomatic = true;
 
 function bkSetDefaultZone(result) {
-    console.log('result');
-    console.log(result);
     if (!result.default_zone || result.default_zone === 'automatic') {
-        bkSetZoneAutomatic(true);
-        BK_zone = 'neutral'
+        BK_defaultIsAutomatic = true;
+        BK_defaultZone = 'neutral';
     } else {
-        bkSetZoneAutomatic(false);
-        BK_zone = result.default_zone;
+        BK_defaultIsAutomatic = false;
+        BK_defaultZone = result.default_zone;
     }
 }
 
-function bkCheckZone() {
-    if (!BK_isEstimateValid) {
-        return;
+function bkGetSiteSettings(pageHost) {
+    if (!pageHost || pageHost === 'undefined') {
+        return { zone: BK_defaultZone, isAutomatic: BK_defaultIsAutomatic };
     }
-    if (!BK_isZoneAutomatic) {
-        return;
+    let settings = BK_siteSettings.get(pageHost);
+    if (!settings) {
+        settings = { zone: BK_defaultZone, isAutomatic: BK_defaultIsAutomatic };
+        BK_siteSettings.set(pageHost, settings);
     }
-    let requestedZone = 'untrusted';
-    if (BK_estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
-        requestedZone = 'trusted';
-    } else if (BK_estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
-        requestedZone = 'neutral';
-    }
-    if (requestedZone != BK_zone) {
-        bkSetZone(requestedZone);
-    }
+    return settings;
 }
 
-
-
-var BK_zoneThreshold = ROC_neutralRoc.threshold;
-var BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
-WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
-var BK_zone = 'neutral';
-function bkSetZone(newZone)
-{
-    WJR_DEBUG && console.log('Zone request to: '+newZone);
-    let didZoneChange = false;
-    switch (newZone) {
+function bkZoneToThreshold(zone) {
+    switch (zone) {
         case 'trusted':
-            BK_zoneThreshold = ROC_trustedRoc.threshold;
-            BK_zonePrecision = rocCalculatePrecision(ROC_trustedRoc);
-            statusSetImageZoneTrusted();
-            BK_zone = newZone;
-            didZoneChange = true;
-            WJR_DEBUG && console.log('Zone is now trusted!');
-            break;
-        case 'neutral':
-            BK_zoneThreshold = ROC_neutralRoc.threshold;
-            BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
-            statusSetImageZoneNeutral();
-            BK_zone = newZone;
-            didZoneChange = true;
-            WJR_DEBUG && console.log('Zone is now neutral!');
-            break;
+            return ROC_trustedRoc.threshold;
         case 'untrusted':
-            BK_zoneThreshold = ROC_untrustedRoc.threshold;
-            BK_zonePrecision = rocCalculatePrecision(ROC_untrustedRoc);
-            statusSetImageZoneUntrusted();
-            BK_zone = newZone;
-            didZoneChange = true;
-            WJR_DEBUG && console.log('Zone is now untrusted!')
-            break;
+            return ROC_untrustedRoc.threshold;
+        default:
+            return ROC_neutralRoc.threshold;
     }
-    if(didZoneChange) {
-        WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
-        bkClearPredictionBuffer();
+}
+
+function bkThresholdToZone(threshold) {
+    if (threshold >= ROC_trustedRoc.threshold) {
+        return 'trusted';
     }
+    if (threshold >= ROC_neutralRoc.threshold) {
+        return 'neutral';
+    }
+    return 'untrusted';
+}
+
+function bkSetZoneForHost(pageHost, newZone) {
+    let settings = bkGetSiteSettings(pageHost);
+    settings.zone = newZone;
+    settings.isAutomatic = false;
+    BK_siteSettings.set(pageHost, settings);
+}
+
+function bkSetZoneAutomaticForHost(pageHost, isAutomatic) {
+    let settings = bkGetSiteSettings(pageHost);
+    settings.isAutomatic = isAutomatic;
+    BK_siteSettings.set(pageHost, settings);
+}
+
+function bkGetZoneForHost(pageHost) {
+    let settings = bkGetSiteSettings(pageHost);
+    if (settings.isAutomatic) {
+        let threshold = bkPickThreshold(pageHost, settings);
+        return bkThresholdToZone(threshold);
+    }
+    return settings.zone;
+}
+
+function bkPickThreshold(pageHost, settings = null) {
+    let resolved = settings ?? bkGetSiteSettings(pageHost);
+    if (resolved.isAutomatic) {
+        return ssSuggestAdaptiveThreshold(
+            pageHost,
+            ROC_neutralRoc.threshold,
+            0.025,
+            ROC_untrustedRoc.threshold,
+            ROC_trustedRoc.threshold
+        );
+    }
+    return bkZoneToThreshold(resolved.zone);
 }
 
 ////////////////////// ZONE END //////////////////////////
@@ -405,7 +415,8 @@ async function bkCrashDetectionWatchdog() {
             requestId: pseudoRequestId,
             mimeType: 'image/jpeg',
             url: pseudoRequestId,
-            threshold: BK_zoneThreshold
+            threshold: bkZoneToThreshold(BK_defaultZone),
+            opaque: { type: 'pseudo' }
         });
         processor.postMessage({
             type: 'ondata',
@@ -577,14 +588,24 @@ async function bkImageListenerNormal(details, mimeType) {
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let processor = bkGetNextProcessor().port;
+    let pageHost = bkExtractRootDomain(bkGetTopmostUrl(details));
+    let contentHost = bkExtractRootDomain(details.url);
+    let threshold = bkPickThreshold(pageHost);
     processor.postMessage({
         type: 'start',
         requestId: details.requestId,
         mimeType: mimeType,
         url: details.url,
-        threshold: BK_zoneThreshold
+        threshold: threshold,
+        opaque: {
+            type: 'normal',
+            pageHost: pageHost,
+            contentHost: contentHost,
+            threshold: threshold
+        }
     });
-    statusStartImageCheck(details.requestId);
+    BK_requestIdToTabId.set(details.requestId, details.tabId);
+    statusStartImageCheck(details.requestId, details.tabId);
 
     filter.ondata = event => {
         if (dataStartTime == null) {
@@ -691,11 +712,20 @@ async function bkBase64ContentListener(details) {
 
     //Choose highest power here because we have many images possibly
     let processor = bkGetNextProcessor().port;
+    let pageHost = bkExtractRootDomain(bkGetTopmostUrl(details));
+    let threshold = bkPickThreshold(pageHost);
     processor.postMessage({
         type: 'b64_start',
         requestId: details.requestId,
-        threshold: BK_zoneThreshold
+        threshold: threshold,
+        opaque: {
+            type: 'b64',
+            pageHost: pageHost,
+            contentHost: pageHost,
+            threshold: threshold
+        }
     });
+    BK_requestIdToTabId.set(details.requestId, details.tabId);
 
     filter.ondata = evt => {
         let str = decoder.decode(evt.data, { stream: true });
@@ -1113,6 +1143,74 @@ if (browser.menus) {
     });
 }
 
+/////////////////////Active Tab Management///////////////////////////
+
+function bkApplyZoneToTab(tabId, zone) {
+    switch (zone) {
+        case 'trusted':
+            statusSetImageZoneTrusted(tabId);
+            break;
+        case 'neutral':
+            statusSetImageZoneNeutral(tabId);
+            break;
+        case 'untrusted':
+            statusSetImageZoneUntrusted(tabId);
+            break;
+    }
+}
+
+function bkUpdateTabVisuals(tabId, tabUrl = null) {
+    if (!tabId) {
+        return;
+    }
+    let apply = url => {
+        if (!url || !url.startsWith('http')) {
+            return;
+        }
+        let pageHost = bkExtractRootDomain(url);
+        let zone = bkGetZoneForHost(pageHost);
+        bkApplyZoneToTab(tabId, zone);
+        statusUpdateVisuals(tabId);
+    };
+    if (tabUrl) {
+        apply(tabUrl);
+        return;
+    }
+    browser.tabs.get(tabId)
+        .then(tab => apply(tab.url))
+        .catch(error => {
+            WJR_DEBUG && console.warn('TAB: Unable to update tab visuals', error);
+        });
+}
+
+function bkUpdateActiveTabVisuals() {
+    browser.tabs.query({ active: true, currentWindow: true })
+        .then(tabs => {
+            if (tabs[0]) {
+                bkUpdateTabVisuals(tabs[0].id, tabs[0].url);
+            }
+        })
+        .catch(error => {
+            WJR_DEBUG && console.warn('TAB: Unable to query active tab', error);
+        });
+}
+
+browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url || changeInfo.status === 'complete') {
+        bkUpdateTabVisuals(tabId, tab.url);
+    }
+});
+
+browser.tabs.onActivated.addListener(activeInfo => {
+    bkUpdateTabVisuals(activeInfo.tabId);
+});
+
+browser.windows.onFocusChanged.addListener(() => {
+    bkUpdateActiveTabVisuals();
+});
+
+bkUpdateActiveTabVisuals();
+
 ////////////////////////Actual Startup//////////////////////////////
 
 function bkRegisterAllCallbacks() {
@@ -1273,18 +1371,41 @@ function bkSetAllLogging(onOrOff) {
     bkBroadcastMessageToProcessors({ "type": "set_all_logging", "value" : onOrOff});
 }
 
+function bkGetPageHostFromMessage(request, sender) {
+    let url = request.pageUrl || request.url || sender?.tab?.url;
+    if (!url) {
+        return 'undefined';
+    }
+    return bkExtractRootDomain(url);
+}
+
 function bkHandleMessage(request, sender, sendResponse) {
     if (request.type == 'setZone') {
-        bkSetZone(request.zone);
+        let pageHost = bkGetPageHostFromMessage(request, sender);
+        bkSetZoneForHost(pageHost, request.zone);
+        if (sender?.tab?.id) {
+            bkUpdateTabVisuals(sender.tab.id);
+        } else {
+            bkUpdateActiveTabVisuals();
+        }
     }
     else if (request.type == 'getZone') {
-        sendResponse({ zone: BK_zone });
+        let pageHost = bkGetPageHostFromMessage(request, sender);
+        sendResponse({ zone: bkGetZoneForHost(pageHost) });
     }
     else if (request.type == 'setZoneAutomatic') {
-        bkSetZoneAutomatic(request.isZoneAutomatic);
+        let pageHost = bkGetPageHostFromMessage(request, sender);
+        bkSetZoneAutomaticForHost(pageHost, request.isZoneAutomatic);
+        if (sender?.tab?.id) {
+            bkUpdateTabVisuals(sender.tab.id);
+        } else {
+            bkUpdateActiveTabVisuals();
+        }
     }
     else if (request.type == 'getZoneAutomatic') {
-        sendResponse({ isZoneAutomatic: BK_isZoneAutomatic });
+        let pageHost = bkGetPageHostFromMessage(request, sender);
+        let settings = bkGetSiteSettings(pageHost);
+        sendResponse({ isZoneAutomatic: settings.isAutomatic });
     }
     else if (request.type == 'getOnOff') {
         sendResponse({ onOff: BK_isEnabled ? 'on' : 'off' });
@@ -1319,9 +1440,6 @@ function bkHandleMessage(request, sender, sendResponse) {
 browser.runtime.onMessage.addListener(bkHandleMessage);
 browser.storage.local.get('default_zone')
     .then(bkSetDefaultZone)
-    .then(() => {
-        bkSetZone(BK_zone);
-    })
     .then(() => {
         bkLoadBackendSettings(); //The loading of the first processor kicks off the rest of initialization
     });

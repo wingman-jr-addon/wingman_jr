@@ -10,13 +10,6 @@ wingman_icon_32_img.onload = function() {
 //Note: checks can occur that fail and do not result in either a block or a pass.
 //Therefore, use block+pass as the total count in certain cases
 
-let STATUS_imageCounts = {
-    'pass' : 0,
-    'block' : 0,
-    'tiny' : 0,
-    'error' : 0
-};
-let STATUS_imageCheckCount = 0;
 let STATUS_openImageFilters = { };
 let STATUS_openImageHighWaterCount = 0;
 
@@ -35,21 +28,42 @@ const STATUS_ICON_SIZE = 32;
 let STATUS_iconCanvas = document.createElement('canvas');
 STATUS_iconCanvas.width = STATUS_ICON_SIZE;
 STATUS_iconCanvas.height = STATUS_ICON_SIZE;
-let STATUS_zoneFill = 'white';
-let STATUS_zoneFillOffset = 'white';
-
-let STATUS_lastZoneFill = '';
-let STATUS_lastProgressWidth = 0;
-let STATUS_lastIsVideoInProgress = true;
-let STATUS_lastIsVideoBlockShown = true;
-let STATUS_lastVideoProgressCounter = -1;
+const STATUS_defaultZoneFill = '#CCCCCC';
+const STATUS_defaultZoneFillOffset = '#AAAAAA';
+const STATUS_tabState = new Map();
 
 const STATUS_blockFadeoutColors = [
     'rgba(255,0,0,1.0)',
     'rgba(255,0,0,1.0)'
 ];
 
-function statusRegenerateIcon() {
+function statusGetTabState(tabId) {
+    let key = tabId ?? 'global';
+    let state = STATUS_tabState.get(key);
+    if (!state) {
+        state = {
+            imageCounts: {
+                pass: 0,
+                block: 0,
+                tiny: 0,
+                error: 0
+            },
+            imageCheckCount: 0,
+            zoneFill: STATUS_defaultZoneFill,
+            zoneFillOffset: STATUS_defaultZoneFillOffset,
+            lastZoneFill: '',
+            lastProgressWidth: 0,
+            lastIsVideoInProgress: true,
+            lastIsVideoBlockShown: true,
+            lastVideoProgressCounter: -1
+        };
+        STATUS_tabState.set(key, state);
+    }
+    return state;
+}
+
+function statusRegenerateIcon(tabId) {
+    let state = statusGetTabState(tabId);
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
     if(STATUS_openImageHighWaterCount > 0) {
@@ -65,26 +79,26 @@ function statusRegenerateIcon() {
 
     // TODO reinstate STATUS_videoProgressCounter == STATUS_lastVideoProgressCounter
     // if video progress is ever directly used
-    if(STATUS_zoneFill == STATUS_lastZoneFill &&
-        currentProgressWidth == STATUS_lastProgressWidth &&
-        isVideoInProgress == STATUS_lastIsVideoInProgress &&
-        isVideoBlockShown == STATUS_lastIsVideoBlockShown) {
+    if(state.zoneFill == state.lastZoneFill &&
+        currentProgressWidth == state.lastProgressWidth &&
+        isVideoInProgress == state.lastIsVideoInProgress &&
+        isVideoBlockShown == state.lastIsVideoBlockShown) {
         return;
     }
 
     // 2. Save current state to last state
-    STATUS_lastZoneFill = STATUS_zoneFill;
-    STATUS_lastProgressWidth = currentProgressWidth;
-    STATUS_lastIsVideoInProgress = isVideoInProgress;
-    STATUS_lastIsVideoBlockShown = isVideoBlockShown;
-    STATUS_lastVideoProgressCounter = STATUS_videoProgressCounter;
+    state.lastZoneFill = state.zoneFill;
+    state.lastProgressWidth = currentProgressWidth;
+    state.lastIsVideoInProgress = isVideoInProgress;
+    state.lastIsVideoBlockShown = isVideoBlockShown;
+    state.lastVideoProgressCounter = STATUS_videoProgressCounter;
 
     // 3. Actually generate and set new icon
     let ctx = STATUS_iconCanvas.getContext('2d');
     ctx.clearRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
 
     // Zone background
-    ctx.fillStyle = STATUS_zoneFill;
+    ctx.fillStyle = state.zoneFill;
     ctx.fillRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
 
     // Icon
@@ -92,12 +106,12 @@ function statusRegenerateIcon() {
 
     // Image progress
     if(currentProgressWidth >= 0) {
-        ctx.fillStyle = STATUS_zoneFillOffset;
+        ctx.fillStyle = state.zoneFillOffset;
         ctx.fillRect(0, 24, currentProgressWidth, 8);
     }
 
     if(isVideoInProgress || isVideoBlockShown) {
-        ctx.fillStyle = isVideoBlockShown ? 'white' : STATUS_zoneFillOffset;
+        ctx.fillStyle = isVideoBlockShown ? 'white' : state.zoneFillOffset;
         ctx.fillRect(24, 24, 8, 8);
 
         ctx.fillStyle = isVideoBlockShown ? STATUS_blockFadeoutColors[stepsSinceLastBlock] : 'black';
@@ -107,7 +121,7 @@ function statusRegenerateIcon() {
     }
 
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
-    browser.browserAction.setIcon({ imageData: imageData });
+    browser.browserAction.setIcon({ imageData: imageData, tabId: tabId ?? undefined });
 }
 
 
@@ -120,22 +134,25 @@ function statusOnLoaded() {
     browser.browserAction.setTitle({title: "Wingman Jr."});
 }
 
-function statusSetImageZoneTrusted() {
-    STATUS_zoneFill = '#88CC88';
-    STATUS_zoneFillOffset = '#66AA66';
-    statusRegenerateIcon();
+function statusSetImageZoneTrusted(tabId) {
+    let state = statusGetTabState(tabId);
+    state.zoneFill = '#88CC88';
+    state.zoneFillOffset = '#66AA66';
+    statusRegenerateIcon(tabId);
 }
 
-function statusSetImageZoneNeutral() {
-    STATUS_zoneFill = '#CCCCCC';
-    STATUS_zoneFillOffset = '#AAAAAA';
-    statusRegenerateIcon();
+function statusSetImageZoneNeutral(tabId) {
+    let state = statusGetTabState(tabId);
+    state.zoneFill = '#CCCCCC';
+    state.zoneFillOffset = '#AAAAAA';
+    statusRegenerateIcon(tabId);
 }
 
-function statusSetImageZoneUntrusted() {
-    STATUS_zoneFill = '#DD9999';
-    STATUS_zoneFillOffset = '#AA6666';
-    statusRegenerateIcon();
+function statusSetImageZoneUntrusted(tabId) {
+    let state = statusGetTabState(tabId);
+    state.zoneFill = '#DD9999';
+    state.zoneFillOffset = '#AA6666';
+    statusRegenerateIcon(tabId);
 }
 
 function statusGetOpenVideoCount() {
@@ -169,37 +186,42 @@ function statusGetOpenImageCount() {
     return Object.keys(STATUS_openImageFilters).length;
 }
 
-function statusStartImageCheck(requestId) {
+function statusStartImageCheck(requestId, tabId) {
     STATUS_openImageFilters[requestId] = requestId;
     let currentLength = statusGetOpenImageCount();
     if(currentLength > STATUS_openImageHighWaterCount) {
         STATUS_openImageHighWaterCount = currentLength;
     }
+    statusRegenerateIcon(tabId);
 }
 
-function statusCompleteImageCheck(requestId, status) {
+function statusCompleteImageCheck(requestId, status, tabId) {
     delete STATUS_openImageFilters[requestId];
-    STATUS_imageCounts[status]++;
-    STATUS_imageCheckCount++;
+    let state = statusGetTabState(tabId);
+    state.imageCounts[status]++;
+    state.imageCheckCount++;
     let currentLength = statusGetOpenImageCount();
     if(currentLength == 0) {
         STATUS_openImageHighWaterCount = 0;
     }
-    statusUpdateVisuals();
+    statusUpdateVisuals(tabId);
 }
 
-function statusUpdateVisuals() {
-    let totalBlockCount = STATUS_imageCounts['block'] + STATUS_videoCounts['block'];
+function statusUpdateVisuals(tabId) {
+    let state = statusGetTabState(tabId);
+    let totalBlockCount = state.imageCounts['block'] + STATUS_videoCounts['block'];
     if(totalBlockCount > 0) {
         //MDN notes we can only fit "about 4" characters here
         let txt = (totalBlockCount < 1000) ? totalBlockCount+'' : '999+';
-        browser.browserAction.setBadgeText({ "text": txt });
+        browser.browserAction.setBadgeText({ "text": txt, tabId: tabId ?? undefined });
+    } else {
+        browser.browserAction.setBadgeText({ "text": '', tabId: tabId ?? undefined });
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'
+    browser.browserAction.setTitle({ title: 'Blocked '+state.imageCounts['block']+'/'+state.imageCheckCount+' images\r\n'
         + '               ' + STATUS_videoCounts['block']+'/'+STATUS_videoCheckCount+' videos\r\n'
-        + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });
+        + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n'), tabId: tabId ?? undefined });
 
-    statusRegenerateIcon();
+    statusRegenerateIcon(tabId);
 }
