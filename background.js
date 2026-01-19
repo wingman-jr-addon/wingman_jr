@@ -323,6 +323,14 @@ function bkGetZoneForHost(pageHost) {
 function bkPickThreshold(pageHost, settings = null) {
     let resolved = settings ?? bkGetSiteSettings(pageHost);
     if (resolved.isAutomatic) {
+        const burstOverride = ssGetBurstOverrideThreshold(pageHost, ROC_untrustedRoc.threshold);
+        if (burstOverride !== null && burstOverride !== undefined) {
+            console.warn('[BK][BURST] threshold_override ' + JSON.stringify({
+                pageHost: pageHost,
+                threshold: burstOverride
+            }));
+            return burstOverride;
+        }
         return ssSuggestAdaptiveThreshold(
             pageHost,
             ROC_neutralRoc.threshold,
