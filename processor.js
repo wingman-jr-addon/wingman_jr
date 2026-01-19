@@ -274,10 +274,6 @@ function procScoreToStr(sqrxrScore) {
         sqrxrScore[1][3].toFixed(2)+')';
 }
 
-function procGetRocScore(sqrxrScore) {
-    return sqrxrScore?.[0]?.[0] ?? null;
-}
-
 function procIsSafe(sqrxrScore, threshold) {
     return sqrxrScore[0][0] < threshold;
 }
@@ -298,7 +294,6 @@ async function procPerformFiltering(entry) {
         requestId: entry.requestId,
         imageBytes: null,
         result: null,
-        rocScore: null,
         opaque: entry.opaque
     };
     let byteCount = 0;
@@ -317,11 +312,11 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
-                result.rocScore = procGetRocScore(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
+                    result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
@@ -426,12 +421,10 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     let sqrxrScore = await procPredict(img);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
-                    let rocScore = procGetRocScore(sqrxrScore);
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
-                            rocScore: rocScore,
                             requestId: b64Filter.requestId+'_'+imageId,
                             opaque: b64Filter.opaque
                         });
@@ -440,7 +433,6 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'block',
-                            rocScore: rocScore,
                             requestId: b64Filter.requestId+'_'+imageId,
                             opaque: b64Filter.opaque
                         });
@@ -464,7 +456,6 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     outputPort.postMessage({
                         type:'stat',
                         result:'tiny',
-                        rocScore: null,
                         requestId: b64Filter.requestId+'_'+imageId,
                         opaque: b64Filter.opaque
                     });
@@ -476,7 +467,6 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                 outputPort.postMessage({
                     type:'stat',
                     result:'error',
-                    rocScore: null,
                     requestId: b64Filter.requestId+'_'+imageId,
                     opaque: b64Filter.opaque
                 });
@@ -546,7 +536,6 @@ async function procCheckProcess() {
             PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
-                rocScore: result.rocScore,
                 requestId: toProcess.requestId,
                 opaque: result.opaque
             });
@@ -782,7 +771,6 @@ async function procOnPortMessage(m) {
             PROC_port.postMessage({
                 type:'stat',
                 result: 'error',
-                rocScore: null,
                 requestId: m.requestId,
                 opaque: failedRequest?.opaque
             });

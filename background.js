@@ -196,6 +196,20 @@ function bkOnProcessorMessage(m) {
                 filter.close();
                 delete BK_openFilters[m.requestId];
                 WJR_DEBUG && console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
+                if (m.opaque && m.opaque.type !== 'pseudo' && m.sqrxrScore) {
+                    ssAddRequestRecord({
+                        timestamp: Date.now(),
+                        pageHost: m.opaque.pageHost,
+                        contentHost: m.opaque.contentHost,
+                        threshold: m.opaque.threshold,
+                        rocScore: m.sqrxrScore[0][0],
+                        modelVersion: ssGetModelVersion()
+                    });
+                    let tabId = bkGetTabIdForRequest(m.requestId);
+                    if (tabId !== null) {
+                        bkUpdateTabVisuals(tabId);
+                    }
+                }
             }
         }
             break;
@@ -224,19 +238,6 @@ function bkOnProcessorMessage(m) {
             let tabId = bkGetTabIdForRequest(m.requestId);
             statusCompleteImageCheck(m.requestId, m.result, tabId);
             BK_requestIdToTabId.delete(m.requestId);
-            if (m.opaque && m.opaque.type !== 'pseudo') {
-                ssAddRequestRecord({
-                    timestamp: Date.now(),
-                    pageHost: m.opaque.pageHost,
-                    contentHost: m.opaque.contentHost,
-                    threshold: m.opaque.threshold,
-                    rocScore: m.rocScore,
-                    modelVersion: ssGetModelVersion()
-                });
-                if (tabId !== null) {
-                    bkUpdateTabVisuals(tabId);
-                }
-            }
         }
             break;
         case 'registration': {
