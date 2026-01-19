@@ -42,7 +42,7 @@
           "silent_mode.js",
           "processor.js",
           "processor_backgroundstartup.js",
-          "media_stats_store.js",
+          "site_store.js",
 
           "background.js",
           "background_video.js",

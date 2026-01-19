@@ -8,7 +8,7 @@ function ssGetModelVersion() {
 }
 
 function ssAddRequestRecord(record) {
-    if (!record || record.rocScore === null || record.rocScore === undefined) {
+    if (!record || record.linearScore === null || record.linearScore === undefined) {
         return;
     }
     const entry = {
@@ -16,7 +16,7 @@ function ssAddRequestRecord(record) {
         pageHost: record.pageHost,
         contentHost: record.contentHost,
         threshold: record.threshold,
-        rocScore: record.rocScore,
+        linearScore: record.linearScore,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION,
         key: SS_nextKey++
     };
@@ -30,7 +30,7 @@ function ssGetScoresForPageHost(pageHost) {
     const scores = [];
     for (let i = 0; i < SS_records.length; i++) {
         if (SS_records[i].pageHost === pageHost) {
-            scores.push(SS_records[i].rocScore);
+            scores.push(SS_records[i].linearScore);
         }
     }
     return scores;
@@ -55,8 +55,8 @@ function ssSuggestAdaptiveThreshold(pageHost, fallbackThreshold, fallbackStdDev,
     }
     const stddev = Math.sqrt(varianceSum / Math.max(scores.length - 1, 1));
 
-    const scaleFactor = 2 + 30.0 / Math.pow(scores.length, 1.5);
-    const pushFromMean = Math.max(stddev * scaleFactor, fallbackStdDev * 3);
+    const scaleFactor = 1 + 8.0 / Math.pow(scores.length, 0.75);
+    const pushFromMean = Math.max(stddev * scaleFactor, fallbackStdDev * 2);
     const suggested = mean + pushFromMean;
 
     let threshold = Math.min(suggested, maxThreshold);

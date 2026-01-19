@@ -225,12 +225,13 @@ function bkOnProcessorMessage(m) {
             statusCompleteImageCheck(m.requestId, m.result, tabId);
             BK_requestIdToTabId.delete(m.requestId);
             if (m.opaque && m.opaque.type !== 'pseudo') {
+                let linearScore = rocEstimateLinearScoreAtThreshold(m.rocScore);
                 ssAddRequestRecord({
                     timestamp: Date.now(),
                     pageHost: m.opaque.pageHost,
                     contentHost: m.opaque.contentHost,
                     threshold: m.opaque.threshold,
-                    rocScore: m.rocScore,
+                    linearScore: linearScore,
                     modelVersion: ssGetModelVersion()
                 });
                 if (tabId !== null) {

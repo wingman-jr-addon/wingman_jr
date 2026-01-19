@@ -13,6 +13,37 @@ function rocFindConfidence(threshold) {
     return 1.0-bestMatch.tpr;
 }
 
+// Converts a raw ROC threshold into an approximately linear "risk" score.
+// We approximate balanced error rate: (FPR + FNR) / 2 using linear interpolation
+// across adjacent ROC entries to smooth between sample thresholds.
+function rocEstimateLinearScoreAtThreshold(threshold) {
+    if (threshold === null || threshold === undefined) {
+        return null;
+    }
+    if (!ROC_VALUES || ROC_VALUES.length === 0) {
+        return null;
+    }
+    let lower = ROC_VALUES[ROC_VALUES.length - 1];
+    let upper = ROC_VALUES[0];
+    for (let i = 0; i < ROC_VALUES.length; i++) {
+        if (ROC_VALUES[i].threshold < threshold) {
+            lower = ROC_VALUES[i];
+            upper = ROC_VALUES[Math.max(i - 1, 0)];
+            break;
+        }
+    }
+    if (upper.threshold === lower.threshold) {
+        let fpr = lower.fpr;
+        let fnr = 1.0 - lower.tpr;
+        return (fpr + fnr) / 2.0;
+    }
+    let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
+    let fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
+    let tpr = lower.tpr + (upper.tpr - lower.tpr) * ratio;
+    let fnr = 1.0 - tpr;
+    return (fpr + fnr) / 2.0;
+}
+
 function rocFindRocEntryByFpr(desiredFPR) {
     let bestMatch = ROC_VALUES[0];
     for(let i=ROC_VALUES.length-1; i>=0; i--) {
