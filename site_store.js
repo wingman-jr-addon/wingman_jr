@@ -8,7 +8,11 @@ function ssGetModelVersion() {
 }
 
 function ssAddRequestRecord(record) {
-    if (!record || record.linearScore === null || record.linearScore === undefined) {
+    if (!record || record.rocScore === null || record.rocScore === undefined) {
+        return;
+    }
+    const linearScore = rocEstimateLinearScoreAtThreshold(record.rocScore);
+    if (linearScore === null || linearScore === undefined) {
         return;
     }
     const entry = {
@@ -16,7 +20,7 @@ function ssAddRequestRecord(record) {
         pageHost: record.pageHost,
         contentHost: record.contentHost,
         threshold: record.threshold,
-        linearScore: record.linearScore,
+        linearScore: linearScore,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION,
         key: SS_nextKey++
     };
