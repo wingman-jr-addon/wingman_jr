@@ -15,6 +15,15 @@ function ssAddRequestRecord(record) {
     if (linearScore === null || linearScore === undefined) {
         return;
     }
+    console.info('[SS] record_input ' + JSON.stringify({
+        timestamp: record.timestamp ?? Date.now(),
+        pageHost: record.pageHost,
+        contentHost: record.contentHost,
+        threshold: record.threshold,
+        rocScore: record.rocScore,
+        linearScore: linearScore,
+        modelVersion: record.modelVersion ?? SS_MODEL_VERSION
+    }));
     const entry = {
         timestamp: record.timestamp ?? Date.now(),
         pageHost: record.pageHost,
@@ -37,12 +46,21 @@ function ssGetScoresForPageHost(pageHost) {
             scores.push(SS_records[i].linearScore);
         }
     }
+    console.info('[SS] scores_for_host ' + JSON.stringify({
+        pageHost: pageHost,
+        count: scores.length
+    }));
     return scores;
 }
 
 function ssSuggestAdaptiveThreshold(pageHost, fallbackThreshold, fallbackStdDev, minThreshold, maxThreshold) {
     const scores = ssGetScoresForPageHost(pageHost);
     if (scores.length < 50) {
+        console.info('[SS] threshold_fallback ' + JSON.stringify({
+            pageHost: pageHost,
+            sampleCount: scores.length,
+            fallbackThreshold: fallbackThreshold
+        }));
         return fallbackThreshold;
     }
 
@@ -65,5 +83,17 @@ function ssSuggestAdaptiveThreshold(pageHost, fallbackThreshold, fallbackStdDev,
 
     let threshold = Math.min(suggested, maxThreshold);
     threshold = Math.max(threshold, minThreshold);
+    console.info('[SS] threshold_calc ' + JSON.stringify({
+        pageHost: pageHost,
+        sampleCount: scores.length,
+        mean: mean,
+        stddev: stddev,
+        scaleFactor: scaleFactor,
+        pushFromMean: pushFromMean,
+        suggested: suggested,
+        minThreshold: minThreshold,
+        maxThreshold: maxThreshold,
+        threshold: threshold
+    }));
     return threshold;
 }
