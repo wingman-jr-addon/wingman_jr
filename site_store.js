@@ -2,6 +2,105 @@ const SS_MAX_RECORDS = 10000;
 const SS_MODEL_VERSION = 'SQRXR112';
 const SS_records = [];
 let SS_nextKey = 1;
+const SS_BURST_BUFFER_SIZE = 30;
+const SS_BURST_HIGH_RISK_LINEAR = 0.6;
+const SS_BURST_SPIKE_RATIO = 0.25;
+const SS_BURST_COOLDOWN_REQUESTS = 50;
+const SS_BURST_FAST_ALPHA = 0.35;
+const SS_BURST_SLOW_ALPHA = 0.05;
+const SS_BURST_SLOW_FAST_DELTA = 0.1;
+const SS_burstState = new Map();
+
+function ssGetBurstState(pageHost) {
+    if (!SS_burstState.has(pageHost)) {
+        SS_burstState.set(pageHost, {
+            scores: new Array(SS_BURST_BUFFER_SIZE),
+            index: 0,
+            size: 0,
+            highRiskCount: 0,
+            cooldownRemaining: 0,
+            fastEma: null,
+            slowEma: null
+        });
+    }
+    return SS_burstState.get(pageHost);
+}
+
+function ssUpdateBurstMetrics(pageHost, linearScore) {
+    if (!pageHost) {
+        return;
+    }
+    const state = ssGetBurstState(pageHost);
+    if (state.size === SS_BURST_BUFFER_SIZE) {
+        const oldScore = state.scores[state.index];
+        if (oldScore > SS_BURST_HIGH_RISK_LINEAR) {
+            state.highRiskCount -= 1;
+        }
+    } else {
+        state.size += 1;
+    }
+
+    state.scores[state.index] = linearScore;
+    if (linearScore > SS_BURST_HIGH_RISK_LINEAR) {
+        state.highRiskCount += 1;
+    }
+    state.index = (state.index + 1) % SS_BURST_BUFFER_SIZE;
+
+    if (state.fastEma === null) {
+        state.fastEma = linearScore;
+    } else {
+        state.fastEma = SS_BURST_FAST_ALPHA * linearScore + (1 - SS_BURST_FAST_ALPHA) * state.fastEma;
+    }
+    if (state.slowEma === null) {
+        state.slowEma = linearScore;
+    } else {
+        state.slowEma = SS_BURST_SLOW_ALPHA * linearScore + (1 - SS_BURST_SLOW_ALPHA) * state.slowEma;
+    }
+
+    if (state.cooldownRemaining > 0) {
+        state.cooldownRemaining -= 1;
+        if (state.cooldownRemaining === 0) {
+            console.warn('[SS][BURST] exit_cooldown ' + JSON.stringify({
+                pageHost: pageHost,
+                highRiskFraction: state.size ? state.highRiskCount / state.size : 0,
+                bufferSize: state.size,
+                fastEma: state.fastEma,
+                slowEma: state.slowEma
+            }));
+        }
+    }
+
+    if (state.size < SS_BURST_BUFFER_SIZE) {
+        return;
+    }
+
+    const highRiskFraction = state.highRiskCount / state.size;
+    const fastSlowDelta = state.fastEma - state.slowEma;
+    if (highRiskFraction >= SS_BURST_SPIKE_RATIO
+        && fastSlowDelta >= SS_BURST_SLOW_FAST_DELTA
+        && state.cooldownRemaining === 0) {
+        state.cooldownRemaining = SS_BURST_COOLDOWN_REQUESTS;
+        console.warn('[SS][BURST] enter_cooldown ' + JSON.stringify({
+            pageHost: pageHost,
+            highRiskFraction: highRiskFraction,
+            bufferSize: state.size,
+            cooldownRequests: SS_BURST_COOLDOWN_REQUESTS,
+            fastEma: state.fastEma,
+            slowEma: state.slowEma,
+            fastSlowDelta: fastSlowDelta,
+            fastAlpha: SS_BURST_FAST_ALPHA,
+            slowAlpha: SS_BURST_SLOW_ALPHA
+        }));
+    }
+}
+
+function ssGetBurstOverrideThreshold(pageHost, untrustedThreshold) {
+    const state = SS_burstState.get(pageHost);
+    if (!state || state.cooldownRemaining === 0) {
+        return null;
+    }
+    return untrustedThreshold;
+}
 
 function ssGetModelVersion() {
     return SS_MODEL_VERSION;
@@ -37,6 +136,7 @@ function ssAddRequestRecord(record) {
     if (SS_records.length > SS_MAX_RECORDS) {
         SS_records.shift();
     }
+    ssUpdateBurstMetrics(entry.pageHost, entry.linearScore);
 }
 
 function ssGetScoresForPageHost(pageHost) {
