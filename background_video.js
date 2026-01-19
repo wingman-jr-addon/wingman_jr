@@ -438,7 +438,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     return details;
 }
 
-function vidCheckCreateDashGroup(url) {
+function vidCheckCreateDashGroup(url, threshold) {
     let dashGroup = VID_DASH_GROUPS[url];
     if(dashGroup === undefined) {
         dashGroup = {
@@ -447,10 +447,13 @@ function vidCheckCreateDashGroup(url) {
             actions: [],
             fmp4: null,
             webm: null,
+            threshold: threshold,
             scanCount: 0,
             blockCount: 0
         };
         VID_DASH_GROUPS[url] = dashGroup;
+    } else if (dashGroup.threshold === undefined && threshold !== undefined) {
+        dashGroup.threshold = threshold;
     }
     return dashGroup;
 }
@@ -495,6 +498,9 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
 
     let dashGroupPrecheck = VID_DASH_GROUPS[url];
     if (dashGroupPrecheck !== undefined) {
+        if (dashGroupPrecheck.threshold === undefined) {
+            dashGroupPrecheck.threshold = threshold;
+        }
         if(dashGroupPrecheck.status == 'pass') {
             console.warn(`DASHVMP4: Already passed for request id ${details.requestId} range ${range.start}-${range.end} with original request ${dashGroupPrecheck.startRequestId} for URL ${url}`);
             dashGroupPrecheck.actions.push({ requestId: details.requestId, range: range, action: 'precheck-pass'});
@@ -548,7 +554,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
             
             if(range.start == 0) {
                 WJR_DEBUG && console.debug(`DASHVMP4: New FMP4 for ${details.requestId} at${url}`);
-                let dashGroup = vidCheckCreateDashGroup(url);
+                let dashGroup = vidCheckCreateDashGroup(url, threshold);
                 dashGroup.startRequestId = details.requestId;
 
                 let fullBuffer = vidConcatBuffersToUint8Array(buffers);
@@ -647,6 +653,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 statusCompleteVideoCheck(details.requestId, status);
                 return;
             }
+            let scanThreshold = dashGroup.threshold ?? threshold;
             let scanResults = await vidPerformVideoScan(
                 processor,
                 videoChainId,
@@ -655,7 +662,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 details.url,
                 details.type,
                 scanBuffers,
-                threshold,
+                scanThreshold,
                 scanStart,
                 scanStep,
                 effectiveScanMaxSteps,
@@ -709,5 +716,4 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
     }
     return details;
 }
-
 
