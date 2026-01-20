@@ -17,10 +17,10 @@ function rocFindConfidence(threshold) {
 // We interpolate FPR for the given threshold, then map it through a piecewise
 // linear score in log10(FPR) space anchored to trusted/neutral/untrusted FPRs.
 function rocMapFprToScore(fpr) {
-    const fT = 0.004;
-    const fN = 0.015;
-    const fU = 0.10;
-    const fMax = 0.5;
+    const fT = ROC_trustedRoc?.fpr ?? 0.004;
+    const fN = ROC_neutralRoc?.fpr ?? 0.015;
+    const fU = ROC_untrustedRoc?.fpr ?? 0.10;
+    const fMax = 1.0;
     const scoreTrusted = 20;
     const scoreNeutral = 50;
     const scoreUntrusted = 80;
@@ -31,7 +31,7 @@ function rocMapFprToScore(fpr) {
     if (fpr <= fT) {
         return minScore;
     }
-    if (fpr >= fMax) {
+    if (fpr >= fMax || fMax <= fU) {
         return maxScore;
     }
 
@@ -39,6 +39,7 @@ function rocMapFprToScore(fpr) {
     const xT = Math.log10(fT);
     const xN = Math.log10(fN);
     const xU = Math.log10(fU);
+    const xMax = Math.log10(fMax);
 
     if (fpr <= fN) {
         let t = (x - xT) / (xN - xT);
@@ -48,7 +49,6 @@ function rocMapFprToScore(fpr) {
         let t = (x - xN) / (xU - xN);
         return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
     }
-    const xMax = Math.log10(fMax);
     let t = (x - xU) / (xMax - xU);
     return Math.min(maxScore, Math.max(minScore, scoreUntrusted + (maxScore - scoreUntrusted) * t));
 }
@@ -60,12 +60,13 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
     if (!ROC_VALUES || ROC_VALUES.length === 0) {
         return null;
     }
-    let lower = ROC_VALUES[ROC_VALUES.length - 1];
-    let upper = ROC_VALUES[0];
-    for (let i = 0; i < ROC_VALUES.length; i++) {
-        if (ROC_VALUES[i].threshold < threshold) {
-            lower = ROC_VALUES[i];
-            upper = ROC_VALUES[Math.max(i - 1, 0)];
+    const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
+    let lower = values[values.length - 1];
+    let upper = values[0];
+    for (let i = 0; i < values.length; i++) {
+        if (values[i].threshold < threshold) {
+            lower = values[i];
+            upper = values[Math.max(i - 1, 0)];
             break;
         }
     }

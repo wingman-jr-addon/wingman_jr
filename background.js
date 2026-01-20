@@ -1449,12 +1449,6 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkRememberRevealUrl(request.url);
         sendResponse({ ok: true });
     }
-    else if (request.type == 'debugDumpSiteStore') {
-        sendResponse({
-            ok: true,
-            dump: ssDebugDump(request.limit ?? 200, request.pageHost ?? null)
-        });
-    }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
 browser.storage.local.get('default_zone')
