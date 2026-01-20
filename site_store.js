@@ -6,6 +6,7 @@ const SS_BURST_BUFFER_SIZE = 30;
 const SS_BURST_HIGH_RISK_LINEAR = 85;
 const SS_BURST_SPIKE_RATIO = 0.35;
 const SS_BURST_COOLDOWN_REQUESTS = 30;
+const SS_BURST_BLOCK_WINDOW_REQUESTS = 40;
 const SS_BURST_FAST_ALPHA = 0.25;
 const SS_BURST_SLOW_ALPHA = 0.05;
 const SS_BURST_SLOW_FAST_DELTA = 7.5;
@@ -19,6 +20,7 @@ function ssGetBurstState(pageHost) {
             size: 0,
             highRiskCount: 0,
             cooldownRemaining: 0,
+            blockWindowRemaining: 0,
             fastEma: null,
             slowEma: null
         });
@@ -69,6 +71,9 @@ function ssUpdateBurstMetrics(pageHost, linearScore) {
             }));
         }
     }
+    if (state.blockWindowRemaining > 0) {
+        state.blockWindowRemaining -= 1;
+    }
 
     if (state.size < SS_BURST_BUFFER_SIZE) {
         return;
@@ -78,6 +83,7 @@ function ssUpdateBurstMetrics(pageHost, linearScore) {
     const fastSlowDelta = state.fastEma - state.slowEma;
     if (highRiskFraction >= SS_BURST_SPIKE_RATIO
         && fastSlowDelta >= SS_BURST_SLOW_FAST_DELTA
+        && state.blockWindowRemaining > 0
         && state.cooldownRemaining === 0) {
         state.cooldownRemaining = SS_BURST_COOLDOWN_REQUESTS;
         console.warn('[SS][BURST] enter_cooldown ' + JSON.stringify({
@@ -105,6 +111,14 @@ function ssGetBurstOverrideThreshold(pageHost, untrustedThreshold) {
 function ssIsBurstActive(pageHost) {
     const state = SS_burstState.get(pageHost);
     return !!(state && state.cooldownRemaining > 0);
+}
+
+function ssNoteBurstBlock(pageHost) {
+    if (!pageHost) {
+        return;
+    }
+    const state = ssGetBurstState(pageHost);
+    state.blockWindowRemaining = SS_BURST_BLOCK_WINDOW_REQUESTS;
 }
 
 function ssGetModelVersion() {

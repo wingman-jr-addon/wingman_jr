@@ -235,6 +235,9 @@ function bkOnProcessorMessage(m) {
             break;
         case 'stat': {
             WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
+            if (m.result === 'block' && m.opaque && m.opaque.pageHost) {
+                ssNoteBurstBlock(m.opaque.pageHost);
+            }
             let tabId = bkGetTabIdForRequest(m.requestId);
             statusCompleteImageCheck(m.requestId, m.result, tabId);
             BK_requestIdToTabId.delete(m.requestId);
