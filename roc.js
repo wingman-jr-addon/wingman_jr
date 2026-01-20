@@ -61,12 +61,12 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
         return null;
     }
     const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
-    let lower = values[values.length - 1];
     let upper = values[0];
-    for (let i = 0; i < values.length; i++) {
-        if (values[i].threshold < threshold) {
-            lower = values[i];
-            upper = values[Math.max(i - 1, 0)];
+    let lower = values[values.length - 1];
+    for (let i = 0; i < values.length - 1; i++) {
+        if (values[i].threshold >= threshold && threshold >= values[i + 1].threshold) {
+            upper = values[i];
+            lower = values[i + 1];
             break;
         }
     }
@@ -86,20 +86,34 @@ function rocEstimateFprAtThreshold(threshold) {
         return null;
     }
     const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
-    let lower = values[values.length - 1];
     let upper = values[0];
-    for (let i = 0; i < values.length; i++) {
-        if (values[i].threshold < threshold) {
-            lower = values[i];
-            upper = values[Math.max(i - 1, 0)];
+    let lower = values[values.length - 1];
+    for (let i = 0; i < values.length - 1; i++) {
+        if (values[i].threshold >= threshold && threshold >= values[i + 1].threshold) {
+            upper = values[i];
+            lower = values[i + 1];
             break;
         }
     }
     if (upper.threshold === lower.threshold) {
+        WJR_DEBUG && console.info('ROC: fpr estimate (exact)', {
+            threshold: threshold,
+            upper: upper,
+            lower: lower,
+            fpr: lower.fpr
+        });
         return lower.fpr;
     }
     let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
-    return lower.fpr + (upper.fpr - lower.fpr) * ratio;
+    let fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
+    WJR_DEBUG && console.info('ROC: fpr estimate (interp)', {
+        threshold: threshold,
+        upper: upper,
+        lower: lower,
+        ratio: ratio,
+        fpr: fpr
+    });
+    return fpr;
 }
 
 // Inverse lookup: pick the ROC threshold that best matches a target linear score.
