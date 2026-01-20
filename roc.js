@@ -78,6 +78,30 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
     return rocMapFprToScore(fpr);
 }
 
+function rocEstimateFprAtThreshold(threshold) {
+    if (threshold === null || threshold === undefined) {
+        return null;
+    }
+    if (!ROC_VALUES || ROC_VALUES.length === 0) {
+        return null;
+    }
+    const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
+    let lower = values[values.length - 1];
+    let upper = values[0];
+    for (let i = 0; i < values.length; i++) {
+        if (values[i].threshold < threshold) {
+            lower = values[i];
+            upper = values[Math.max(i - 1, 0)];
+            break;
+        }
+    }
+    if (upper.threshold === lower.threshold) {
+        return lower.fpr;
+    }
+    let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
+    return lower.fpr + (upper.fpr - lower.fpr) * ratio;
+}
+
 // Inverse lookup: pick the ROC threshold that best matches a target linear score.
 function rocFindThresholdForLinearScore(targetLinearScore) {
     if (targetLinearScore === null || targetLinearScore === undefined) {

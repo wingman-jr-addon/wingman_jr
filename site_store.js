@@ -160,6 +160,7 @@ function ssAddRequestRecord(record) {
         return;
     }
     const linearScore = rocEstimateLinearScoreAtThreshold(record.rocScore);
+    const estimatedFpr = rocEstimateFprAtThreshold(record.rocScore);
     if (linearScore === null || linearScore === undefined) {
         return;
     }
@@ -170,6 +171,7 @@ function ssAddRequestRecord(record) {
         threshold: record.threshold,
         rocScore: record.rocScore,
         linearScore: linearScore,
+        estimatedFpr: estimatedFpr,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION
     }));
     const entry = {
@@ -178,6 +180,7 @@ function ssAddRequestRecord(record) {
         contentHost: record.contentHost,
         threshold: record.threshold,
         linearScore: linearScore,
+        estimatedFpr: estimatedFpr,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION,
         key: SS_nextKey++
     };
