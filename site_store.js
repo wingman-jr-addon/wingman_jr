@@ -151,6 +151,26 @@ function ssDebugDump(limit = 200, pageHost = null) {
     return { records, burst };
 }
 
+function ssDebugScoreSnapshot(limit = 50, pageHost = null) {
+    const sliceLimit = Math.max(0, Math.min(limit, SS_records.length));
+    let records = SS_records.slice(-sliceLimit);
+    if (pageHost) {
+        records = records.filter(entry => entry.pageHost === pageHost);
+    }
+    return records.map(entry => ({
+        timestamp: entry.timestamp,
+        pageHost: entry.pageHost,
+        contentHost: entry.contentHost,
+        threshold: entry.threshold,
+        rocScore: entry.rocScore,
+        estimatedFpr: entry.estimatedFpr,
+        linearScore: entry.linearScore,
+        isBelowThreshold: entry.isBelowThreshold,
+        modelVersion: entry.modelVersion,
+        key: entry.key
+    }));
+}
+
 function ssGetModelVersion() {
     return SS_MODEL_VERSION;
 }
@@ -164,6 +184,12 @@ function ssAddRequestRecord(record) {
     if (linearScore === null || linearScore === undefined) {
         return;
     }
+    const isBelowThreshold = record.threshold !== null
+        && record.threshold !== undefined
+        && record.rocScore !== null
+        && record.rocScore !== undefined
+        ? record.rocScore < record.threshold
+        : null;
     console.info('[SS] record_input ' + JSON.stringify({
         timestamp: record.timestamp ?? Date.now(),
         pageHost: record.pageHost,
@@ -172,6 +198,7 @@ function ssAddRequestRecord(record) {
         rocScore: record.rocScore,
         linearScore: linearScore,
         estimatedFpr: estimatedFpr,
+        isBelowThreshold: isBelowThreshold,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION
     }));
     const entry = {
@@ -179,8 +206,10 @@ function ssAddRequestRecord(record) {
         pageHost: record.pageHost,
         contentHost: record.contentHost,
         threshold: record.threshold,
+        rocScore: record.rocScore,
         linearScore: linearScore,
         estimatedFpr: estimatedFpr,
+        isBelowThreshold: isBelowThreshold,
         modelVersion: record.modelVersion ?? SS_MODEL_VERSION,
         key: SS_nextKey++
     };
