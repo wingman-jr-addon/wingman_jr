@@ -20,6 +20,7 @@ function rocMapFprToScore(fpr) {
     const fT = 0.004;
     const fN = 0.015;
     const fU = 0.10;
+    const fMax = 0.5;
     const scoreTrusted = 20;
     const scoreNeutral = 50;
     const scoreUntrusted = 80;
@@ -30,7 +31,7 @@ function rocMapFprToScore(fpr) {
     if (fpr <= fT) {
         return minScore;
     }
-    if (fpr >= fU) {
+    if (fpr >= fMax) {
         return maxScore;
     }
 
@@ -43,8 +44,13 @@ function rocMapFprToScore(fpr) {
         let t = (x - xT) / (xN - xT);
         return Math.min(maxScore, Math.max(minScore, scoreTrusted + (scoreNeutral - scoreTrusted) * t));
     }
-    let t = (x - xN) / (xU - xN);
-    return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
+    if (fpr <= fU) {
+        let t = (x - xN) / (xU - xN);
+        return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
+    }
+    const xMax = Math.log10(fMax);
+    let t = (x - xU) / (xMax - xU);
+    return Math.min(maxScore, Math.max(minScore, scoreUntrusted + (maxScore - scoreUntrusted) * t));
 }
 
 function rocEstimateLinearScoreAtThreshold(threshold) {
