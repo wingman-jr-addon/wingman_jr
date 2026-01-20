@@ -3,13 +3,13 @@ const SS_MODEL_VERSION = 'SQRXR112';
 const SS_records = [];
 let SS_nextKey = 1;
 const SS_BURST_BUFFER_SIZE = 30;
-const SS_BURST_HIGH_RISK_LINEAR = 85;
-const SS_BURST_SPIKE_RATIO = 0.35;
-const SS_BURST_COOLDOWN_REQUESTS = 30;
-const SS_BURST_BLOCK_WINDOW_REQUESTS = 40;
+const SS_BURST_HIGH_RISK_LINEAR = 92;
+const SS_BURST_SPIKE_RATIO = 0.45;
+const SS_BURST_COOLDOWN_REQUESTS = 20;
+const SS_BURST_BLOCK_WINDOW_REQUESTS = 25;
 const SS_BURST_FAST_ALPHA = 0.25;
 const SS_BURST_SLOW_ALPHA = 0.05;
-const SS_BURST_SLOW_FAST_DELTA = 7.5;
+const SS_BURST_SLOW_FAST_DELTA = 9.5;
 const SS_burstState = new Map();
 
 function ssGetBurstState(pageHost) {
