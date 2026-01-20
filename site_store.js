@@ -121,6 +121,36 @@ function ssNoteBurstBlock(pageHost) {
     state.blockWindowRemaining = SS_BURST_BLOCK_WINDOW_REQUESTS;
 }
 
+function ssSerializeBurstState(state) {
+    if (!state) {
+        return null;
+    }
+    return {
+        scores: state.scores.slice(),
+        index: state.index,
+        size: state.size,
+        highRiskCount: state.highRiskCount,
+        cooldownRemaining: state.cooldownRemaining,
+        blockWindowRemaining: state.blockWindowRemaining,
+        fastEma: state.fastEma,
+        slowEma: state.slowEma
+    };
+}
+
+function ssDebugDump(limit = 200, pageHost = null) {
+    const sliceLimit = Math.max(0, Math.min(limit, SS_records.length));
+    const records = SS_records.slice(-sliceLimit);
+    let burst = {};
+    if (pageHost) {
+        burst[pageHost] = ssSerializeBurstState(SS_burstState.get(pageHost));
+    } else {
+        SS_burstState.forEach((state, host) => {
+            burst[host] = ssSerializeBurstState(state);
+        });
+    }
+    return { records, burst };
+}
+
 function ssGetModelVersion() {
     return SS_MODEL_VERSION;
 }
