@@ -16,28 +16,7 @@ function rocFindConfidence(threshold) {
 // Converts a raw ROC threshold into a semantic score based on FPR anchors.
 // We interpolate FPR for the given threshold, then map it through a piecewise
 // linear score in log10(FPR) space anchored to trusted/neutral/untrusted FPRs.
-function rocEstimateLinearScoreAtThreshold(threshold) {
-    if (threshold === null || threshold === undefined) {
-        return null;
-    }
-    if (!ROC_VALUES || ROC_VALUES.length === 0) {
-        return null;
-    }
-    let lower = ROC_VALUES[ROC_VALUES.length - 1];
-    let upper = ROC_VALUES[0];
-    for (let i = 0; i < ROC_VALUES.length; i++) {
-        if (ROC_VALUES[i].threshold < threshold) {
-            lower = ROC_VALUES[i];
-            upper = ROC_VALUES[Math.max(i - 1, 0)];
-            break;
-        }
-    }
-    let fpr = lower.fpr;
-    if (upper.threshold !== lower.threshold) {
-        let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
-        fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
-    }
-
+function rocMapFprToScore(fpr) {
     const fT = 0.004;
     const fN = 0.015;
     const fU = 0.10;
@@ -68,6 +47,30 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
     return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
 }
 
+function rocEstimateLinearScoreAtThreshold(threshold) {
+    if (threshold === null || threshold === undefined) {
+        return null;
+    }
+    if (!ROC_VALUES || ROC_VALUES.length === 0) {
+        return null;
+    }
+    let lower = ROC_VALUES[ROC_VALUES.length - 1];
+    let upper = ROC_VALUES[0];
+    for (let i = 0; i < ROC_VALUES.length; i++) {
+        if (ROC_VALUES[i].threshold < threshold) {
+            lower = ROC_VALUES[i];
+            upper = ROC_VALUES[Math.max(i - 1, 0)];
+            break;
+        }
+    }
+    let fpr = lower.fpr;
+    if (upper.threshold !== lower.threshold) {
+        let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
+        fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
+    }
+    return rocMapFprToScore(fpr);
+}
+
 // Inverse lookup: pick the ROC threshold that best matches a target linear score.
 function rocFindThresholdForLinearScore(targetLinearScore) {
     if (targetLinearScore === null || targetLinearScore === undefined) {
@@ -80,8 +83,7 @@ function rocFindThresholdForLinearScore(targetLinearScore) {
     let bestDelta = Number.POSITIVE_INFINITY;
     for (let i = 0; i < ROC_VALUES.length; i++) {
         let entry = ROC_VALUES[i];
-        let fnr = 1.0 - entry.tpr;
-        let linearScore = (entry.fpr + fnr) / 2.0;
+        let linearScore = rocMapFprToScore(entry.fpr);
         let delta = Math.abs(linearScore - targetLinearScore);
         if (delta < bestDelta) {
             bestDelta = delta;

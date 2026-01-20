@@ -3,12 +3,12 @@ const SS_MODEL_VERSION = 'SQRXR112';
 const SS_records = [];
 let SS_nextKey = 1;
 const SS_BURST_BUFFER_SIZE = 30;
-const SS_BURST_HIGH_RISK_LINEAR = 0.6;
-const SS_BURST_SPIKE_RATIO = 0.25;
-const SS_BURST_COOLDOWN_REQUESTS = 50;
-const SS_BURST_FAST_ALPHA = 0.35;
+const SS_BURST_HIGH_RISK_LINEAR = 85;
+const SS_BURST_SPIKE_RATIO = 0.35;
+const SS_BURST_COOLDOWN_REQUESTS = 30;
+const SS_BURST_FAST_ALPHA = 0.25;
 const SS_BURST_SLOW_ALPHA = 0.05;
-const SS_BURST_SLOW_FAST_DELTA = 0.1;
+const SS_BURST_SLOW_FAST_DELTA = 7.5;
 const SS_burstState = new Map();
 
 function ssGetBurstState(pageHost) {
@@ -100,6 +100,11 @@ function ssGetBurstOverrideThreshold(pageHost, untrustedThreshold) {
         return null;
     }
     return untrustedThreshold;
+}
+
+function ssIsBurstActive(pageHost) {
+    const state = SS_burstState.get(pageHost);
+    return !!(state && state.cooldownRemaining > 0);
 }
 
 function ssGetModelVersion() {

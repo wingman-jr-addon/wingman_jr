@@ -600,6 +600,7 @@ async function bkImageListenerNormal(details, mimeType) {
     let pageHost = bkExtractRootDomain(bkGetTopmostUrl(details));
     let contentHost = bkExtractRootDomain(details.url);
     let threshold = bkPickThreshold(pageHost);
+    statusSetBurstActive(details.tabId, ssIsBurstActive(pageHost));
     processor.postMessage({
         type: 'start',
         requestId: details.requestId,
