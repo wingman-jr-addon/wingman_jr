@@ -17,10 +17,9 @@ function rocFindConfidence(threshold) {
 // We interpolate FPR for the given threshold, then map it through a piecewise
 // linear score in log10(FPR) space anchored to trusted/neutral/untrusted FPRs.
 function rocMapFprToScore(fpr) {
-    const fT = ROC_trustedRoc?.fpr ?? 0.004;
-    const fN = ROC_neutralRoc?.fpr ?? 0.015;
-    const fU = ROC_untrustedRoc?.fpr ?? 0.10;
-    const fMax = 1.0;
+    const fT = 0.004;
+    const fN = 0.015;
+    const fU = 0.10;
     const scoreTrusted = 20;
     const scoreNeutral = 50;
     const scoreUntrusted = 80;
@@ -31,15 +30,11 @@ function rocMapFprToScore(fpr) {
     if (fpr <= fT) {
         return minScore;
     }
-    if (fpr >= fMax || fMax <= fU) {
-        return maxScore;
-    }
 
     const x = Math.log10(fpr + eps);
     const xT = Math.log10(fT);
     const xN = Math.log10(fN);
     const xU = Math.log10(fU);
-    const xMax = Math.log10(fMax);
 
     if (fpr <= fN) {
         let t = (x - xT) / (xN - xT);
@@ -49,8 +44,7 @@ function rocMapFprToScore(fpr) {
         let t = (x - xN) / (xU - xN);
         return Math.min(maxScore, Math.max(minScore, scoreNeutral + (scoreUntrusted - scoreNeutral) * t));
     }
-    let t = (x - xU) / (xMax - xU);
-    return Math.min(maxScore, Math.max(minScore, scoreUntrusted + (maxScore - scoreUntrusted) * t));
+    return maxScore;
 }
 
 function rocEstimateLinearScoreAtThreshold(threshold) {
@@ -60,20 +54,9 @@ function rocEstimateLinearScoreAtThreshold(threshold) {
     if (!ROC_VALUES || ROC_VALUES.length === 0) {
         return null;
     }
-    const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
-    let upper = values[0];
-    let lower = values[values.length - 1];
-    for (let i = 0; i < values.length - 1; i++) {
-        if (values[i].threshold >= threshold && threshold >= values[i + 1].threshold) {
-            upper = values[i];
-            lower = values[i + 1];
-            break;
-        }
-    }
-    let fpr = lower.fpr;
-    if (upper.threshold !== lower.threshold) {
-        let ratio = (threshold - lower.threshold) / (upper.threshold - lower.threshold);
-        fpr = lower.fpr + (upper.fpr - lower.fpr) * ratio;
+    const fpr = rocEstimateFprAtThreshold(threshold);
+    if (fpr === null || fpr === undefined) {
+        return null;
     }
     return rocMapFprToScore(fpr);
 }
@@ -86,6 +69,22 @@ function rocEstimateFprAtThreshold(threshold) {
         return null;
     }
     const values = ROC_VALUES.slice().sort((a, b) => b.threshold - a.threshold);
+    if (threshold >= values[0].threshold) {
+        WJR_DEBUG && console.info('ROC: fpr estimate (clamp-high)', {
+            threshold: threshold,
+            entry: values[0],
+            fpr: values[0].fpr
+        });
+        return values[0].fpr;
+    }
+    if (threshold <= values[values.length - 1].threshold) {
+        WJR_DEBUG && console.info('ROC: fpr estimate (clamp-low)', {
+            threshold: threshold,
+            entry: values[values.length - 1],
+            fpr: values[values.length - 1].fpr
+        });
+        return values[values.length - 1].fpr;
+    }
     let upper = values[0];
     let lower = values[values.length - 1];
     for (let i = 0; i < values.length - 1; i++) {
