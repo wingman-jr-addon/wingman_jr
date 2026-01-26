@@ -235,6 +235,9 @@ function bkOnProcessorMessage(m) {
             break;
         case 'stat': {
             WJR_DEBUG && console.debug('STAT: '+m.requestId+' '+m.result);
+            if (m.result === 'block' && m.opaque && m.opaque.pageHost) {
+                ssNoteBurstBlock(m.opaque.pageHost);
+            }
             let tabId = bkGetTabIdForRequest(m.requestId);
             statusCompleteImageCheck(m.requestId, m.result, tabId);
             BK_requestIdToTabId.delete(m.requestId);
@@ -323,6 +326,14 @@ function bkGetZoneForHost(pageHost) {
 function bkPickThreshold(pageHost, settings = null) {
     let resolved = settings ?? bkGetSiteSettings(pageHost);
     if (resolved.isAutomatic) {
+        const burstOverride = ssGetBurstOverrideThreshold(pageHost, ROC_untrustedRoc.threshold);
+        if (burstOverride !== null && burstOverride !== undefined) {
+            console.warn('[BK][BURST] threshold_override ' + JSON.stringify({
+                pageHost: pageHost,
+                threshold: burstOverride
+            }));
+            return burstOverride;
+        }
         return ssSuggestAdaptiveThreshold(
             pageHost,
             ROC_neutralRoc.threshold,
@@ -592,6 +603,7 @@ async function bkImageListenerNormal(details, mimeType) {
     let pageHost = bkExtractRootDomain(bkGetTopmostUrl(details));
     let contentHost = bkExtractRootDomain(details.url);
     let threshold = bkPickThreshold(pageHost);
+    statusSetBurstActive(details.tabId, ssIsBurstActive(pageHost));
     processor.postMessage({
         type: 'start',
         requestId: details.requestId,

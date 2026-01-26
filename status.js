@@ -51,11 +51,14 @@ function statusGetTabState(tabId) {
             imageCheckCount: 0,
             zoneFill: STATUS_defaultZoneFill,
             zoneFillOffset: STATUS_defaultZoneFillOffset,
+            zoneName: 'neutral',
             lastZoneFill: '',
             lastProgressWidth: 0,
             lastIsVideoInProgress: true,
             lastIsVideoBlockShown: true,
-            lastVideoProgressCounter: -1
+            lastVideoProgressCounter: -1,
+            isBurstActive: false,
+            lastIsBurstActive: true
         };
         STATUS_tabState.set(key, state);
     }
@@ -82,7 +85,8 @@ function statusRegenerateIcon(tabId) {
     if(state.zoneFill == state.lastZoneFill &&
         currentProgressWidth == state.lastProgressWidth &&
         isVideoInProgress == state.lastIsVideoInProgress &&
-        isVideoBlockShown == state.lastIsVideoBlockShown) {
+        isVideoBlockShown == state.lastIsVideoBlockShown &&
+        state.isBurstActive == state.lastIsBurstActive) {
         return;
     }
 
@@ -92,6 +96,7 @@ function statusRegenerateIcon(tabId) {
     state.lastIsVideoInProgress = isVideoInProgress;
     state.lastIsVideoBlockShown = isVideoBlockShown;
     state.lastVideoProgressCounter = STATUS_videoProgressCounter;
+    state.lastIsBurstActive = state.isBurstActive;
 
     // 3. Actually generate and set new icon
     let ctx = STATUS_iconCanvas.getContext('2d');
@@ -120,6 +125,16 @@ function statusRegenerateIcon(tabId) {
         ctx.fillText('V', 24, 24);
     }
 
+    if(state.isBurstActive) {
+        ctx.fillStyle = state.zoneFillOffset;
+        ctx.fillRect(24, 0, 8, 8);
+
+        ctx.fillStyle = 'black';
+        ctx.font = '8px sans-serif';
+        ctx.textBaseline = 'top';
+        ctx.fillText('B', 24, 0);
+    }
+
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
     browser.browserAction.setIcon({ imageData: imageData, tabId: tabId ?? undefined });
 }
@@ -138,6 +153,7 @@ function statusSetImageZoneTrusted(tabId) {
     let state = statusGetTabState(tabId);
     state.zoneFill = '#88CC88';
     state.zoneFillOffset = '#66AA66';
+    state.zoneName = 'trusted';
     statusRegenerateIcon(tabId);
 }
 
@@ -145,6 +161,7 @@ function statusSetImageZoneNeutral(tabId) {
     let state = statusGetTabState(tabId);
     state.zoneFill = '#CCCCCC';
     state.zoneFillOffset = '#AAAAAA';
+    state.zoneName = 'neutral';
     statusRegenerateIcon(tabId);
 }
 
@@ -152,6 +169,16 @@ function statusSetImageZoneUntrusted(tabId) {
     let state = statusGetTabState(tabId);
     state.zoneFill = '#DD9999';
     state.zoneFillOffset = '#AA6666';
+    state.zoneName = 'untrusted';
+    statusRegenerateIcon(tabId);
+}
+
+function statusSetBurstActive(tabId, isActive) {
+    let state = statusGetTabState(tabId);
+    if (state.isBurstActive === isActive) {
+        return;
+    }
+    state.isBurstActive = isActive;
     statusRegenerateIcon(tabId);
 }
 
@@ -219,7 +246,10 @@ function statusUpdateVisuals(tabId) {
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+state.imageCounts['block']+'/'+state.imageCheckCount+' images\r\n'
+    let zoneLabel = state.zoneName ?? 'neutral';
+    let burstLabel = state.isBurstActive ? ' (burst override active)' : '';
+    browser.browserAction.setTitle({ title: 'Zone: ' + zoneLabel + burstLabel + '\r\n'
+        + 'Blocked '+state.imageCounts['block']+'/'+state.imageCheckCount+' images\r\n'
         + '               ' + STATUS_videoCounts['block']+'/'+STATUS_videoCheckCount+' videos\r\n'
         + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n'), tabId: tabId ?? undefined });
 
