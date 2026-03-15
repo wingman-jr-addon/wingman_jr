@@ -287,7 +287,15 @@ function TextDecoderWithSniffing(declType)
             }
         } else {
             WJR_DEBUG && console.debug('CHARSET: Effective decoding ' + self.currentType);
-            return self.decoder.decode(buffer, options);
+            try {
+                return self.decoder.decode(buffer, options);
+            } catch(ex) {
+                WJR_DEBUG && console.warn('CHARSET: Decoder exception after sniff complete. Falling back from '+self.currentType+' to iso-8859-1 (Exception: '+ex+')');
+                self.decoder = new TextDecoder('iso-8859-1');
+                self.currentType = 'iso-8859-1';
+
+                return self.decoder.decode(buffer, options);
+            }
         }
     }
 }
