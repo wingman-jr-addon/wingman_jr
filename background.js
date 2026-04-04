@@ -105,6 +105,45 @@ browser.runtime.onConnect.addListener(bkOnClientConnected);
 
 
 let BK_processorBackendPreference = [];
+let BK_canUseHiddenTab = true;
+let BK_hasHiddenTabPermissionDecision = false;
+
+function bkInitializeHiddenTabPermissionState() {
+    browser.permissions.contains({ permissions: ['tabHide'] })
+        .then(isGranted => {
+            if (isGranted) {
+                BK_canUseHiddenTab = true;
+                BK_hasHiddenTabPermissionDecision = true;
+                return;
+            }
+            browser.storage.local.get('tabhide_prompted_once')
+                .then(result => {
+                    if (result.tabhide_prompted_once === true) {
+                        BK_canUseHiddenTab = false;
+                        BK_hasHiddenTabPermissionDecision = true;
+                        return;
+                    }
+                    browser.storage.local.set({ tabhide_prompted_once: true })
+                        .then(() => browser.permissions.request({ permissions: ['tabHide'] }))
+                        .then(requestResult => {
+                            BK_canUseHiddenTab = requestResult === true;
+                            BK_hasHiddenTabPermissionDecision = true;
+                        })
+                        .catch(() => {
+                            BK_canUseHiddenTab = false;
+                            BK_hasHiddenTabPermissionDecision = true;
+                        });
+                })
+                .catch(() => {
+                    BK_canUseHiddenTab = false;
+                    BK_hasHiddenTabPermissionDecision = true;
+                });
+        })
+        .catch(() => {
+            BK_canUseHiddenTab = false;
+            BK_hasHiddenTabPermissionDecision = true;
+        });
+}
 
 function bkReloadProcessors() {
     WJR_DEBUG && console.log('LIFECYCLE: Cleaning up old processors.');
@@ -127,19 +166,38 @@ function bkReloadProcessors() {
     for(let i=0; i<BK_processorBackendPreference.length; i++) {
         let backend = BK_processorBackendPreference[i];
         WJR_DEBUG && console.log(`LIFECYCLE: Spawning processor with backend ${backend}`);
-        if(backend == 'inprocwebgl') {
-            console.log(`LIFECYCLE: Probing for inprocwebgl backend`);
-            if(!bkTryStartupBackgroundJsProcessor()) {
-                const requestedBackend = backend;
-                const effectiveBackend = 'webgl';
-                console.log(`LIFECYCLE: Probe for inprocwebgl failed, launching tab processor (requested=${requestedBackend}, effective=${effectiveBackend})`);
-                browser.tabs.create({url:`/processor.html?backend=${effectiveBackend}&id=${effectiveBackend}-1`, active: false})
-                    .then(async tab=>await browser.tabs.hide(tab.id));
+        if (backend == 'inprocwebgl') {
+            console.log('LIFECYCLE: Probing for inprocwebgl backend');
+            if (bkTryStartupBackgroundJsProcessor()) {
+                continue;
             }
-        } else {
-            browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-                .then(async tab=>await browser.tabs.hide(tab.id));
+            if (BK_hasHiddenTabPermissionDecision && !BK_canUseHiddenTab) {
+                console.warn('LIFECYCLE: Hidden-tab permission unavailable and inprocwebgl failed.');
+                continue;
+            }
+            console.log('LIFECYCLE: Probe for inprocwebgl failed, attempting hidden-tab webgl.');
+            browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-1', active: false})
+                .then(async tab => await browser.tabs.hide(tab.id))
+                .catch(() => {
+                    console.warn('LIFECYCLE: Hidden-tab webgl launch failed after inprocwebgl failure.');
+                });
+            continue;
         }
+
+        if (BK_hasHiddenTabPermissionDecision && !BK_canUseHiddenTab) {
+            if (!bkTryStartupBackgroundJsProcessor()) {
+                console.warn(`LIFECYCLE: Could not launch hidden-tab backend ${backend}, and inprocwebgl fallback failed.`);
+            }
+            continue;
+        }
+
+        browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+            .then(async tab => await browser.tabs.hide(tab.id))
+            .catch(() => {
+                if (!bkTryStartupBackgroundJsProcessor()) {
+                    console.warn(`LIFECYCLE: Hidden-tab launch failed for backend ${backend}, and inprocwebgl fallback failed.`);
+                }
+            });
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
@@ -1319,6 +1377,7 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
+bkInitializeHiddenTabPermissionState();
 browser.storage.local.get('default_zone')
     .then(bkSetDefaultZone)
     .then(() => {

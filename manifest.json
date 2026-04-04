@@ -20,9 +20,11 @@
       "menus",
       "proxy",
       "storage",
-      "tabHide",
       "idle",
       "contextMenus"
+    ],
+    "optional_permissions": [
+      "tabHide"
     ],
   
     "background": {
