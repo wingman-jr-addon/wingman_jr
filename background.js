@@ -109,39 +109,37 @@ let BK_canUseHiddenTab = true;
 let BK_hasHiddenTabPermissionDecision = false;
 
 function bkInitializeHiddenTabPermissionState() {
+    BK_canUseHiddenTab = false;
+    BK_hasHiddenTabPermissionDecision = true;
     browser.permissions.contains({ permissions: ['tabHide'] })
         .then(isGranted => {
             if (isGranted) {
                 BK_canUseHiddenTab = true;
-                BK_hasHiddenTabPermissionDecision = true;
+                console.log('LIFECYCLE: Hidden tab permisssions were already granted on startup.');
                 return;
             }
             browser.storage.local.get('tabhide_prompted_once')
                 .then(result => {
                     if (result.tabhide_prompted_once === true) {
-                        BK_canUseHiddenTab = false;
-                        BK_hasHiddenTabPermissionDecision = true;
+                        console.log('LIFECYCLE: Hidden tab permisssions were not already granted on startup, but the user has already been prompted on this installation, not prompting again.');
                         return;
                     }
                     browser.storage.local.set({ tabhide_prompted_once: true })
                         .then(() => browser.permissions.request({ permissions: ['tabHide'] }))
                         .then(requestResult => {
                             BK_canUseHiddenTab = requestResult === true;
-                            BK_hasHiddenTabPermissionDecision = true;
+                            console.warn(`LIFECYCLE: Hidden tab permisssions were prompted, and grant result was ${requestResult}`);
                         })
-                        .catch(() => {
-                            BK_canUseHiddenTab = false;
-                            BK_hasHiddenTabPermissionDecision = true;
+                        .catch(promptError => {
+                            console.error('LIFECYCLE: Error while prompting for hidden tab permissions.', promptError);
                         });
                 })
-                .catch(() => {
-                    BK_canUseHiddenTab = false;
-                    BK_hasHiddenTabPermissionDecision = true;
+                .catch(fetchError => {
+                    console.error('LIFECYCLE: Error while processing tabhide_prompted_once:', fetchError);
                 });
         })
-        .catch(() => {
-            BK_canUseHiddenTab = false;
-            BK_hasHiddenTabPermissionDecision = true;
+        .catch(handlingError => {
+            console.log('LIFECYCLE: Error while handling tabHide permissions check: ', handlingError);
         });
 }
 
@@ -169,6 +167,7 @@ function bkReloadProcessors() {
         if (backend == 'inprocwebgl') {
             console.log('LIFECYCLE: Probing for inprocwebgl backend');
             if (bkTryStartupBackgroundJsProcessor()) {
+                console.log('LIFECYCLE inprocwebgl launch success');
                 continue;
             }
             if (BK_hasHiddenTabPermissionDecision && !BK_canUseHiddenTab) {
@@ -178,26 +177,24 @@ function bkReloadProcessors() {
             console.log('LIFECYCLE: Probe for inprocwebgl failed, attempting hidden-tab webgl.');
             browser.tabs.create({url:'/processor.html?backend=webgl&id=webgl-1', active: false})
                 .then(async tab => await browser.tabs.hide(tab.id))
-                .catch(() => {
-                    console.warn('LIFECYCLE: Hidden-tab webgl launch failed after inprocwebgl failure.');
+                .catch(webglCreationError => {
+                    console.warn('LIFECYCLE: Hidden-tab webgl launch issue after inprocwebgl failure.', webglCreationError);
                 });
             continue;
         }
 
         if (BK_hasHiddenTabPermissionDecision && !BK_canUseHiddenTab) {
+            console.warn('LIFECYCLE: User has chosen not to grant hidden-tab, trying inprocwebgl instead');
             if (!bkTryStartupBackgroundJsProcessor()) {
                 console.warn(`LIFECYCLE: Could not launch hidden-tab backend ${backend}, and inprocwebgl fallback failed.`);
+            } else {
+                console.warn('LIFECYCLE: inprocwebgl fallback started after no hidden-tab permission');
             }
             continue;
         }
 
         browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-            .then(async tab => await browser.tabs.hide(tab.id))
-            .catch(() => {
-                if (!bkTryStartupBackgroundJsProcessor()) {
-                    console.warn(`LIFECYCLE: Hidden-tab launch failed for backend ${backend}, and inprocwebgl fallback failed.`);
-                }
-            });
+            .then(async tab => await browser.tabs.hide(tab.id));
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
 }
