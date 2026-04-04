@@ -130,8 +130,10 @@ function bkReloadProcessors() {
         if(backend == 'inprocwebgl') {
             console.log(`LIFECYCLE: Probing for inprocwebgl backend`);
             if(!bkTryStartupBackgroundJsProcessor()) {
-                console.log(`LIFECYCLE: Probe for inprocwebgl failed, falling back to webgl`);
-                browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+                const requestedBackend = backend;
+                const effectiveBackend = 'webgl';
+                console.log(`LIFECYCLE: Probe for inprocwebgl failed, launching tab processor (requested=${requestedBackend}, effective=${effectiveBackend})`);
+                browser.tabs.create({url:`/processor.html?backend=${effectiveBackend}&id=${effectiveBackend}-1`, active: false})
                     .then(async tab=>await browser.tabs.hide(tab.id));
             }
         } else {
