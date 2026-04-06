@@ -1284,20 +1284,6 @@ function bkLoadBackendSettings() {
     });
 }
 
-async function bkSetBackendFromWizardSelection(selection) {
-    if(selection == 'webgl') {
-        const hasPermission = await browser.permissions.request({ permissions: ['tabHide'] });
-        if(!hasPermission) {
-            await browser.storage.local.set({ backend_selection: 'inprocwebgl' });
-            bkUpdateFromSettings();
-            return { selectedBackend: 'inprocwebgl', wasFallback: true };
-        }
-    }
-    await browser.storage.local.set({ backend_selection: selection });
-    bkUpdateFromSettings();
-    return { selectedBackend: selection, wasFallback: false };
-}
-
 function bkSetAllLogging(onOrOff) {
     WJR_DEBUG = onOrOff;
     bkBroadcastMessageToProcessors({ "type": "set_all_logging", "value" : onOrOff});
@@ -1346,11 +1332,6 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'getBackendWizardCompatibility') {
         let compatibility = bkGetBackgroundJsWebglCompatibility();
         sendResponse({ isInProcWebglSupported: compatibility.supported });
-    }
-    else if (request.type == 'setBackendSelectionFromWizard') {
-        bkSetBackendFromWizardSelection(request.value)
-            .then(sendResponse);
-        return true;
     }
     else if (request.type == 'revealBlockedImage') {
         console.log('REVEAL: Message received', request.url);
