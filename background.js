@@ -10,10 +10,17 @@ async function bkOnUpdate() {
     await browser.tabs.create({ url });
 }
 
+async function bkOpenBackendWizard() {
+    await browser.tabs.create({ url: '/backend_wizard.html' });
+}
+
 //User feedback
 browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
     if (temporary) return; // skip during development
     switch (reason) {
+        case "install": {
+            await bkOpenBackendWizard();
+        } break;
         case "update": {
             await bkOnUpdate();
         } break;
@@ -92,6 +99,13 @@ function bkBroadcastMessageToProcessors(m) {
     });
 }
 
+async function bkHideTabIfAllowed(tabId) {
+    const hasPermission = await browser.permissions.contains({ permissions: ['tabHide'] });
+    if(hasPermission) {
+        await browser.tabs.hide(tabId);
+    }
+}
+
 let BK_isSilentModeEnabled = false;
 
 function bkBroadcastProcessorSettings() {
@@ -134,11 +148,11 @@ function bkReloadProcessors() {
                 const effectiveBackend = 'webgl';
                 console.log(`LIFECYCLE: Probe for inprocwebgl failed, launching tab processor (requested=${requestedBackend}, effective=${effectiveBackend})`);
                 browser.tabs.create({url:`/processor.html?backend=${effectiveBackend}&id=${effectiveBackend}-1`, active: false})
-                    .then(async tab=>await browser.tabs.hide(tab.id));
+                    .then(async tab=>await bkHideTabIfAllowed(tab.id));
             }
         } else {
             browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
-                .then(async tab=>await browser.tabs.hide(tab.id));
+                .then(async tab=>await bkHideTabIfAllowed(tab.id));
         }
     }
     WJR_DEBUG && console.log('LIFECYCLE: New processors are launching!');
@@ -1255,7 +1269,7 @@ function bkUpdateFromSettings() {
 
 function bkLoadBackendSettings() {
     browser.storage.local.get('backend_selection').then(result => {
-        let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
+        let backends = result.backend_selection ? result.backend_selection.split('_') : ['inprocwebgl'];
         let hasChanged = backends.length != BK_processorBackendPreference.length;
         for (let i = 0; i < backends.length && !hasChanged; i++) {
             hasChanged = backends[i] != BK_processorBackendPreference[i];
@@ -1268,6 +1282,20 @@ function bkLoadBackendSettings() {
             WJR_DEBUG && console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
         }
     });
+}
+
+async function bkSetBackendFromWizardSelection(selection) {
+    if(selection == 'webgl') {
+        const hasPermission = await browser.permissions.request({ permissions: ['tabHide'] });
+        if(!hasPermission) {
+            await browser.storage.local.set({ backend_selection: 'inprocwebgl' });
+            bkUpdateFromSettings();
+            return { selectedBackend: 'inprocwebgl', wasFallback: true };
+        }
+    }
+    await browser.storage.local.set({ backend_selection: selection });
+    bkUpdateFromSettings();
+    return { selectedBackend: selection, wasFallback: false };
 }
 
 function bkSetAllLogging(onOrOff) {
@@ -1311,6 +1339,18 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
+    }
+    else if (request.type == 'openBackendWizard') {
+        bkOpenBackendWizard();
+    }
+    else if (request.type == 'getBackendWizardCompatibility') {
+        let compatibility = bkGetBackgroundJsWebglCompatibility();
+        sendResponse({ isInProcWebglSupported: compatibility.supported });
+    }
+    else if (request.type == 'setBackendSelectionFromWizard') {
+        bkSetBackendFromWizardSelection(request.value)
+            .then(sendResponse);
+        return true;
     }
     else if (request.type == 'revealBlockedImage') {
         console.log('REVEAL: Message received', request.url);

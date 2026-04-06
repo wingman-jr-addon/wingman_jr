@@ -22,11 +22,6 @@ async function optSaveOptions() {
         default_zone: defaultZone
     });
 
-    let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
-    await browser.storage.local.set({
-        backend_selection: backendSelection
-    });
-    browser.runtime.sendMessage({ type: 'setBackendSelection', value: backendSelection });
 }
 
 function optRestoreOptions() {
@@ -81,10 +76,9 @@ function optRestoreOptions() {
 
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
         let result = rawResult.backend_selection;
-        console.log('OPTION: Setting backend to ' + result);
-        let coercedResult = result || 'webgl';
-        document.getElementById('backend_selection_' + coercedResult).checked = true;
-        browser.runtime.sendMessage({ type: 'setBackendSelection', value: coercedResult });
+        let coercedResult = result || 'inprocwebgl';
+        console.log('OPTION: Setting backend to ' + coercedResult);
+        document.getElementById('backend_selection_summary').textContent = 'Current backend: ' + coercedResult;
     }
 
     function onError(error) {
@@ -133,11 +127,6 @@ for (var i = 0, max = radiosDefaultZone.length; i < max; i++) {
         optSaveOptions();
     }
 }
-
-
-var radiosBackendSelection = document.forms[0].elements["backend_selection"];
-for (var i = 0, max = radiosBackendSelection.length; i < max; i++) {
-    radiosBackendSelection[i].onclick = function () {
-        optSaveOptions();
-    }
-}
+document.getElementById('open_backend_wizard').onclick = function() {
+    browser.runtime.sendMessage({ type: 'openBackendWizard' });
+};
