@@ -22,7 +22,8 @@
       "storage",
       "tabHide",
       "idle",
-      "contextMenus"
+      "contextMenus",
+      "downloads"
     ],
   
     "background": {
