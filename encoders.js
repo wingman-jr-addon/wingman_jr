@@ -66,6 +66,10 @@ function encDetectCharsetAndSetupDecoderEncoder(details) {
         WJR_DEBUG && console.debug('CHARSET:  '+header.name+': '+header.value);
     }
     if (headerIndex == -1) {
+        if (encHasKnownBinaryExtension(details.url)) {
+            WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+'but binary extension so skipping.');
+            return;
+        }
       WJR_DEBUG && console.debug('CHARSET: No Content-Type header detected for '+details.url+', adding one by guessing.');
       contentType = encGuessContentType(details);
       headerIndex = details.responseHeaders.length;
@@ -119,6 +123,17 @@ function encDetectCharsetAndSetupDecoderEncoder(details) {
     let encoder = new TextEncoderWithSniffing(decoder);
 
     return [decoder, encoder];
+}
+
+function encHasKnownBinaryExtension(url) {
+    const extension = new URL(url).pathname
+        .toLowerCase()
+        .match(/\.([^.\/]+)$/)?.[1];
+
+    return new Set([
+        '7z', 'bin', 'dll', 'dmg', 'exe', 'img', 'iso',
+        'msi', 'ocx', 'rar', 'tar', 'zip'
+    ]).has(extension);
 }
 
 function encConcatBuffersToUint8Array(buffers) {
