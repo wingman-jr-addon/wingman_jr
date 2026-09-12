@@ -83,12 +83,9 @@
     <br />
     <a href="silent_collections.html" target="_blank">Manage silent image collections >> </a> <br />
     <br />
-    <h4>Which Tensorflow.js processing backend should be used? (Advanced option)</h4>
-    <label class="radio-option" for="backend_selection_webgl"><input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><span>WebGL only</span></label> <br />
-    <label class="radio-option" for="backend_selection_inprocwebgl"><input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><span>Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</span></label> <br />
-    <label class="radio-option" for="backend_selection_wasm"><input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm"><span>WASM only</span></label> <br />
-    <label class="radio-option" for="backend_selection_webgl_wasm"><input type="radio" name="backend_selection" id="backend_selection_webgl_wasm" value="webgl_wasm"><span>WebGL (primary) + WASM (secondary)</span></label> <br />
-    <label class="radio-option" for="backend_selection_wasm_webgl"><input type="radio" name="backend_selection" id="backend_selection_wasm_webgl" value="wasm_webgl"><span>WASM (primary) + WebGL (secondary)</span></label> <br />
+    <h4>Scanning backend</h4>
+    <div id="backend_selection_summary">Current backend: Loading...</div>
+    <button type="button" id="open_backend_wizard">Configure scanning backend...</button>
     <br />
     <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Feedback?</a> <br />
     <a id="github" href="https://github.com/wingman-jr-addon/wingman_jr/issues">Are you a developer? File issues/requests on GitHub</a>

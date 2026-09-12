@@ -1,5 +1,5 @@
 let PROC_processorId = 'inprocwebgl';
-function bkTryStartupBackgroundJsProcessor() {
+function bkGetBackgroundJsWebglCompatibility() {
     // In Firefox 83, background.js Tensorflow.js inference fell back to CPU for
     // many users, essentially making the browsing experience unusuable. The addon
     // was rewritten in a client/server architecture to allow for a hidden tab to
@@ -25,14 +25,23 @@ function bkTryStartupBackgroundJsProcessor() {
         failIfMajorPerformanceCaveat: true
     });
     if(!inferenceCtx) {
+        return { supported: false, contextType: null };
+    }
+
+    let inferenceCtxType = `${inferenceCtx}`;
+    delete inferenceCtx;
+    delete inferenceCanvas;
+    return { supported: true, contextType: inferenceCtxType };
+}
+
+function bkTryStartupBackgroundJsProcessor() {
+    console.log('INPROC: Performing Tensorflow.js WebGL check for background.js...');
+    let compatibility = bkGetBackgroundJsWebglCompatibility();
+    if(!compatibility.supported) {
         console.log('INPROC: Tensorflow.js WebGL check for background.js failed, falling back to hidden tab.');
         return null;
     }
-    
-    let inferenceCtxType = `${inferenceCtx}`;
-    console.log(`INPROC: Tensorflow.js WebGL check for background.js succeeded, continuing in-process! (${inferenceCtxType})`);
-    delete inferenceCtx;
-    delete inferenceCanvas;
+    console.log(`INPROC: Tensorflow.js WebGL check for background.js succeeded, continuing in-process! (${compatibility.contextType})`);
     //Initialize and fake out a port pair for processor and background
     procWingmanStartup('webgl')
     .then(async ()=>
@@ -86,5 +95,5 @@ function bkTryStartupBackgroundJsProcessor() {
             backend: PROC_loadedBackend
         });
     });
-    return inferenceCtxType;
+    return compatibility.contextType;
 }

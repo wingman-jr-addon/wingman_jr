@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      margin: 0;
+      background: #f6f7fb;
+      color: #1f2a44;
+    }
+    main {
+      max-width: 760px;
+      margin: 16px auto;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    h2 { margin-top: 0; }
+    .status { margin: 10px 0 14px; font-weight: 600; }
+    .radio-option { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; }
+    .radio-option span { display: block; }
+    .backend-name { font-weight: 700; }
+    .secondary { color: #4a5568; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    button { padding: 8px 12px; }
+    #wizard_message { margin-top: 10px; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Scanning Setup</h2>
+    <p>
+      This add-on performs AI-based page scanning, so speed can matter during regular use.
+      Choose how scanning should run in Firefox.
+    </p>
+    <div id="wizard_status" class="status">Browser compatibility check: Running...</div>
+
+    <label class="radio-option" for="backend_selection_inprocwebgl">
+      <input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl">
+      <span>
+        <span class="backend-name">In-browser mode (InProcWebGL)</span><br />
+        <span class="secondary">No hidden tabs. Most predictable experience, but usually slower.</span>
+      </span>
+    </label>
+
+    <label class="radio-option" for="backend_selection_webgl">
+      <input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl">
+      <span>
+        <span class="backend-name">Fast mode (WebGL)</span><br />
+        <span class="secondary">Usually faster. Uses hidden tabs, which some users find distracting.</span>
+      </span>
+    </label>
+
+    <label class="radio-option" for="backend_selection_wasm">
+      <input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm">
+      <span>
+        <span class="backend-name">Compatibility mode (WASM)</span><br />
+        <span class="secondary">Not selected by default. Useful on a small set of systems with poor GPU behavior.</span>
+      </span>
+    </label>
+
+    <p class="secondary">You can run this setup again from Options → Backend.</p>
+
+    <div class="actions">
+      <button id="save_backend_selection">Save</button>
+      <button id="cancel_backend_selection">Cancel</button>
+    </div>
+    <div id="wizard_message"></div>
+  </main>
+  <script src="backend_wizard.js"></script>
+</body>
+</html>
