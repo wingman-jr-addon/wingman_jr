@@ -176,6 +176,11 @@ async function vidRootListener(details) {
         }
     }
 
+    if (whtIsBlacklisted(details.url)) {
+        WJR_DEBUG && console.log('WEBREQV: Video URL blacklist '+details.url);
+        return { cancel: true };
+    }
+
     //Start splitting based on different types
     let parsedUrl = new URL(details.url);
     //If range is valid and ONLY a partial request, then consider it to be DASH
