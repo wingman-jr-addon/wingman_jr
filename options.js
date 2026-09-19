@@ -29,6 +29,21 @@ async function optSaveOptions() {
     browser.runtime.sendMessage({ type: 'setBackendSelection', value: backendSelection });
 }
 
+const OPT_DEFAULT_URL_FILTER_RULES = {
+    whitelist: {
+        domains: [
+            '# Allow Google reCAPTCHA to load correctly',
+            'https://www.google.com/recaptcha',
+            'https://www.gstatic.com/recaptcha'
+        ],
+        regex: []
+    },
+    blacklist: {
+        domains: [],
+        regex: []
+    }
+};
+
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
 
@@ -105,9 +120,116 @@ function optRestoreOptions() {
 
     let gettingBackendSelection = browser.storage.local.get('backend_selection');
     gettingBackendSelection.then(setCurrentBackendSelectionSwitchChoice, onError);
+
+    browser.storage.local.get('url_filter_rules').then(rawResult => {
+        const rules = Object.prototype.hasOwnProperty.call(rawResult, 'url_filter_rules') && rawResult.url_filter_rules
+            ? rawResult.url_filter_rules
+            : OPT_DEFAULT_URL_FILTER_RULES;
+        const whitelist = rules.whitelist || {};
+        const blacklist = rules.blacklist || {};
+        document.getElementById('whitelist_domains').value = (whitelist.domains || []).join('\n');
+        document.getElementById('whitelist_regex').value = (whitelist.regex || []).join('\n');
+        document.getElementById('blacklist_domains').value = (blacklist.domains || []).join('\n');
+        document.getElementById('blacklist_regex').value = (blacklist.regex || []).join('\n');
+    }, onError);
+}
+
+function optLinesFromTextarea(id) {
+    return document.getElementById(id).value
+        .split(/\r?\n/)
+        .map(value => value.trim())
+        .filter(value => value.length > 0);
+}
+
+function optActiveLinesFromTextarea(id) {
+    return optLinesFromTextarea(id).filter(value => !value.startsWith('#'));
+}
+
+function optCompileUrlRegex(value) {
+    let pattern = value;
+    let flags = '';
+    if (value.startsWith('/')) {
+        const lastSlash = value.lastIndexOf('/');
+        const possibleFlags = value.slice(lastSlash + 1);
+        if (lastSlash > 0 && /^[dgimsuvy]*$/.test(possibleFlags)) {
+            pattern = value.slice(1, lastSlash);
+            flags = possibleFlags;
+        }
+    }
+    return new RegExp(pattern, flags);
+}
+
+function optValidateRegexList(id, label) {
+    const input = document.getElementById(id);
+    for (const value of optActiveLinesFromTextarea(id)) {
+        try {
+            optCompileUrlRegex(value);
+        } catch (error) {
+            input.setAttribute('aria-invalid', 'true');
+            return `${label} contains an invalid expression: ${value}`;
+        }
+    }
+    input.removeAttribute('aria-invalid');
+    return '';
+}
+
+function optValidateDomainList(id, label) {
+    const input = document.getElementById(id);
+    for (const value of optActiveLinesFromTextarea(id)) {
+        let candidate = value.toLowerCase();
+        if (candidate.startsWith('*.')) {
+            candidate = candidate.slice(2);
+        }
+        try {
+            const parsed = new URL(candidate.includes('://') ? candidate : 'http://' + candidate);
+            if (!parsed.hostname) {
+                throw new Error('Missing hostname');
+            }
+        } catch (error) {
+            input.setAttribute('aria-invalid', 'true');
+            return `${label} contains an invalid domain or URL: ${value}`;
+        }
+    }
+    input.removeAttribute('aria-invalid');
+    return '';
+}
+
+async function optSaveUrlRules() {
+    const status = document.getElementById('url_rules_status');
+    const validationError = optValidateDomainList('whitelist_domains', 'Whitelist')
+        || optValidateRegexList('whitelist_regex', 'Whitelist')
+        || optValidateDomainList('blacklist_domains', 'Blacklist')
+        || optValidateRegexList('blacklist_regex', 'Blacklist');
+    if (validationError) {
+        status.dataset.state = 'error';
+        status.textContent = validationError;
+        return;
+    }
+
+    const rules = {
+        whitelist: {
+            domains: optLinesFromTextarea('whitelist_domains'),
+            regex: optLinesFromTextarea('whitelist_regex')
+        },
+        blacklist: {
+            domains: optLinesFromTextarea('blacklist_domains'),
+            regex: optLinesFromTextarea('blacklist_regex')
+        }
+    };
+
+    try {
+        await browser.storage.local.set({ url_filter_rules: rules });
+        status.dataset.state = 'saved';
+        status.textContent = 'Saved.';
+    } catch (error) {
+        status.dataset.state = 'error';
+        status.textContent = 'Could not save URL lists.';
+        console.error('Error saving URL rules', error);
+    }
 }
 
 document.addEventListener("DOMContentLoaded", optRestoreOptions);
+document.getElementById('save_url_rules').addEventListener('click', optSaveUrlRules);
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for (var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function () {

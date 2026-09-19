@@ -35,6 +35,11 @@ const BK_revealAllowlistMaxSize = 1000;
 let BK_isRevealMenuCreated = false;
 let BK_isOnOffSwitchShown = false;
 
+function bkClearRevealAllowlist() {
+    BK_revealAllowlist.clear();
+    BK_revealAllowlistQueue.length = 0;
+}
+
 let BK_isInitialized = false;
 function bkUpdateRevealMenuVisibility(isVisible) {
     if (!browser?.menus?.update) {
@@ -545,12 +550,16 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         WJR_DEBUG && console.log('WEBREQ: Skipping filtering for silent collections preview', details.url);
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
-        WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
-        return;
-    }
     if (bkIsRevealAllowed(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
+        return;
+    }
+    if (whtIsBlacklisted(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: URL blacklist '+details.url);
+        return { cancel: true };
+    }
+    if (whtIsWhitelisted(details.url)) {
+        WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
     let mimeType = '';
@@ -645,6 +654,10 @@ async function bkDirectTypedUrlListener(details) {
         if (header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
             if(mimeType.startsWith('image/')) {
+                if (whtIsBlacklisted(details.url)) {
+                    WJR_DEBUG && console.log('WEBREQ: Direct typed URL blacklist '+details.url);
+                    return { cancel: true };
+                }
                 WJR_DEBUG && console.log('WEBREQ: Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
                 return bkImageListener(details,true);
             }
@@ -741,6 +754,67 @@ async function bkBase64ContentListener(details) {
 ////////////////////////////Context Menu////////////////////////////
 
 if (browser.menus) {
+    const BK_URL_RULE_MENU_IDS = {
+        whitelistParent: 'wingman-whitelist-image-domain',
+        whitelistHost: 'wingman-whitelist-image-host',
+        whitelistParentDomain: 'wingman-whitelist-image-parent-domain',
+        blacklistParent: 'wingman-blacklist-image-domain',
+        blacklistHost: 'wingman-blacklist-image-host',
+        blacklistParentDomain: 'wingman-blacklist-image-parent-domain'
+    };
+    const BK_URL_RULE_MENU_ACTIONS = {
+        [BK_URL_RULE_MENU_IDS.whitelistHost]: { listName: 'whitelist', scope: 'host' },
+        [BK_URL_RULE_MENU_IDS.whitelistParentDomain]: { listName: 'whitelist', scope: 'parentDomain' },
+        [BK_URL_RULE_MENU_IDS.blacklistHost]: { listName: 'blacklist', scope: 'host' },
+        [BK_URL_RULE_MENU_IDS.blacklistParentDomain]: { listName: 'blacklist', scope: 'parentDomain' }
+    };
+
+    function bkUpdateUrlRuleContextMenus(info) {
+        const scopes = whtGetDomainScopes(info.srcUrl);
+        const isVisible = scopes !== null;
+        const hasParentDomain = !!scopes?.parentDomain;
+        const updates = [
+            browser.menus.update(BK_URL_RULE_MENU_IDS.whitelistParent, { visible: isVisible }),
+            browser.menus.update(BK_URL_RULE_MENU_IDS.blacklistParent, { visible: isVisible }),
+            browser.menus.update(BK_URL_RULE_MENU_IDS.whitelistHost, {
+                visible: isVisible,
+                title: isVisible ? `This host: ${scopes.host}` : 'This host'
+            }),
+            browser.menus.update(BK_URL_RULE_MENU_IDS.blacklistHost, {
+                visible: isVisible,
+                title: isVisible ? `This host: ${scopes.host}` : 'This host'
+            }),
+            browser.menus.update(BK_URL_RULE_MENU_IDS.whitelistParentDomain, {
+                visible: hasParentDomain,
+                title: hasParentDomain ? `Broader: ${scopes.parentDomain} and *.${scopes.parentDomain}` : 'Broader domain'
+            }),
+            browser.menus.update(BK_URL_RULE_MENU_IDS.blacklistParentDomain, {
+                visible: hasParentDomain,
+                title: hasParentDomain ? `Broader: ${scopes.parentDomain} and *.${scopes.parentDomain}` : 'Broader domain'
+            })
+        ];
+        Promise.all(updates)
+            .then(() => browser.menus.refresh())
+            .catch(error => console.warn('URL FILTER: Unable to update context menus', error));
+    }
+
+    async function bkHideContextImage(info, tab) {
+        if (tab?.id === undefined || info.targetElementId === undefined) {
+            return;
+        }
+        try {
+            await browser.tabs.executeScript(tab.id, {
+                frameId: info.frameId,
+                code: `(() => {
+                    const target = browser.menus.getTargetElement(${JSON.stringify(info.targetElementId)});
+                    target?.style?.setProperty('visibility', 'hidden', 'important');
+                })();`
+            });
+        } catch (error) {
+            console.warn('URL FILTER: Rule saved, but the current image could not be hidden', error);
+        }
+    }
+
     const BK_REVEAL_TARGET_RESOLVER = `
         const wingmanRevealDataAttributes = [
             'data-src',
@@ -949,12 +1023,55 @@ if (browser.menus) {
         documentUrlPatterns: ["*://*/*"],
         contexts: ["image"],
         onclick(info, tab) {
-          browser.tabs.executeScript(tab.id, {
-            frameId: info.frameId,
-            code: `browser.menus.getTargetElement(${info.targetElementId}).style.visibility="hidden";`,
-          });
+          bkHideContextImage(info, tab);
         },
       });
+
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.whitelistParent,
+        title: 'Whitelist images from...',
+        documentUrlPatterns: ['*://*/*'],
+        contexts: ['image'],
+        visible: false
+    });
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.whitelistHost,
+        parentId: BK_URL_RULE_MENU_IDS.whitelistParent,
+        title: 'This host',
+        contexts: ['image'],
+        visible: false
+    });
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.whitelistParentDomain,
+        parentId: BK_URL_RULE_MENU_IDS.whitelistParent,
+        title: 'Broader domain',
+        contexts: ['image'],
+        visible: false
+    });
+
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.blacklistParent,
+        title: 'Blacklist images from...',
+        documentUrlPatterns: ['*://*/*'],
+        contexts: ['image'],
+        visible: false
+    });
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.blacklistHost,
+        parentId: BK_URL_RULE_MENU_IDS.blacklistParent,
+        title: 'This host',
+        contexts: ['image'],
+        visible: false
+    });
+    browser.menus.create({
+        id: BK_URL_RULE_MENU_IDS.blacklistParentDomain,
+        parentId: BK_URL_RULE_MENU_IDS.blacklistParent,
+        title: 'Broader domain',
+        contexts: ['image'],
+        visible: false
+    });
+
+    browser.menus.onShown.addListener(bkUpdateUrlRuleContextMenus);
 
     browser.menus.create({
         id: "wingman-reveal-blocked-image",
@@ -967,6 +1084,26 @@ if (browser.menus) {
     bkUpdateRevealMenuVisibility(BK_isOnOffSwitchShown);
 
     browser.menus.onClicked.addListener(async (info, tab) => {
+        const urlRuleAction = BK_URL_RULE_MENU_ACTIONS[info.menuItemId];
+        if (urlRuleAction) {
+            const scopes = whtGetDomainScopes(info.srcUrl);
+            const domain = scopes && scopes[urlRuleAction.scope];
+            if (!domain) {
+                console.warn('URL FILTER: Context-menu image has no supported domain', info.srcUrl);
+                return;
+            }
+            try {
+                await whtAddDomainRule(urlRuleAction.listName, domain);
+                if (urlRuleAction.listName === 'blacklist') {
+                    await bkHideContextImage(info, tab);
+                }
+                console.log(`URL FILTER: Added ${domain} to ${urlRuleAction.listName}`);
+            } catch (error) {
+                console.error('URL FILTER: Unable to save context-menu rule', error);
+            }
+            return;
+        }
+
         if (info.menuItemId !== "wingman-reveal-blocked-image") {
             return;
         }
