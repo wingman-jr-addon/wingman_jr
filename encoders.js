@@ -131,8 +131,11 @@ function encHasKnownBinaryExtension(url) {
         .match(/\.([^.\/]+)$/)?.[1];
 
     return new Set([
-        '7z', 'bin', 'dll', 'dmg', 'exe', 'img', 'iso',
-        'msi', 'ocx', 'rar', 'tar', 'zip'
+        '7z', 'appx', 'appxbundle', 'bin', 'bz2', 'cab', 'com',
+        'cpl', 'dll', 'dmg', 'drv', 'esd', 'exe', 'gz', 'img',
+        'iso', 'msi', 'msix', 'msixbundle', 'msp', 'mst', 'msu',
+        'ocx', 'rar', 'scr', 'swm', 'sys', 'tar', 'tbz2', 'tgz',
+        'txz', 'vhd', 'vhdx', 'wim', 'xpi', 'xz', 'zip', 'zst'
     ]).has(extension);
 }
 
