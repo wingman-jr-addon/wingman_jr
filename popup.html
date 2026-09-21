@@ -21,7 +21,7 @@
             body {
                 min-width: 300px;
                 max-width: 360px;
-                padding: 12px 14px 14px;
+                padding: 9px 12px 11px;
                 box-sizing: border-box;
                 background: #f3f4f6;
                 color: #1f2a44;
@@ -29,8 +29,8 @@
             #popupForm {
                 display: flex;
                 flex-direction: column;
-                gap: 12px;
-                padding: 16px;
+                gap: 10px;
+                padding: 14px;
                 border: 1px solid rgba(0, 0, 0, 0.06);
                 border-radius: 10px;
                 background: #fff;
@@ -98,7 +98,7 @@
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
-                padding: 9px 11px;
+                padding: 8px 10px;
                 border: 1px solid rgba(31, 42, 68, 0.12);
                 border-radius: 8px;
                 background: linear-gradient(135deg, rgba(47, 128, 237, 0.08), rgba(47, 128, 237, 0.02));
@@ -130,6 +130,7 @@
                 font-size: 10px;
             }
             .master-power {
+                --pause-progress: 0deg;
                 display: inline-flex;
                 align-items: center;
                 cursor: pointer;
@@ -159,6 +160,15 @@
                 background: #2f80ed;
                 color: #fff;
             }
+            .master-power[data-mode=paused] .power-graphic {
+                border-color: #64748b;
+                background: conic-gradient(
+                    from -90deg,
+                    rgba(47, 128, 237, 0.42) 0deg var(--pause-progress),
+                    #eef1f5 var(--pause-progress) 360deg
+                );
+                color: #1f2a44;
+            }
             .master-power input:focus-visible + .power-graphic,
             .zone-options input[type=radio]:focus-visible + label {
                 outline: 2px solid #2f80ed;
@@ -167,6 +177,36 @@
             .master-power input:disabled + .power-graphic {
                 cursor: not-allowed;
                 opacity: 0.45;
+            }
+            .smart-pause-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                padding-top: 8px;
+                border-top: 1px solid rgba(31, 42, 68, 0.12);
+            }
+            .smart-pause-label {
+                font-size: 11px;
+                font-weight: 700;
+            }
+            .smart-pause-actions {
+                display: flex;
+                gap: 5px;
+            }
+            .smart-pause-actions button {
+                padding: 3px 7px;
+                border: 1px solid rgba(47, 128, 237, 0.35);
+                border-radius: 5px;
+                background: #fff;
+                color: #2f80ed;
+                cursor: pointer;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            .smart-pause-actions button[aria-pressed=true] {
+                border-color: #2f80ed;
+                background: rgba(47, 128, 237, 0.12);
             }
             .visually-hidden {
                 position: absolute;
@@ -215,7 +255,7 @@
             .zone-options {
                 display: grid;
                 grid-template-columns: 1fr;
-                gap: 8px;
+                gap: 7px;
             }
             .zone-options input[type=radio] + label {
                 display: grid;
@@ -300,7 +340,7 @@
             .footer-links {
                 display: flex;
                 justify-content: flex-end;
-                padding-top: 9px;
+                padding-top: 7px;
                 border-top: 1px solid #d5dae6;
             }
             .footer-links a {
@@ -327,13 +367,21 @@
                 <div class="filtering-row">
                     <span class="filtering-row-text">
                         <span class="filtering-row-title">Master filtering</span>
-                        <span class="filtering-row-detail">Temporary pause for every site.</span>
+                        <span class="filtering-row-detail" id="masterFilteringDetail">Filtering is active everywhere.</span>
                     </span>
-                    <label class="master-power" title="Turn master filtering on or off">
+                    <label class="master-power" id="masterPower" data-mode="on" title="Turn filtering off">
                         <span class="visually-hidden">Master filtering</span>
-                        <input type="checkbox" id="isOnOff">
+                        <input type="checkbox" id="isOnOff" aria-label="Turn filtering off">
                         <span class="power-graphic" aria-hidden="true">&#x23FB;</span>
                     </label>
+                </div>
+                <div class="smart-pause-row">
+                    <span class="smart-pause-label">Smart Pause</span>
+                    <span class="smart-pause-actions">
+                        <button type="button" data-pause-minutes="1" aria-pressed="false" aria-label="Pause filtering everywhere for 1 minute">1 min</button>
+                        <button type="button" data-pause-minutes="5" aria-pressed="false" aria-label="Pause filtering everywhere for 5 minutes">5 min</button>
+                        <button type="button" data-pause-minutes="15" aria-pressed="false" aria-label="Pause filtering everywhere for 15 minutes">15 min</button>
+                    </span>
                 </div>
             </div>
 

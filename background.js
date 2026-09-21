@@ -58,7 +58,7 @@ function bkUpdateRevealMenuVisibility(isVisible) {
 function bkInitialize() {
     statusOnLoaded();
     bkUpdateFromSettings();
-    bkSetEnabled(true); //always start on
+    bkRestoreMasterFilteringState();
 }
 
 function bkOnClientConnected(port) {
@@ -1441,7 +1441,137 @@ function bkRefreshCallbackRegistration() {
     WJR_DEBUG && console.log('CONFIG: Callback wireup refresh complete!');
 }
 
+const BK_MASTER_PAUSE_STORAGE_KEY = 'master_smart_pause';
+const BK_MASTER_PAUSE_DURATIONS_MS = Object.freeze({
+    1: 1 * 60 * 1000,
+    5: 5 * 60 * 1000,
+    15: 15 * 60 * 1000
+});
+const BK_MASTER_PAUSE_STATUS_INTERVAL_MS = 1000;
 let BK_isEnabled = false;
+let BK_masterPauseUntil = null;
+let BK_masterPauseDurationMs = null;
+let BK_masterPauseTimer = null;
+
+function bkGetMasterFilteringState() {
+    const isPaused = !BK_isEnabled
+        && Number.isFinite(BK_masterPauseUntil)
+        && BK_masterPauseUntil > Date.now();
+    return {
+        onOff: BK_isEnabled ? 'on' : 'off',
+        mode: BK_isEnabled ? 'on' : (isPaused ? 'paused' : 'off'),
+        pauseUntil: isPaused ? BK_masterPauseUntil : null,
+        pauseDurationMs: isPaused ? BK_masterPauseDurationMs : null
+    };
+}
+
+function bkClearMasterPauseTimer() {
+    if (BK_masterPauseTimer !== null) {
+        clearTimeout(BK_masterPauseTimer);
+        BK_masterPauseTimer = null;
+    }
+}
+
+function bkUpdateMasterFilteringStatus() {
+    const state = bkGetMasterFilteringState();
+    statusSetMasterFilteringState(state.mode, state.pauseUntil);
+}
+
+function bkScheduleMasterPauseTimer() {
+    bkClearMasterPauseTimer();
+    function updatePauseStatus() {
+        const remainingMs = BK_masterPauseUntil - Date.now();
+        if (remainingMs <= 0) {
+            bkResumeMasterFiltering();
+            return;
+        }
+        bkUpdateMasterFilteringStatus();
+        BK_masterPauseTimer = setTimeout(
+            updatePauseStatus,
+            Math.min(BK_MASTER_PAUSE_STATUS_INTERVAL_MS, remainingMs)
+        );
+    }
+    if (Number.isFinite(BK_masterPauseUntil)) {
+        updatePauseStatus();
+    }
+}
+
+async function bkClearStoredMasterPause() {
+    try {
+        await browser.storage.local.remove(BK_MASTER_PAUSE_STORAGE_KEY);
+    } catch (error) {
+        console.error('CONFIG: Unable to clear Smart Pause', error);
+    }
+}
+
+async function bkResumeMasterFiltering() {
+    bkClearMasterPauseTimer();
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    await bkClearStoredMasterPause();
+    bkSetEnabled(true);
+    bkUpdateMasterFilteringStatus();
+    return bkGetMasterFilteringState();
+}
+
+async function bkSetMasterFilteringOff() {
+    bkClearMasterPauseTimer();
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    await bkClearStoredMasterPause();
+    bkSetEnabled(false);
+    bkUpdateMasterFilteringStatus();
+    return bkGetMasterFilteringState();
+}
+
+async function bkStartMasterPause(durationMinutes) {
+    const durationMs = BK_MASTER_PAUSE_DURATIONS_MS[durationMinutes];
+    if (!durationMs) {
+        return bkGetMasterFilteringState();
+    }
+    BK_masterPauseDurationMs = durationMs;
+    BK_masterPauseUntil = Date.now() + durationMs;
+    try {
+        await browser.storage.local.set({
+            [BK_MASTER_PAUSE_STORAGE_KEY]: {
+                until: BK_masterPauseUntil,
+                durationMs: BK_masterPauseDurationMs
+            }
+        });
+    } catch (error) {
+        console.error('CONFIG: Unable to persist Smart Pause', error);
+    }
+    bkSetEnabled(false);
+    bkScheduleMasterPauseTimer();
+    return bkGetMasterFilteringState();
+}
+
+async function bkRestoreMasterFilteringState() {
+    try {
+        const result = await browser.storage.local.get(BK_MASTER_PAUSE_STORAGE_KEY);
+        const storedPause = result[BK_MASTER_PAUSE_STORAGE_KEY];
+        const until = Number(storedPause?.until);
+        const durationMs = Number(storedPause?.durationMs);
+        if (Number.isFinite(until)
+            && Number.isFinite(durationMs)
+            && until > Date.now()
+            && Object.values(BK_MASTER_PAUSE_DURATIONS_MS).includes(durationMs)) {
+            BK_masterPauseUntil = until;
+            BK_masterPauseDurationMs = durationMs;
+            bkSetEnabled(false);
+            bkScheduleMasterPauseTimer();
+            return;
+        }
+        await bkClearStoredMasterPause();
+    } catch (error) {
+        console.error('CONFIG: Unable to restore Smart Pause', error);
+    }
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    bkSetEnabled(true);
+    bkUpdateMasterFilteringStatus();
+}
+
 function bkSetEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Setting enabled to '+isOn);
     if(isOn == BK_isEnabled) {
@@ -1548,10 +1678,18 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse({ isZoneAutomatic: BK_isZoneAutomatic });
     }
     else if (request.type == 'getOnOff') {
-        sendResponse({ onOff: BK_isEnabled ? 'on' : 'off' });
+        if (BK_masterPauseUntil !== null && BK_masterPauseUntil <= Date.now()) {
+            return bkResumeMasterFiltering();
+        }
+        sendResponse(bkGetMasterFilteringState());
     }
     else if (request.type == 'setOnOff') {
-        bkSetEnabled(request.onOff == 'on');
+        return request.onOff == 'on'
+            ? bkResumeMasterFiltering()
+            : bkSetMasterFilteringOff();
+    }
+    else if (request.type == 'setMasterPause') {
+        return bkStartMasterPause(request.durationMinutes);
     }
     else if (request.type == 'getSiteFilteringState') {
         const siteState = bkGetSiteFilteringState(request.url);

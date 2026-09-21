@@ -31,6 +31,9 @@ let STATUS_openVideoFilters = { };
 let STATUS_videoProgressCounter = 0;
 let STATUS_videoLastBlockProgressCounter = -999;
 
+let STATUS_masterFilteringMode = 'on';
+let STATUS_masterPauseUntil = null;
+
 const STATUS_ICON_SIZE = 32;
 let STATUS_iconCanvas = document.createElement('canvas');
 STATUS_iconCanvas.width = STATUS_ICON_SIZE;
@@ -41,6 +44,7 @@ let STATUS_isAdaptiveOutline = false;
 
 let STATUS_lastZoneFill = '';
 let STATUS_lastIsAdaptiveOutline = false;
+let STATUS_lastMasterFilteringMode = '';
 let STATUS_lastProgressWidth = 0;
 let STATUS_lastIsVideoInProgress = true;
 let STATUS_lastIsVideoBlockShown = true;
@@ -54,15 +58,17 @@ const STATUS_blockFadeoutColors = [
 function statusRegenerateIcon(force = false) {
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
-    if(STATUS_openImageHighWaterCount > 0) {
+    if(STATUS_masterFilteringMode === 'on' && STATUS_openImageHighWaterCount > 0) {
         let currentLength = statusGetOpenImageCount();
         let percentage = currentLength / STATUS_openImageHighWaterCount;
         currentProgressWidth = Math.round(percentage*24);
     }
 
-    let isVideoInProgress = statusGetOpenVideoCount() > 0;
+    let isVideoInProgress = STATUS_masterFilteringMode === 'on'
+        && statusGetOpenVideoCount() > 0;
     let stepsSinceLastBlock = STATUS_videoProgressCounter - STATUS_videoLastBlockProgressCounter
-    let isVideoBlockShown =  stepsSinceLastBlock < STATUS_blockFadeoutColors.length;
+    let isVideoBlockShown = STATUS_masterFilteringMode === 'on'
+        && stepsSinceLastBlock < STATUS_blockFadeoutColors.length;
     
 
     // TODO reinstate STATUS_videoProgressCounter == STATUS_lastVideoProgressCounter
@@ -70,6 +76,7 @@ function statusRegenerateIcon(force = false) {
     if(!force &&
         STATUS_zoneFill == STATUS_lastZoneFill &&
         STATUS_isAdaptiveOutline == STATUS_lastIsAdaptiveOutline &&
+        STATUS_masterFilteringMode == STATUS_lastMasterFilteringMode &&
         currentProgressWidth == STATUS_lastProgressWidth &&
         isVideoInProgress == STATUS_lastIsVideoInProgress &&
         isVideoBlockShown == STATUS_lastIsVideoBlockShown) {
@@ -79,6 +86,7 @@ function statusRegenerateIcon(force = false) {
     // 2. Save current state to last state
     STATUS_lastZoneFill = STATUS_zoneFill;
     STATUS_lastIsAdaptiveOutline = STATUS_isAdaptiveOutline;
+    STATUS_lastMasterFilteringMode = STATUS_masterFilteringMode;
     STATUS_lastProgressWidth = currentProgressWidth;
     STATUS_lastIsVideoInProgress = isVideoInProgress;
     STATUS_lastIsVideoBlockShown = isVideoBlockShown;
@@ -87,6 +95,9 @@ function statusRegenerateIcon(force = false) {
     // 3. Actually generate and set new icon
     let ctx = STATUS_iconCanvas.getContext('2d');
     ctx.clearRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
+    ctx.globalAlpha = STATUS_masterFilteringMode === 'paused'
+        ? 0.55
+        : (STATUS_masterFilteringMode === 'off' ? 0.35 : 1);
 
     // Zone background
     if (STATUS_zoneFill) {
@@ -139,6 +150,30 @@ function statusRegenerateIcon(force = false) {
         ctx.fillText('V', 24, 24);
     }
 
+    ctx.globalAlpha = 1;
+    if (STATUS_masterFilteringMode !== 'on') {
+        const markerX = 25;
+        const markerY = 25;
+        ctx.beginPath();
+        ctx.arc(markerX, markerY, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#343A40';
+        ctx.fill();
+
+        if (STATUS_masterFilteringMode === 'paused') {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(22, 21.5, 2, 7);
+            ctx.fillRect(26, 21.5, 2, 7);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(21.5, 28.5);
+            ctx.lineTo(28.5, 21.5);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+    }
+
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
     browser.browserAction.setIcon({ imageData: imageData });
 }
@@ -151,6 +186,32 @@ function statusInitialize() {
 
 function statusOnLoaded() {
     browser.browserAction.setTitle({title: "Wingman Jr."});
+}
+
+function statusFormatPauseRemaining(pauseUntil) {
+    const totalSeconds = Math.max(0, Math.ceil((pauseUntil - Date.now()) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes === 0) {
+        return `${seconds}s`;
+    }
+    return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+}
+
+function statusSetMasterFilteringState(mode, pauseUntil) {
+    STATUS_masterFilteringMode = mode;
+    STATUS_masterPauseUntil = mode === 'paused' ? pauseUntil : null;
+    statusUpdateVisuals();
+}
+
+function statusGetMasterFilteringTitle() {
+    if (STATUS_masterFilteringMode === 'paused' && Number.isFinite(STATUS_masterPauseUntil)) {
+        return `Filtering resumes in ${statusFormatPauseRemaining(STATUS_masterPauseUntil)}\r\n`;
+    }
+    if (STATUS_masterFilteringMode === 'off') {
+        return 'Filtering is off\r\n';
+    }
+    return '';
 }
 
 function statusSetImageZoneTrusted() {
@@ -247,7 +308,8 @@ function statusUpdateVisuals() {
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    browser.browserAction.setTitle({ title: 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'
+    browser.browserAction.setTitle({ title: statusGetMasterFilteringTitle()
+        + 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'
         + '               ' + STATUS_videoCounts['block']+'/'+STATUS_videoCheckCount+' videos\r\n'
         + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });
 

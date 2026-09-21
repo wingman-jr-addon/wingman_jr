@@ -1,6 +1,12 @@
 let POP_activeTab = null;
 let POP_isMasterFilteringEnabled = true;
 let POP_isOnOffSwitchShown = false;
+let POP_masterFilteringState = {
+    mode: 'on',
+    pauseUntil: null,
+    pauseDurationMs: null
+};
+let POP_masterCountdownInterval = null;
 let POP_siteState = {
     supported: false,
     hostname: null,
@@ -17,6 +23,61 @@ function popCapitalize(value) {
         : '';
 }
 
+function popFormatPauseRemaining(pauseUntil) {
+    const totalSeconds = Math.max(0, Math.ceil((pauseUntil - Date.now()) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes === 0) {
+        return `${seconds}s`;
+    }
+    return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+}
+
+function popSetMasterFilteringState(state) {
+    let mode = ['on', 'off', 'paused'].includes(state?.mode)
+        ? state.mode
+        : (state?.onOff === 'off' ? 'off' : 'on');
+    const pauseUntil = Number(state?.pauseUntil);
+    const pauseDurationMs = Number(state?.pauseDurationMs);
+    if (mode === 'paused'
+        && (!Number.isFinite(pauseUntil)
+            || !Number.isFinite(pauseDurationMs)
+            || pauseDurationMs <= 0)) {
+        mode = 'off';
+    }
+    POP_masterFilteringState = {
+        mode: mode,
+        pauseUntil: mode === 'paused' ? pauseUntil : null,
+        pauseDurationMs: mode === 'paused' ? pauseDurationMs : null
+    };
+    POP_isMasterFilteringEnabled = mode === 'on';
+}
+
+function popUpdateMasterCountdown() {
+    if (POP_masterFilteringState.mode !== 'paused') {
+        return;
+    }
+    if (POP_masterFilteringState.pauseUntil <= Date.now()) {
+        browser.runtime.sendMessage({ type: 'getOnOff' }).then(state => {
+            popSetMasterFilteringState(state);
+            popStartMasterCountdown();
+            popUpdateFilteringUi();
+        }, error => console.log('Error refreshing Smart Pause: '+error));
+        return;
+    }
+    popUpdateFilteringUi();
+}
+
+function popStartMasterCountdown() {
+    if (POP_masterCountdownInterval !== null) {
+        clearInterval(POP_masterCountdownInterval);
+        POP_masterCountdownInterval = null;
+    }
+    if (POP_masterFilteringState.mode === 'paused') {
+        POP_masterCountdownInterval = setInterval(popUpdateMasterCountdown, 1000);
+    }
+}
+
 function popUpdateFilteringUi() {
     const status = document.getElementById('filteringStatus');
     const offInput = document.getElementById('site_mode_off');
@@ -24,8 +85,41 @@ function popUpdateFilteringUi() {
     const resetButton = document.getElementById('resetSiteMode');
     const modeInputs = document.querySelectorAll('input[name="siteMode"]');
     const canConfigureSite = POP_siteState.supported;
+    const powerControl = document.getElementById('masterPower');
+    const powerInput = document.getElementById('isOnOff');
+    const masterDetail = document.getElementById('masterFilteringDetail');
 
-    document.getElementById('isOnOff').checked = POP_isMasterFilteringEnabled;
+    powerInput.checked = POP_isMasterFilteringEnabled;
+    powerControl.dataset.mode = POP_masterFilteringState.mode;
+    let powerTooltip = 'Turn filtering off';
+    let pauseProgressDegrees = 0;
+    if (POP_masterFilteringState.mode === 'paused') {
+        powerTooltip = `Filtering resumes in ${popFormatPauseRemaining(POP_masterFilteringState.pauseUntil)}`;
+        masterDetail.textContent = 'Filtering is paused temporarily.';
+        const remainingMs = Math.max(0, POP_masterFilteringState.pauseUntil - Date.now());
+        pauseProgressDegrees = Math.min(
+            360,
+            360 * remainingMs / POP_masterFilteringState.pauseDurationMs
+        );
+    } else if (POP_masterFilteringState.mode === 'off') {
+        powerTooltip = 'Turn filtering on';
+        masterDetail.textContent = 'Filtering is off until resumed.';
+    } else {
+        masterDetail.textContent = 'Filtering is active everywhere.';
+    }
+    powerControl.title = powerTooltip;
+    powerInput.setAttribute('aria-label', powerTooltip);
+    powerControl.style.setProperty('--pause-progress', `${pauseProgressDegrees}deg`);
+    for (const button of document.querySelectorAll('[data-pause-minutes]')) {
+        const durationMs = Number(button.dataset.pauseMinutes) * 60 * 1000;
+        button.setAttribute(
+            'aria-pressed',
+            POP_masterFilteringState.mode === 'paused'
+                && POP_masterFilteringState.pauseDurationMs === durationMs
+                ? 'true'
+                : 'false'
+        );
+    }
     document.getElementById('siteFilteringHostname').textContent = POP_siteState.supported
         ? POP_siteState.hostname
         : 'Unavailable on this page';
@@ -64,8 +158,11 @@ function popUpdateFilteringUi() {
         source.textContent = `Using default: ${popCapitalize(POP_siteState.defaultMode)}.`;
     }
 
-    if (!POP_isMasterFilteringEnabled) {
+    if (POP_masterFilteringState.mode === 'paused') {
         status.textContent = 'Paused everywhere';
+        status.dataset.zone = 'off';
+    } else if (POP_masterFilteringState.mode === 'off') {
+        status.textContent = 'Off everywhere';
         status.dataset.zone = 'off';
     } else if (!POP_siteState.supported) {
         status.textContent = 'Active';
@@ -102,21 +199,41 @@ async function popSendSiteChange(message) {
 
 window.onload = async function() {
     document.getElementById('isOnOff').addEventListener('change', async event => {
-        const previousValue = POP_isMasterFilteringEnabled;
-        POP_isMasterFilteringEnabled = event.target.checked;
+        const previousState = { ...POP_masterFilteringState };
+        popSetMasterFilteringState({ mode: event.target.checked ? 'on' : 'off' });
         popUpdateFilteringUi();
         try {
-            await browser.runtime.sendMessage({
+            const state = await browser.runtime.sendMessage({
                 type: 'setOnOff',
-                onOff: POP_isMasterFilteringEnabled ? 'on' : 'off'
+                onOff: event.target.checked ? 'on' : 'off'
             });
+            popSetMasterFilteringState(state);
+            popStartMasterCountdown();
+            popUpdateFilteringUi();
             popShowReloadButton();
         } catch (error) {
-            POP_isMasterFilteringEnabled = previousValue;
+            popSetMasterFilteringState(previousState);
             popUpdateFilteringUi();
             console.log('Error setting master filtering: '+error);
         }
     });
+
+    for (const button of document.querySelectorAll('[data-pause-minutes]')) {
+        button.addEventListener('click', async event => {
+            try {
+                const state = await browser.runtime.sendMessage({
+                    type: 'setMasterPause',
+                    durationMinutes: Number(event.currentTarget.dataset.pauseMinutes)
+                });
+                popSetMasterFilteringState(state);
+                popStartMasterCountdown();
+                popUpdateFilteringUi();
+                popShowReloadButton();
+            } catch (error) {
+                console.log('Error setting Smart Pause: '+error);
+            }
+        });
+    }
 
     for (const input of document.querySelectorAll('input[name="siteMode"]')) {
         input.addEventListener('click', async event => {
@@ -165,7 +282,8 @@ window.onload = async function() {
 
     try {
         const message = await browser.runtime.sendMessage({type:'getOnOff'});
-        POP_isMasterFilteringEnabled = message.onOff === 'on';
+        popSetMasterFilteringState(message);
+        popStartMasterCountdown();
     } catch (error) {
         console.log('Error getting master filtering: '+error);
     }
