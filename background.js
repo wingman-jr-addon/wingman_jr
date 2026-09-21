@@ -550,15 +550,20 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         WJR_DEBUG && console.log('WEBREQ: Skipping filtering for silent collections preview', details.url);
         return;
     }
+    const requestPolicy = whtGetRequestPolicy(details);
+    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED) {
+        WJR_DEBUG && console.log('WEBREQ: Filtering disabled for page site', details.url);
+        return;
+    }
     if (bkIsRevealAllowed(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
-    if (whtIsBlacklisted(details.url)) {
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_BLACKLISTED) {
         WJR_DEBUG && console.log('WEBREQ: URL blacklist '+details.url);
         return { cancel: true };
     }
-    if (whtIsWhitelisted(details.url)) {
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
@@ -640,7 +645,12 @@ async function bkDirectTypedUrlListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
+    const requestPolicy = whtGetRequestPolicy(details);
+    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED) {
+        WJR_DEBUG && console.log('WEBREQ: Direct typed page-site filtering disabled '+details.url);
+        return;
+    }
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
@@ -654,7 +664,7 @@ async function bkDirectTypedUrlListener(details) {
         if (header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
             if(mimeType.startsWith('image/')) {
-                if (whtIsBlacklisted(details.url)) {
+                if (requestPolicy === WHT_REQUEST_POLICY.URL_BLACKLISTED) {
                     WJR_DEBUG && console.log('WEBREQ: Direct typed URL blacklist '+details.url);
                     return { cancel: true };
                 }
@@ -676,7 +686,12 @@ async function bkBase64ContentListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
+    const requestPolicy = whtGetRequestPolicy(details);
+    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED) {
+        WJR_DEBUG && console.log('WEBREQ: Base64 page-site filtering disabled '+details.url);
+        return;
+    }
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
         WJR_DEBUG && console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
@@ -1430,6 +1445,12 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setOnOff') {
         bkSetEnabled(request.onOff == 'on');
+    }
+    else if (request.type == 'getSiteFilteringState') {
+        sendResponse(whtGetSiteFilteringState(request.url));
+    }
+    else if (request.type == 'setSiteFilteringEnabled') {
+        return whtSetSiteFilteringEnabled(request.url, request.enabled);
     }
     else if (request.type == 'getOnOffSwitchShown') {
         sendResponse({ isOnOffSwitchShown: BK_isOnOffSwitchShown });

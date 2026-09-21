@@ -47,9 +47,8 @@
             .filtering-control
             {
                 display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 10px;
+                flex-direction: column;
+                gap: 8px;
                 padding: 10px 12px;
                 border: 1px solid rgba(31, 42, 68, 0.12);
                 border-radius: 8px;
@@ -62,8 +61,9 @@
             .filtering-text
             {
                 display: flex;
-                flex-direction: column;
-                gap: 2px;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
             }
             .filtering-text .title
             {
@@ -78,7 +78,45 @@
                 font-size: 11px;
                 color: #4a5978;
             }
-            label#isOnOffSection
+            #filteringStatus
+            {
+                padding: 2px 7px;
+                border-radius: 10px;
+                background: rgba(47, 128, 237, 0.12);
+                font-size: 10px;
+                font-weight: 700;
+                white-space: nowrap;
+            }
+            .filtering-row
+            {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                padding-top: 7px;
+                border-top: 1px solid rgba(31, 42, 68, 0.12);
+            }
+            .filtering-row-text
+            {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+                min-width: 0;
+            }
+            .filtering-row-title
+            {
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .filtering-row-detail
+            {
+                overflow: hidden;
+                color: #4a5978;
+                font-size: 10px;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            label.filter-toggle
             {
                 display: inline-flex;
                 align-items: center;
@@ -87,13 +125,14 @@
                 color: #1f2a44;
                 cursor: pointer;
                 font-weight: 600;
+                flex: 0 0 auto;
             }
-            label#isOnOffSection input
+            label.filter-toggle input
             {
                 position: absolute;
                 opacity: 0;
             }
-            label#isOnOffSection span.toggle-track
+            label.filter-toggle span.toggle-track
             {
                 position: relative;
                 width: 44px;
@@ -102,7 +141,7 @@
                 background: rgba(31, 42, 68, 0.2);
                 transition: background 0.2s ease;
             }
-            label#isOnOffSection span.toggle-track::after
+            label.filter-toggle span.toggle-track::after
             {
                 content: '';
                 position: absolute;
@@ -115,15 +154,36 @@
                 box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
                 transition: transform 0.2s ease;
             }
-            label#isOnOffSection input:checked + span.toggle-track
+            label.filter-toggle input:checked + span.toggle-track
             {
                 background: #2f80ed;
             }
-            label#isOnOffSection input:checked + span.toggle-track::after
+            label.filter-toggle input:checked + span.toggle-track::after
             {
                 transform: translateX(20px);
             }
-            label#isOnOffSection span.toggle-label
+            label.filter-toggle input:disabled + span.toggle-track
+            {
+                cursor: not-allowed;
+                opacity: 0.45;
+            }
+            label.filter-toggle span.toggle-label
+            {
+                display: none;
+            }
+            #reloadFilteringPage
+            {
+                align-self: flex-end;
+                padding: 4px 8px;
+                border: 1px solid rgba(47, 128, 237, 0.35);
+                border-radius: 5px;
+                background: #fff;
+                color: #2f80ed;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            #reloadFilteringPage[hidden]
             {
                 display: none;
             }
@@ -277,13 +337,31 @@
             <div class="filtering-control">
                 <div class="filtering-text">
                     <span class="title">Filtering</span>
-                    <span class="subtitle">Quickly pause protection if you need a break.</span>
+                    <span id="filteringStatus">Active</span>
                 </div>
-                <label id="isOnOffSection">
-                    <span class="toggle-label">Filtering</span>
-                    <input type="checkbox" id="isOnOff">
-                    <span class="toggle-track"></span>
-                </label>
+                <div class="filtering-row">
+                    <span class="filtering-row-text">
+                        <span class="filtering-row-title">Master filtering</span>
+                        <span class="filtering-row-detail">Temporary pause for every site.</span>
+                    </span>
+                    <label id="isOnOffSection" class="filter-toggle">
+                        <span class="toggle-label">Master filtering</span>
+                        <input type="checkbox" id="isOnOff">
+                        <span class="toggle-track"></span>
+                    </label>
+                </div>
+                <div class="filtering-row" id="siteFilteringRow">
+                    <span class="filtering-row-text">
+                        <span class="filtering-row-title">Current site</span>
+                        <span class="filtering-row-detail" id="siteFilteringHostname">Checking site...</span>
+                    </span>
+                    <label id="isSiteOnOffSection" class="filter-toggle">
+                        <span class="toggle-label">Filtering on current site</span>
+                        <input type="checkbox" id="isSiteOnOff">
+                        <span class="toggle-track"></span>
+                    </label>
+                </div>
+                <button type="button" id="reloadFilteringPage" hidden>Reload page to apply</button>
             </div>
             <fieldset>
                 <legend>Select trust level</legend>

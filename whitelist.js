@@ -1,4 +1,11 @@
 const WHT_URL_RULES_STORAGE_KEY = 'url_filter_rules';
+const WHT_SITE_FILTERING_STORAGE_KEY = 'site_filtering_disabled_hosts';
+const WHT_REQUEST_POLICY = Object.freeze({
+    SITE_DISABLED: 'site-disabled',
+    URL_BLACKLISTED: 'url-blacklisted',
+    URL_WHITELISTED: 'url-whitelisted',
+    FILTER: 'filter'
+});
 const WHT_COMMON_SECOND_LEVEL_SUFFIXES = new Set([
     'ac', 'co', 'com', 'edu', 'gov', 'mil', 'net', 'org'
 ]);
@@ -19,6 +26,137 @@ const whtDefaultUrlRules = {
 };
 
 let whtUserRules = whtNormalizeRules(whtDefaultUrlRules);
+let whtDisabledSiteHosts = new Set();
+
+function whtHostnameFromUrl(value) {
+    if (typeof value !== 'string' || !value) {
+        return null;
+    }
+    try {
+        const parsed = new URL(value);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null;
+        }
+        const hostname = parsed.hostname.toLowerCase().replace(/^\.+|\.+$/g, '');
+        return hostname || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function whtNormalizeSiteHosts(hosts) {
+    if (!Array.isArray(hosts)) {
+        return [];
+    }
+    const normalized = new Set();
+    for (const value of hosts) {
+        if (typeof value !== 'string') {
+            continue;
+        }
+        const hostname = whtHostnameFromUrl('http://' + value.trim());
+        if (hostname) {
+            normalized.add(hostname);
+        }
+    }
+    return Array.from(normalized).sort();
+}
+
+function whtSetDisabledSiteHosts(hosts) {
+    whtDisabledSiteHosts = new Set(whtNormalizeSiteHosts(hosts));
+}
+
+function whtGetTopLevelPageUrl(details) {
+    if (!details || (typeof details !== 'object' && typeof details !== 'function')) {
+        return null;
+    }
+
+    try {
+        if (details.type === 'main_frame') {
+            return whtHostnameFromUrl(details.url) ? details.url : null;
+        }
+    } catch (error) {
+        return null;
+    }
+
+    let frameAncestors;
+    try {
+        frameAncestors = details.frameAncestors;
+    } catch (error) {
+        return null;
+    }
+
+    if (frameAncestors !== undefined && frameAncestors !== null) {
+        let ancestorCount;
+        try {
+            if (!Array.isArray(frameAncestors)) {
+                return null;
+            }
+            ancestorCount = frameAncestors.length;
+        } catch (error) {
+            return null;
+        }
+        if (ancestorCount > 0) {
+            try {
+                const topLevelUrl = frameAncestors[ancestorCount - 1].url;
+                return whtHostnameFromUrl(topLevelUrl) ? topLevelUrl : null;
+            } catch (error) {
+                return null;
+            }
+        }
+    }
+
+    for (const propertyName of ['documentUrl', 'originUrl']) {
+        try {
+            const candidate = details[propertyName];
+            if (whtHostnameFromUrl(candidate)) {
+                return candidate;
+            }
+        } catch (error) {
+            return null;
+        }
+    }
+    return null;
+}
+
+function whtGetTopLevelPageHostname(details) {
+    return whtHostnameFromUrl(whtGetTopLevelPageUrl(details));
+}
+
+function whtIsSiteFilteringDisabled(details) {
+    const hostname = whtGetTopLevelPageHostname(details);
+    return !!hostname && whtDisabledSiteHosts.has(hostname);
+}
+
+function whtGetSiteFilteringState(pageUrl) {
+    const hostname = whtHostnameFromUrl(pageUrl);
+    if (!hostname) {
+        return { supported: false, hostname: null, enabled: true };
+    }
+    return {
+        supported: true,
+        hostname: hostname,
+        enabled: !whtDisabledSiteHosts.has(hostname)
+    };
+}
+
+async function whtSetSiteFilteringEnabled(pageUrl, isEnabled) {
+    const hostname = whtHostnameFromUrl(pageUrl);
+    if (!hostname) {
+        return { supported: false, hostname: null, enabled: true };
+    }
+
+    const result = await browser.storage.local.get(WHT_SITE_FILTERING_STORAGE_KEY);
+    const hosts = new Set(whtNormalizeSiteHosts(result[WHT_SITE_FILTERING_STORAGE_KEY]));
+    if (isEnabled) {
+        hosts.delete(hostname);
+    } else {
+        hosts.add(hostname);
+    }
+    const savedHosts = Array.from(hosts).sort();
+    await browser.storage.local.set({ [WHT_SITE_FILTERING_STORAGE_KEY]: savedHosts });
+    whtSetDisabledSiteHosts(savedHosts);
+    return { supported: true, hostname: hostname, enabled: !!isEnabled };
+}
 
 function whtNormalizeRules(rules) {
     function normalizeList(list) {
@@ -161,6 +299,29 @@ function whtIsWhitelisted(url) {
     return whtRuleSetMatches(url, whtUserRules.whitelist);
 }
 
+function whtGetRequestPolicy(details) {
+    if (whtIsSiteFilteringDisabled(details)) {
+        return WHT_REQUEST_POLICY.SITE_DISABLED;
+    }
+
+    let requestUrl;
+    try {
+        requestUrl = details && details.url;
+    } catch (error) {
+        requestUrl = null;
+    }
+    if (typeof requestUrl !== 'string') {
+        return WHT_REQUEST_POLICY.FILTER;
+    }
+    if (whtIsBlacklisted(requestUrl)) {
+        return WHT_REQUEST_POLICY.URL_BLACKLISTED;
+    }
+    if (whtIsWhitelisted(requestUrl)) {
+        return WHT_REQUEST_POLICY.URL_WHITELISTED;
+    }
+    return WHT_REQUEST_POLICY.FILTER;
+}
+
 function whtSetUserRules(rules) {
     whtUserRules = whtNormalizeRules(rules);
     if (typeof bkClearRevealAllowlist === 'function') {
@@ -236,8 +397,15 @@ browser.storage.local.get(WHT_URL_RULES_STORAGE_KEY)
     })
     .catch(error => console.error('URL FILTER: Unable to load URL rules', error));
 
+browser.storage.local.get(WHT_SITE_FILTERING_STORAGE_KEY)
+    .then(result => whtSetDisabledSiteHosts(result[WHT_SITE_FILTERING_STORAGE_KEY]))
+    .catch(error => console.error('SITE FILTER: Unable to load disabled sites', error));
+
 browser.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && changes[WHT_URL_RULES_STORAGE_KEY]) {
         whtSetUserRules(changes[WHT_URL_RULES_STORAGE_KEY].newValue || whtDefaultUrlRules);
+    }
+    if (areaName === 'local' && changes[WHT_SITE_FILTERING_STORAGE_KEY]) {
+        whtSetDisabledSiteHosts(changes[WHT_SITE_FILTERING_STORAGE_KEY].newValue);
     }
 });

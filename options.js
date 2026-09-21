@@ -44,6 +44,52 @@ const OPT_DEFAULT_URL_FILTER_RULES = {
     }
 };
 
+function optNormalizedDisabledSiteHosts(hosts) {
+    if (!Array.isArray(hosts)) {
+        return [];
+    }
+    return Array.from(new Set(hosts
+        .filter(value => typeof value === 'string')
+        .map(value => value.trim().toLowerCase())
+        .filter(value => value.length > 0)))
+        .sort();
+}
+
+function optRenderDisabledSiteHosts(hosts) {
+    const list = document.getElementById('site_filtering_hosts');
+    const empty = document.getElementById('site_filtering_empty');
+    const normalizedHosts = optNormalizedDisabledSiteHosts(hosts);
+    list.textContent = '';
+    empty.hidden = normalizedHosts.length > 0;
+
+    for (const hostname of normalizedHosts) {
+        const item = document.createElement('li');
+        const hostText = document.createElement('code');
+        const removeButton = document.createElement('button');
+        hostText.textContent = hostname;
+        removeButton.type = 'button';
+        removeButton.textContent = 'Remove';
+        removeButton.dataset.hostname = hostname;
+        item.append(hostText, removeButton);
+        list.append(item);
+    }
+}
+
+async function optRemoveDisabledSite(hostname) {
+    const status = document.getElementById('site_filtering_status');
+    try {
+        const result = await browser.storage.local.get('site_filtering_disabled_hosts');
+        const hosts = optNormalizedDisabledSiteHosts(result.site_filtering_disabled_hosts)
+            .filter(value => value !== hostname);
+        await browser.storage.local.set({ site_filtering_disabled_hosts: hosts });
+        optRenderDisabledSiteHosts(hosts);
+        status.textContent = `Removed ${hostname}.`;
+    } catch (error) {
+        status.textContent = 'Could not remove the site.';
+        console.error('Error removing site filtering exception', error);
+    }
+}
+
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
 
@@ -131,6 +177,10 @@ function optRestoreOptions() {
         document.getElementById('whitelist_regex').value = (whitelist.regex || []).join('\n');
         document.getElementById('blacklist_domains').value = (blacklist.domains || []).join('\n');
         document.getElementById('blacklist_regex').value = (blacklist.regex || []).join('\n');
+    }, onError);
+
+    browser.storage.local.get('site_filtering_disabled_hosts').then(rawResult => {
+        optRenderDisabledSiteHosts(rawResult.site_filtering_disabled_hosts);
     }, onError);
 }
 
@@ -230,6 +280,12 @@ async function optSaveUrlRules() {
 
 document.addEventListener("DOMContentLoaded", optRestoreOptions);
 document.getElementById('save_url_rules').addEventListener('click', optSaveUrlRules);
+document.getElementById('site_filtering_hosts').addEventListener('click', event => {
+    const hostname = event.target?.dataset?.hostname;
+    if (hostname) {
+        optRemoveDisabledSite(hostname);
+    }
+});
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for (var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function () {

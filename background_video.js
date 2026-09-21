@@ -50,7 +50,9 @@ function vidShouldQuickScanBlock(scanResults) {
 }
 
 async function vidPrerequestListener(details) {
-    if (whtIsWhitelisted(details.url)) {
+    const requestPolicy = whtGetRequestPolicy(details);
+    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED
+        || requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
         return;
     }
 }
@@ -107,7 +109,12 @@ async function vidRootListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
+    const requestPolicy = whtGetRequestPolicy(details);
+    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED) {
+        WJR_DEBUG && console.log('WEBREQV: Filtering disabled for page site '+details.url);
+        return;
+    }
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
         WJR_DEBUG && console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
@@ -176,7 +183,7 @@ async function vidRootListener(details) {
         }
     }
 
-    if (whtIsBlacklisted(details.url)) {
+    if (requestPolicy === WHT_REQUEST_POLICY.URL_BLACKLISTED) {
         WJR_DEBUG && console.log('WEBREQV: Video URL blacklist '+details.url);
         return { cancel: true };
     }
