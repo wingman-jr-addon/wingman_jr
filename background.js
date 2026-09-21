@@ -270,7 +270,7 @@ function bkSetDefaultZone(result) {
         BK_defaultMode = requestedDefault;
         bkSetZoneAutomatic(false);
     }
-    bkSetStatusForZone(BK_defaultMode === 'adaptive' ? BK_zone : BK_defaultMode);
+    bkRefreshActiveBrowserActionZone();
 }
 
 function bkCheckZone() {
@@ -362,6 +362,12 @@ function bkBuildRequestPlan(details) {
 
 function bkSetStatusForZone(zone) {
     switch (zone) {
+        case 'adaptive':
+            statusSetImageZoneAdaptive();
+            break;
+        case 'off':
+            statusSetImageZoneOff();
+            break;
         case 'trusted':
             statusSetImageZoneTrusted();
             break;
@@ -371,6 +377,29 @@ function bkSetStatusForZone(zone) {
         default:
             statusSetImageZoneNeutral();
             break;
+    }
+}
+
+let BK_browserActionRefreshGeneration = 0;
+async function bkRefreshActiveBrowserActionZone(pageUrl = null) {
+    const refreshGeneration = ++BK_browserActionRefreshGeneration;
+    let resolvedUrl = pageUrl;
+    if (typeof resolvedUrl !== 'string') {
+        try {
+            const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+            resolvedUrl = Array.isArray(tabs) && tabs.length ? tabs[0].url : null;
+        } catch (error) {
+            resolvedUrl = null;
+        }
+    }
+    if (refreshGeneration !== BK_browserActionRefreshGeneration) {
+        return;
+    }
+    const state = bkGetSiteFilteringState(resolvedUrl);
+    if (!state.supported) {
+        bkSetStatusForZone('adaptive');
+    } else {
+        bkSetStatusForZone(state.mode === 'off' ? 'off' : state.effectiveZone);
     }
 }
 
@@ -402,9 +431,7 @@ function bkSetZone(newZone)
             break;
     }
     if(didZoneChange) {
-        if (BK_defaultMode === 'adaptive') {
-            bkSetStatusForZone(BK_zone);
-        }
+        bkRefreshActiveBrowserActionZone();
         WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
         bkClearPredictionBuffer();
     }
@@ -1527,15 +1554,25 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkSetEnabled(request.onOff == 'on');
     }
     else if (request.type == 'getSiteFilteringState') {
-        sendResponse(bkGetSiteFilteringState(request.url));
+        const siteState = bkGetSiteFilteringState(request.url);
+        bkRefreshActiveBrowserActionZone(request.url);
+        sendResponse(siteState);
     }
     else if (request.type == 'setSiteFilteringMode') {
         return siteSetModeForUrl(request.url, request.mode)
-            .then(() => bkGetSiteFilteringState(request.url));
+            .then(() => {
+                const siteState = bkGetSiteFilteringState(request.url);
+                bkRefreshActiveBrowserActionZone(request.url);
+                return siteState;
+            });
     }
     else if (request.type == 'resetSiteFiltering') {
         return siteResetForUrl(request.url)
-            .then(() => bkGetSiteFilteringState(request.url));
+            .then(() => {
+                const siteState = bkGetSiteFilteringState(request.url);
+                bkRefreshActiveBrowserActionZone(request.url);
+                return siteState;
+            });
     }
     else if (request.type == 'getOnOffSwitchShown') {
         sendResponse({ isOnOffSwitchShown: BK_isOnOffSwitchShown });
@@ -1566,6 +1603,15 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
+browser.tabs.onActivated.addListener(() => bkRefreshActiveBrowserActionZone());
+browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (tab.active && (changeInfo.url || changeInfo.status === 'loading')) {
+        bkRefreshActiveBrowserActionZone();
+    }
+});
+if (browser.windows?.onFocusChanged) {
+    browser.windows.onFocusChanged.addListener(() => bkRefreshActiveBrowserActionZone());
+}
 browser.storage.local.get('default_zone')
     .then(bkSetDefaultZone)
     .then(() => {

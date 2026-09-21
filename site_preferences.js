@@ -190,10 +190,16 @@ browser.storage.local.get([SITE_SETTINGS_STORAGE_KEY, SITE_LEGACY_DISABLED_HOSTS
     .then(async result => {
         if (Object.prototype.hasOwnProperty.call(result, SITE_SETTINGS_STORAGE_KEY)) {
             siteSetCachedSettings(result[SITE_SETTINGS_STORAGE_KEY]);
+            if (typeof bkRefreshActiveBrowserActionZone === 'function') {
+                bkRefreshActiveBrowserActionZone();
+            }
             return;
         }
         const migrated = siteMigrateDisabledHosts(result[SITE_LEGACY_DISABLED_HOSTS_KEY]);
         siteSetCachedSettings(migrated);
+        if (typeof bkRefreshActiveBrowserActionZone === 'function') {
+            bkRefreshActiveBrowserActionZone();
+        }
         if (Object.keys(migrated).length > 0) {
             await browser.storage.local.set({ [SITE_SETTINGS_STORAGE_KEY]: migrated });
         }
@@ -203,5 +209,8 @@ browser.storage.local.get([SITE_SETTINGS_STORAGE_KEY, SITE_LEGACY_DISABLED_HOSTS
 browser.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && changes[SITE_SETTINGS_STORAGE_KEY]) {
         siteSetCachedSettings(changes[SITE_SETTINGS_STORAGE_KEY].newValue);
+        if (typeof bkRefreshActiveBrowserActionZone === 'function') {
+            bkRefreshActiveBrowserActionZone();
+        }
     }
 });

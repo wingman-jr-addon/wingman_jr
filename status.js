@@ -3,7 +3,7 @@ wingman_icon_32_img.src = 'data:image/svg+xml;base64, PHN2ZyB3aWR0aD0iMzJweCIgaG
 wingman_icon_32_img.width = 32;
 wingman_icon_32_img.height = 32;
 wingman_icon_32_img.onload = function() {
-    statusRegenerateIcon();
+    statusRegenerateIcon(true);
 }
 
 
@@ -37,8 +37,10 @@ STATUS_iconCanvas.width = STATUS_ICON_SIZE;
 STATUS_iconCanvas.height = STATUS_ICON_SIZE;
 let STATUS_zoneFill = 'white';
 let STATUS_zoneFillOffset = 'white';
+let STATUS_isAdaptiveOutline = false;
 
 let STATUS_lastZoneFill = '';
+let STATUS_lastIsAdaptiveOutline = false;
 let STATUS_lastProgressWidth = 0;
 let STATUS_lastIsVideoInProgress = true;
 let STATUS_lastIsVideoBlockShown = true;
@@ -49,7 +51,7 @@ const STATUS_blockFadeoutColors = [
     'rgba(255,0,0,1.0)'
 ];
 
-function statusRegenerateIcon() {
+function statusRegenerateIcon(force = false) {
     // 1. First, do we need to do anything? Do this analysis to avoid extra icon flickering
     let currentProgressWidth = -1;
     if(STATUS_openImageHighWaterCount > 0) {
@@ -65,7 +67,9 @@ function statusRegenerateIcon() {
 
     // TODO reinstate STATUS_videoProgressCounter == STATUS_lastVideoProgressCounter
     // if video progress is ever directly used
-    if(STATUS_zoneFill == STATUS_lastZoneFill &&
+    if(!force &&
+        STATUS_zoneFill == STATUS_lastZoneFill &&
+        STATUS_isAdaptiveOutline == STATUS_lastIsAdaptiveOutline &&
         currentProgressWidth == STATUS_lastProgressWidth &&
         isVideoInProgress == STATUS_lastIsVideoInProgress &&
         isVideoBlockShown == STATUS_lastIsVideoBlockShown) {
@@ -74,6 +78,7 @@ function statusRegenerateIcon() {
 
     // 2. Save current state to last state
     STATUS_lastZoneFill = STATUS_zoneFill;
+    STATUS_lastIsAdaptiveOutline = STATUS_isAdaptiveOutline;
     STATUS_lastProgressWidth = currentProgressWidth;
     STATUS_lastIsVideoInProgress = isVideoInProgress;
     STATUS_lastIsVideoBlockShown = isVideoBlockShown;
@@ -84,11 +89,39 @@ function statusRegenerateIcon() {
     ctx.clearRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
 
     // Zone background
-    ctx.fillStyle = STATUS_zoneFill;
-    ctx.fillRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
+    if (STATUS_zoneFill) {
+        ctx.fillStyle = STATUS_zoneFill;
+        ctx.fillRect(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
+    }
+
+    if (STATUS_isAdaptiveOutline) {
+        const x = 0.75;
+        const y = 0.75;
+        const width = 30.5;
+        const height = 30.5;
+        const radius = 6.25;
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.arcTo(x + width, y, x + width, y + radius, radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+        ctx.lineTo(x + radius, y + height);
+        ctx.arcTo(x, y + height, x, y + height - radius, radius);
+        ctx.lineTo(x, y + radius);
+        ctx.arcTo(x, y, x + radius, y, radius);
+        ctx.closePath();
+        ctx.strokeStyle = '#242424';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+    }
 
     // Icon
-    ctx.drawImage(wingman_icon_32_img, 0, 0);
+    if (STATUS_isAdaptiveOutline) {
+        ctx.drawImage(wingman_icon_32_img, 2, 2, 28, 28);
+    } else {
+        ctx.drawImage(wingman_icon_32_img, 0, 0);
+    }
 
     // Image progress
     if(currentProgressWidth >= 0) {
@@ -121,20 +154,37 @@ function statusOnLoaded() {
 }
 
 function statusSetImageZoneTrusted() {
+    STATUS_isAdaptiveOutline = false;
     STATUS_zoneFill = '#88CC88';
     STATUS_zoneFillOffset = '#66AA66';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneNeutral() {
-    STATUS_zoneFill = '#CCCCCC';
-    STATUS_zoneFillOffset = '#AAAAAA';
+    STATUS_isAdaptiveOutline = false;
+    STATUS_zoneFill = '#B3B3B3';
+    STATUS_zoneFillOffset = '#8F8F8F';
     statusRegenerateIcon();
 }
 
 function statusSetImageZoneUntrusted() {
+    STATUS_isAdaptiveOutline = false;
     STATUS_zoneFill = '#DD9999';
     STATUS_zoneFillOffset = '#AA6666';
+    statusRegenerateIcon();
+}
+
+function statusSetImageZoneOff() {
+    STATUS_isAdaptiveOutline = false;
+    STATUS_zoneFill = null;
+    STATUS_zoneFillOffset = '#CCCCCC';
+    statusRegenerateIcon();
+}
+
+function statusSetImageZoneAdaptive() {
+    STATUS_isAdaptiveOutline = true;
+    STATUS_zoneFill = null;
+    STATUS_zoneFillOffset = '#CCCCCC';
     statusRegenerateIcon();
 }
 

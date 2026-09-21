@@ -40,6 +40,28 @@
     .option-group {
       margin: 0 0 16px;
     }
+    .site-settings-group {
+      margin: 0 0 16px;
+      padding: 11px 12px 12px;
+      border: 1px solid rgba(31, 42, 68, 0.11);
+      border-radius: 8px;
+      background: rgba(31, 42, 68, 0.025);
+    }
+    .site-settings-heading {
+      margin: 0 0 10px;
+      color: #4f5b75;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .site-settings-group .option-group {
+      margin-bottom: 13px;
+    }
+    .site-settings-group .option-group:last-child {
+      margin-bottom: 0;
+      padding-top: 12px;
+      border-top: 1px solid rgba(31, 42, 68, 0.10);
+    }
     .option-description,
     .option-note {
       margin: 0 0 6px;
@@ -175,17 +197,6 @@
 <body>
   <form>
     <section class="option-group">
-      <h4>Which zone should be the default?</h4>
-      <p class="option-description">This addon uses the concept of "zones" to indicate how strictly it filters images.</p>
-      <div class="radio-group">
-        <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic"><span><b>Automatic</b> - Automatically change zones based on how many unsafe images have been detected recently</span></label>
-        <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
-        <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral" checked><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
-        <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted" checked><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>
-      </div>
-    </section>
-
-    <section class="option-group">
       <h4>Show on/off controls on the main menu?</h4>
       <p class="option-description">Show controls for temporarily pausing filtering everywhere or persistently turning it off for the current site. The Off site card is hidden with these controls; the other zone cards remain available. This also controls the Reveal Blocked Image menu visibility.</p>
       <div class="radio-group inline">
@@ -194,12 +205,27 @@
       </div>
     </section>
 
-    <section class="option-group" aria-labelledby="site_filtering_heading">
-      <h4 id="site_filtering_heading">Site filtering overrides</h4>
-      <p class="option-description">These zones apply to top-level page hostnames, not the domains serving individual images or videos. Configure a site from the main menu while visiting it, or return it to the default zone here.</p>
-      <ul id="site_filtering_hosts" class="site-filter-list"></ul>
-      <p id="site_filtering_empty">No sites have custom filtering settings.</p>
-      <span id="site_filtering_status" role="status" aria-live="polite"></span>
+    <section class="site-settings-group" aria-labelledby="site_settings_heading">
+      <h3 id="site_settings_heading" class="site-settings-heading">Site filtering</h3>
+
+      <section class="option-group">
+        <h4>Default site zone</h4>
+        <p class="option-description">Sites without an override use this zone. Adaptive automatically changes zones based on how many unsafe images have been detected recently.</p>
+        <div class="radio-group">
+          <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic" checked><span><b>Adaptive</b> - automatically change zones based on recent filtering results</span></label>
+          <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
+          <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral"><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
+          <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted"><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>
+        </div>
+      </section>
+
+      <section class="option-group" aria-labelledby="site_filtering_heading">
+        <h4 id="site_filtering_heading">Site filtering overrides</h4>
+        <p class="option-description">These zones apply to top-level page hostnames, not the domains serving individual images or videos. Adaptive is an explicit site override; Use default follows the Default site zone selection above.</p>
+        <ul id="site_filtering_hosts" class="site-filter-list"></ul>
+        <p id="site_filtering_empty">No sites have custom filtering settings.</p>
+        <span id="site_filtering_status" role="status" aria-live="polite"></span>
+      </section>
     </section>
 
     <section class="option-group">
