@@ -4,175 +4,288 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            :root
-            {
+            :root {
                 color-scheme: light dark;
                 --trusted-color: #2ecc71;
-                --neutral-color: #f1c40f;
+                --neutral-color: #b3b3b3;
                 --untrusted-color: #e74c3c;
-                --surface: #ffffffee;
-                --surface-border: rgba(0, 0, 0, 0.08);
-                --surface-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+                --adaptive-color: #2f80ed;
+                --off-color: #6b7280;
                 font-family: 'Segoe UI', Tahoma, sans-serif;
             }
-            html, body
-            {
+            html, body {
                 margin: 0;
                 padding: 0;
                 -webkit-text-size-adjust: 100%;
             }
-            body
-            {
-                min-width: 0;
-                max-width: 100%;
-                background: #f3f4f6;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+            body {
+                min-width: 300px;
+                max-width: 360px;
                 padding: 12px 14px 14px;
                 box-sizing: border-box;
+                background: #f3f4f6;
                 color: #1f2a44;
             }
-            #popupForm
-            {
-                background: #ffffff;
-                border: 1px solid rgba(0, 0, 0, 0.06);
-                border-radius: 10px;
-                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+            #popupForm {
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
                 padding: 16px;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                border-radius: 10px;
+                background: #fff;
+                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
             }
-            .filtering-control
-            {
+            .site-heading {
                 display: flex;
-                flex-direction: column;
-                gap: 8px;
-                padding: 10px 12px;
-                border: 1px solid rgba(31, 42, 68, 0.12);
-                border-radius: 8px;
-                background: linear-gradient(135deg, rgba(47, 128, 237, 0.08), rgba(47, 128, 237, 0.02));
-            }
-            .filtering-control.filtering-hidden
-            {
-                display: none;
-            }
-            .filtering-text
-            {
-                display: flex;
-                align-items: center;
+                align-items: flex-start;
                 justify-content: space-between;
                 gap: 8px;
             }
-            .filtering-text .title
-            {
-                font-size: 12px;
+            .site-heading-text {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+            .eyebrow {
+                color: #1f2a44aa;
+                font-size: 11px;
                 font-weight: 700;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
-                color: #1f2a44cc;
             }
-            .filtering-text .subtitle
-            {
-                font-size: 11px;
-                color: #4a5978;
+            #siteFilteringHostname {
+                overflow: hidden;
+                font-size: 15px;
+                font-weight: 700;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
-            #filteringStatus
-            {
-                padding: 2px 7px;
+            #filteringStatus {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                flex: 0 0 auto;
+                padding: 3px 8px;
                 border-radius: 10px;
                 background: rgba(47, 128, 237, 0.12);
                 font-size: 10px;
                 font-weight: 700;
                 white-space: nowrap;
             }
-            .filtering-row
-            {
+            #filteringStatus::before,
+            #adaptiveCurrentZone::before {
+                content: '';
+                width: 7px;
+                height: 7px;
+                flex: 0 0 auto;
+                border-radius: 50%;
+                background: #2f80ed;
+            }
+            #filteringStatus[data-zone=trusted] { background: rgba(46, 204, 113, 0.16); color: #18794e; }
+            #filteringStatus[data-zone=neutral] { background: rgba(107, 114, 128, 0.14); color: #5f6672; }
+            #filteringStatus[data-zone=untrusted] { background: rgba(231, 76, 60, 0.15); color: #b42318; }
+            #filteringStatus[data-zone=off] { background: rgba(107, 114, 128, 0.14); color: #5f6672; }
+            #filteringStatus[data-zone=trusted]::before,
+            #adaptiveCurrentZone[data-zone=trusted]::before { background: var(--trusted-color); }
+            #filteringStatus[data-zone=neutral]::before,
+            #adaptiveCurrentZone[data-zone=neutral]::before { background: var(--neutral-color); }
+            #filteringStatus[data-zone=untrusted]::before,
+            #adaptiveCurrentZone[data-zone=untrusted]::before { background: var(--untrusted-color); }
+            #filteringStatus[data-zone=off]::before,
+            #adaptiveCurrentZone[data-zone=off]::before { background: var(--off-color); }
+            .switch-controls {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding: 9px 11px;
+                border: 1px solid rgba(31, 42, 68, 0.12);
+                border-radius: 8px;
+                background: linear-gradient(135deg, rgba(47, 128, 237, 0.08), rgba(47, 128, 237, 0.02));
+            }
+            .switch-controls.filtering-hidden {
+                display: none;
+            }
+            .filtering-row {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 10px;
-                padding-top: 7px;
+            }
+            .filtering-row + .filtering-row {
+                padding-top: 8px;
                 border-top: 1px solid rgba(31, 42, 68, 0.12);
             }
-            .filtering-row-text
-            {
+            .filtering-row-text {
                 display: flex;
                 flex-direction: column;
-                gap: 1px;
                 min-width: 0;
             }
-            .filtering-row-title
-            {
+            .filtering-row-title {
                 font-size: 12px;
                 font-weight: 700;
             }
-            .filtering-row-detail
-            {
-                overflow: hidden;
+            .filtering-row-detail {
                 color: #4a5978;
                 font-size: 10px;
-                text-overflow: ellipsis;
-                white-space: nowrap;
             }
-            label.filter-toggle
-            {
+            .master-power {
                 display: inline-flex;
                 align-items: center;
-                gap: 10px;
-                font-size: 13px;
-                color: #1f2a44;
                 cursor: pointer;
-                font-weight: 600;
                 flex: 0 0 auto;
             }
-            label.filter-toggle input
-            {
+            .master-power input,
+            .zone-options input[type=radio] {
                 position: absolute;
                 opacity: 0;
             }
-            label.filter-toggle span.toggle-track
-            {
-                position: relative;
-                width: 44px;
-                height: 24px;
-                border-radius: 12px;
-                background: rgba(31, 42, 68, 0.2);
-                transition: background 0.2s ease;
-            }
-            label.filter-toggle span.toggle-track::after
-            {
-                content: '';
-                position: absolute;
-                top: 3px;
-                left: 3px;
-                width: 18px;
-                height: 18px;
+            .power-graphic {
+                display: grid;
+                width: 30px;
+                height: 30px;
+                place-items: center;
+                border: 2px solid rgba(31, 42, 68, 0.25);
                 border-radius: 50%;
                 background: #fff;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-                transition: transform 0.2s ease;
+                color: #6b7280;
+                font-size: 22px;
+                font-weight: 700;
+                line-height: 1;
+                transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
             }
-            label.filter-toggle input:checked + span.toggle-track
-            {
+            .master-power input:checked + .power-graphic {
+                border-color: #2f80ed;
                 background: #2f80ed;
+                color: #fff;
             }
-            label.filter-toggle input:checked + span.toggle-track::after
-            {
-                transform: translateX(20px);
+            .master-power input:focus-visible + .power-graphic,
+            .zone-options input[type=radio]:focus-visible + label {
+                outline: 2px solid #2f80ed;
+                outline-offset: 2px;
             }
-            label.filter-toggle input:disabled + span.toggle-track
-            {
+            .master-power input:disabled + .power-graphic {
                 cursor: not-allowed;
                 opacity: 0.45;
             }
-            label.filter-toggle span.toggle-label
-            {
+            .visually-hidden {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0 0 0 0);
+                white-space: nowrap;
+            }
+            fieldset {
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+                margin: 0;
+                padding: 0;
+                border: 0;
+            }
+            fieldset legend {
+                padding: 0;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            .mode-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                min-height: 22px;
+            }
+            #siteModeSource {
+                color: #5a6478;
+                font-size: 10px;
+            }
+            #resetSiteMode {
+                padding: 2px 6px;
+                border: 0;
+                background: transparent;
+                color: #2f80ed;
+                cursor: pointer;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            #resetSiteMode[hidden] {
                 display: none;
             }
-            #reloadFilteringPage
-            {
+            .zone-options {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            .zone-options input[type=radio] + label {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                align-items: center;
+                gap: 10px;
+                padding: 10px;
+                border: 1px solid rgba(31, 42, 68, 0.18);
+                border-radius: 8px;
+                background: #fcfcff;
+                cursor: pointer;
+                transition: border 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            }
+            .zone-options input[type=radio] + label:hover {
+                background: #f2f5ff;
+            }
+            .zone-options input[type=radio]:checked + label {
+                padding: 9px;
+                border: 2px solid #2f80ed;
+                background: #eef3ff;
+            }
+            .zone-options input[type=radio]:disabled + label {
+                cursor: not-allowed;
+                opacity: 0.48;
+            }
+            .zone-options img,
+            .zone-icon {
+                width: 32px;
+                height: 32px;
+            }
+            .zone-icon {
+                display: grid;
+                place-items: center;
+                color: var(--off-color);
+                font-size: 25px;
+                line-height: 1;
+            }
+            .zone-title {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            .zone-description {
+                display: block;
+                color: #1f2a44aa;
+                font-size: 12px;
+            }
+            #adaptiveCurrentZone {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                color: #2f80ed;
+                font-size: 9px;
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            #adaptiveCurrentZone[data-zone=trusted] { color: #18794e; }
+            #adaptiveCurrentZone[data-zone=neutral] { color: #5f6672; }
+            #adaptiveCurrentZone[data-zone=untrusted] { color: #b42318; }
+            #adaptiveCurrentZone[data-zone=off] { color: #5f6672; }
+            .zone-options > [hidden] { display: none !important; }
+            label[for=site_mode_off] { border-left: 4px solid var(--off-color) !important; }
+            label[for=site_mode_adaptive] { border-left: 4px solid var(--adaptive-color) !important; }
+            label[for=site_mode_trusted] { border-left: 4px solid var(--trusted-color) !important; }
+            label[for=site_mode_neutral] { border-left: 4px solid var(--neutral-color) !important; }
+            label[for=site_mode_untrusted] { border-left: 4px solid var(--untrusted-color) !important; }
+            #reloadFilteringPage {
                 align-self: flex-end;
                 padding: 4px 8px;
                 border: 1px solid rgba(47, 128, 237, 0.35);
@@ -183,208 +296,93 @@
                 font-size: 11px;
                 font-weight: 600;
             }
-            #reloadFilteringPage[hidden]
-            {
-                display: none;
-            }
-            .switch_hidden
-            {
-                display: none !important;
-            }
-            fieldset
-            {
-                border: none;
-                padding: 0;
-                margin: 0;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            fieldset legend
-            {
-                font-size: 13px;
-                font-weight: 600;
-                letter-spacing: 0.3px;
-                color: #1f2a44aa;
-            }
-            .zone-options
-            {
-                display: grid;
-                gap: 8px;
-            }
-            input[type=radio]
-            {
-                position: absolute;
-                opacity: 0;
-            }
-            input[type=radio] + label
-            {
-                border-radius: 8px;
-                border: 1px solid rgba(31, 42, 68, 0.18);
-                padding: 10px;
-                display: grid;
-                grid-template-columns: auto 1fr;
-                align-items: center;
-                gap: 10px;
-                background: #fcfcff;
-                transition: border 0.15s ease, background 0.15s ease;
-                cursor: pointer;
-            }
-            input[type=radio] + label:hover
-            {
-                background: #f2f5ff;
-            }
-            input[type=radio]:checked + label
-            {
-                border: 2px solid #2f80ed;
-                background: #eef3ff;
-            }
-            input[type=radio] + label img
-            {
-                width: 32px;
-                height: 32px;
-            }
-            input[type=radio] + label span.zone-title
-            {
-                font-size: 14px;
-                font-weight: 700;
-                display: block;
-            }
-            input[type=radio] + label span.zone-description
-            {
-                font-size: 12px;
-                color: #1f2a44aa;
-                display: block;
-            }
-            label[for=trusted]
-            {
-                border-left: 4px solid var(--trusted-color);
-            }
-            label[for=neutral]
-            {
-                border-left: 4px solid var(--neutral-color);
-            }
-            label[for=untrusted]
-            {
-                border-left: 4px solid var(--untrusted-color);
-            }
-            #isZoneAutomaticWrapper
-            {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                padding-top: 10px;
-                border-top: 1px solid #d5dae6;
-                margin-top: 4px;
-            }
-            #isZoneAutomaticWrapper label
-            {
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                color: #2f3e7a;
-            }
-            #isZoneAutomaticWrapper .automatic-text
-            {
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-            }
-            #isZoneAutomaticWrapper .automatic-details
-            {
-                font-size: 11px;
-                color: #5a6478;
-                letter-spacing: 0.2px;
-            }
-            #isZoneAutomaticWrapper input
-            {
-                width: 18px;
-                height: 18px;
-                accent-color: #2f80ed;
-            }
-            .footer-links
-            {
+            #reloadFilteringPage[hidden] { display: none; }
+            .footer-links {
                 display: flex;
                 justify-content: flex-end;
-                margin-top: 4px;
+                padding-top: 9px;
+                border-top: 1px solid #d5dae6;
             }
-            .footer-links a
-            {
+            .footer-links a {
+                color: #2f80ed;
                 font-size: 12px;
                 font-weight: 600;
                 text-decoration: none;
-                color: #2f80ed;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
             }
-            .footer-links a::before
-            {
-                content: '\1f4ac';
-                font-size: 13px;
-            }
-            .footer-links a:hover
-            {
-                text-decoration: underline;
-            }
+            .footer-links a:hover { text-decoration: underline; }
         </style>
         <script src="popup.js"></script>
     </head>
     <body>
         <form id="popupForm">
-            <div class="filtering-control">
-                <div class="filtering-text">
-                    <span class="title">Filtering</span>
-                    <span id="filteringStatus">Active</span>
-                </div>
+            <div class="site-heading">
+                <span class="site-heading-text">
+                    <span class="eyebrow">Current site</span>
+                    <span id="siteFilteringHostname">Checking site...</span>
+                </span>
+                <span id="filteringStatus" data-zone="neutral">Active</span>
+            </div>
+
+            <div class="switch-controls filtering-hidden">
                 <div class="filtering-row">
                     <span class="filtering-row-text">
                         <span class="filtering-row-title">Master filtering</span>
                         <span class="filtering-row-detail">Temporary pause for every site.</span>
                     </span>
-                    <label id="isOnOffSection" class="filter-toggle">
-                        <span class="toggle-label">Master filtering</span>
+                    <label class="master-power" title="Turn master filtering on or off">
+                        <span class="visually-hidden">Master filtering</span>
                         <input type="checkbox" id="isOnOff">
-                        <span class="toggle-track"></span>
+                        <span class="power-graphic" aria-hidden="true">&#x23FB;</span>
                     </label>
                 </div>
-                <div class="filtering-row" id="siteFilteringRow">
-                    <span class="filtering-row-text">
-                        <span class="filtering-row-title">Current site</span>
-                        <span class="filtering-row-detail" id="siteFilteringHostname">Checking site...</span>
-                    </span>
-                    <label id="isSiteOnOffSection" class="filter-toggle">
-                        <span class="toggle-label">Filtering on current site</span>
-                        <input type="checkbox" id="isSiteOnOff">
-                        <span class="toggle-track"></span>
-                    </label>
-                </div>
-                <button type="button" id="reloadFilteringPage" hidden>Reload page to apply</button>
             </div>
-            <fieldset>
-                <legend>Select trust level</legend>
+
+            <fieldset id="siteModeFieldset">
+                <legend>Zone for this site</legend>
+                <div class="mode-meta">
+                    <span id="siteModeSource">Using default zone.</span>
+                    <button type="button" id="resetSiteMode" hidden>Use default</button>
+                </div>
                 <div class="zone-options">
-                    <input type="radio" name="zone" id="trusted">
-                    <label for="trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones.">
-                        <img src="icons/wingman_icon_32_trusted.png" alt="Trusted level icon" />
+                    <input type="radio" name="siteMode" id="site_mode_off" value="off" hidden>
+                    <label id="site_mode_off_label" for="site_mode_off" title="Do not filter images or videos on this site." hidden>
+                        <span class="zone-icon" aria-hidden="true">&#x23FB;</span>
+                        <span>
+                            <span class="zone-title">Off</span>
+                            <span class="zone-description">Allow images and videos on this site without filtering.</span>
+                        </span>
+                    </label>
+
+                    <input type="radio" name="siteMode" id="site_mode_adaptive" value="adaptive">
+                    <label for="site_mode_adaptive" title="Automatically adjust the zone based on recent filtering results.">
+                        <img src="icons/wingman_icon_32_adaptive.svg" alt="Adaptive zone icon">
+                        <span>
+                            <span class="zone-title">Adaptive <span id="adaptiveCurrentZone" data-zone="neutral">Neutral now</span></span>
+                            <span class="zone-description">Automatically adjusts the zone when needed.</span>
+                        </span>
+                    </label>
+
+                    <input type="radio" name="siteMode" id="site_mode_trusted" value="trusted">
+                    <label for="site_mode_trusted" title="You trust where you're browsing: block few good images accidentally but still catch the majority of bad ones.">
+                        <img src="icons/wingman_icon_32_trusted.png" alt="Trusted zone icon">
                         <span>
                             <span class="zone-title">Trusted</span>
                             <span class="zone-description">Light filtering for known safe sites.</span>
                         </span>
                     </label>
-                    <input type="radio" name="zone" id="neutral" checked>
-                    <label for="neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones.">
-                        <img src="icons/wingman_icon_32_neutral.png" alt="Neutral level icon" />
+
+                    <input type="radio" name="siteMode" id="site_mode_neutral" value="neutral">
+                    <label for="site_mode_neutral" title="You feel neutral about where you're browsing: block some good images accidentally, and catch most bad ones.">
+                        <img src="icons/wingman_icon_32_neutral.png" alt="Neutral zone icon">
                         <span>
                             <span class="zone-title">Neutral</span>
                             <span class="zone-description">Balanced protection with smart blocking.</span>
                         </span>
                     </label>
-                    <input type="radio" name="zone" id="untrusted">
-                    <label for="untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well.">
-                        <img src="icons/wingman_icon_32_untrusted.png" alt="Untrusted level icon" />
+
+                    <input type="radio" name="siteMode" id="site_mode_untrusted" value="untrusted">
+                    <label for="site_mode_untrusted" title="You don't trust where you're browsing: block almost all bad images but quite a few good ones as well.">
+                        <img src="icons/wingman_icon_32_untrusted.png" alt="Untrusted zone icon">
                         <span>
                             <span class="zone-title">Untrusted</span>
                             <span class="zone-description">Maximum filtering on suspicious sites.</span>
@@ -392,13 +390,8 @@
                     </label>
                 </div>
             </fieldset>
-            <span id="isZoneAutomaticWrapper" title="If set to automatic, the plugin will attempt to switch between zones automatically based on the number of blocked images. Selecting a specific zone will change this to manual.">
-                <span class="automatic-text">
-                    <label for="isZoneAutomatic">Adaptive mode</label>
-                    <span class="automatic-details">Automatically adjusts trust level when needed.</span>
-                </span>
-                <input type="checkbox" name="zoneAuto" id="isZoneAutomatic">
-            </span>
+
+            <button type="button" id="reloadFilteringPage" hidden>Reload page to apply</button>
             <div class="footer-links">
                 <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Share feedback</a>
             </div>

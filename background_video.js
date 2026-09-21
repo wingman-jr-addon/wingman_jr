@@ -50,9 +50,9 @@ function vidShouldQuickScanBlock(scanResults) {
 }
 
 async function vidPrerequestListener(details) {
-    const requestPolicy = whtGetRequestPolicy(details);
-    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED
-        || requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
+    const requestPlan = bkBuildRequestPlan(details);
+    if (requestPlan.action === 'site-disabled'
+        || requestPlan.action === 'url-whitelisted') {
         return;
     }
 }
@@ -109,12 +109,12 @@ async function vidRootListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    const requestPolicy = whtGetRequestPolicy(details);
-    if (requestPolicy === WHT_REQUEST_POLICY.SITE_DISABLED) {
+    const requestPlan = bkBuildRequestPlan(details);
+    if (requestPlan.action === 'site-disabled') {
         WJR_DEBUG && console.log('WEBREQV: Filtering disabled for page site '+details.url);
         return;
     }
-    if (requestPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
+    if (requestPlan.action === 'url-whitelisted') {
         WJR_DEBUG && console.log('WEBREQV: Video whitelist '+details.url);
         return;
     }
@@ -142,7 +142,7 @@ async function vidRootListener(details) {
         console.warn('WEBREQV: Weird error parsing content-length '+e);
     }
 
-    let threshold = BK_zoneThreshold;
+    let threshold = requestPlan.threshold;
 
     let contentRange = undefined;
     for(let i=0; i<details.responseHeaders.length; i++) {
@@ -176,14 +176,14 @@ async function vidRootListener(details) {
         let isImage = mimeType.startsWith('image/');
         if(isImage) {
             WJR_DEBUG && console.log('WEBREQV: Video received an image: '+details.requestId+' '+mimeType);
-            return bkImageListener(details);
+            return bkImageListener(details, false, requestPlan);
         } else {
             WJR_DEBUG && console.debug('WEBREQV: VIDEO rejected '+details.requestId+' because MIME type was '+mimeType);
             return;
         }
     }
 
-    if (requestPolicy === WHT_REQUEST_POLICY.URL_BLACKLISTED) {
+    if (requestPlan.action === 'url-blacklisted') {
         WJR_DEBUG && console.log('WEBREQV: Video URL blacklist '+details.url);
         return { cancel: true };
     }

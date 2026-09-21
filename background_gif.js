@@ -294,7 +294,7 @@ async function gifPerformGifFrameScan(
     return p;
 }
 
-async function gifListener(details) {
+async function gifListener(details, threshold) {
     let expectedContentLength = -1;
     try {
         for(let i=0; i<details.responseHeaders.length; i++) {
@@ -309,7 +309,6 @@ async function gifListener(details) {
         console.warn('WEBREQG: Weird error parsing content-length '+e);
     }
 
-    let threshold = BK_zoneThreshold;
     let mimeType = 'image/gif';
     WJR_DEBUG && console.log(`DEFG: Starting request ${details.requestId} of type ${mimeType} of expected content-length ${expectedContentLength}`);
     let filter = browser.webRequest.filterResponseData(details.requestId);

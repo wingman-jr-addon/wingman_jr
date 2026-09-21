@@ -1,20 +1,84 @@
 let POP_activeTab = null;
 let POP_isMasterFilteringEnabled = true;
-let POP_isSiteFilteringSupported = false;
-let POP_isSiteFilteringEnabled = true;
+let POP_isOnOffSwitchShown = false;
+let POP_siteState = {
+    supported: false,
+    hostname: null,
+    enabled: true,
+    mode: 'adaptive',
+    defaultMode: 'adaptive',
+    effectiveZone: 'neutral',
+    isOverride: false
+};
+
+function popCapitalize(value) {
+    return typeof value === 'string' && value.length
+        ? value.charAt(0).toUpperCase() + value.slice(1)
+        : '';
+}
 
 function popUpdateFilteringUi() {
-    const siteToggle = document.getElementById('isSiteOnOff');
     const status = document.getElementById('filteringStatus');
-    siteToggle.checked = POP_isSiteFilteringEnabled;
-    siteToggle.disabled = !POP_isMasterFilteringEnabled || !POP_isSiteFilteringSupported;
+    const offInput = document.getElementById('site_mode_off');
+    const offLabel = document.getElementById('site_mode_off_label');
+    const resetButton = document.getElementById('resetSiteMode');
+    const modeInputs = document.querySelectorAll('input[name="siteMode"]');
+    const canConfigureSite = POP_siteState.supported;
+
+    document.getElementById('isOnOff').checked = POP_isMasterFilteringEnabled;
+    document.getElementById('siteFilteringHostname').textContent = POP_siteState.supported
+        ? POP_siteState.hostname
+        : 'Unavailable on this page';
+    document.querySelector('.switch-controls').classList.toggle(
+        'filtering-hidden',
+        !POP_isOnOffSwitchShown
+    );
+    offInput.hidden = !POP_isOnOffSwitchShown;
+    offLabel.hidden = !POP_isOnOffSwitchShown;
+    for (const input of modeInputs) {
+        input.checked = POP_siteState.supported && (POP_siteState.enabled
+            ? input.value === POP_siteState.mode
+            : input.value === 'off');
+        input.disabled = !canConfigureSite;
+    }
+
+    const adaptiveState = document.getElementById('adaptiveCurrentZone');
+    adaptiveState.textContent =
+        POP_siteState.supported
+            ? popCapitalize(POP_siteState.effectiveZone) + ' now'
+            : 'Unavailable';
+    adaptiveState.dataset.zone = POP_siteState.supported
+        ? POP_siteState.effectiveZone
+        : 'off';
+    resetButton.hidden = !POP_siteState.isOverride;
+    resetButton.disabled = !canConfigureSite;
+
+    const source = document.getElementById('siteModeSource');
+    if (!POP_siteState.supported) {
+        source.textContent = 'Site-specific zones are unavailable here.';
+    } else if (!POP_siteState.enabled) {
+        source.textContent = 'Filtering is off. Choose a zone to turn it on.';
+    } else if (POP_siteState.isOverride) {
+        source.textContent = 'Custom zone.';
+    } else {
+        source.textContent = `Using default: ${popCapitalize(POP_siteState.defaultMode)}.`;
+    }
 
     if (!POP_isMasterFilteringEnabled) {
         status.textContent = 'Paused everywhere';
-    } else if (POP_isSiteFilteringSupported && !POP_isSiteFilteringEnabled) {
-        status.textContent = 'Paused here';
-    } else {
+        status.dataset.zone = 'off';
+    } else if (!POP_siteState.supported) {
         status.textContent = 'Active';
+        status.dataset.zone = 'off';
+    } else if (!POP_siteState.enabled) {
+        status.textContent = 'Off for this site';
+        status.dataset.zone = 'off';
+    } else if (POP_siteState.mode === 'adaptive') {
+        status.textContent = `Adaptive · ${popCapitalize(POP_siteState.effectiveZone)}`;
+        status.dataset.zone = POP_siteState.effectiveZone;
+    } else {
+        status.textContent = popCapitalize(POP_siteState.mode);
+        status.dataset.zone = POP_siteState.mode;
     }
 }
 
@@ -24,43 +88,22 @@ function popShowReloadButton() {
     }
 }
 
-window.onload = async function() {
-    let rad = document.getElementById('popupForm').zone;
-    for (var i = 0; i < rad.length; i++) {
-        rad[i].addEventListener('change', function(e) {
-            browser.runtime.sendMessage({ type: 'setZone', zone: e.target.id });
-            browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: false });
-            window.close();
-        });
+async function popSendSiteChange(message) {
+    if (!POP_activeTab || !POP_siteState.supported) {
+        return;
     }
-    browser.runtime.sendMessage({type:'getZone'}).then(
-        function(message) {
-            console.log('Restoring zone visual state to '+message.zone);
-            document.getElementById(message.zone).checked = true;
-        },
-        function(error) {
-            console.log('Error getting zone: '+error);
-        }
-    );
-
-    let autoBox = document.getElementById('popupForm').zoneAuto;
-    autoBox.addEventListener('change', function(e) {
-        browser.runtime.sendMessage({ type: 'setZoneAutomatic', isZoneAutomatic: e.target.checked });
-        window.close();
+    POP_siteState = await browser.runtime.sendMessage({
+        ...message,
+        url: POP_activeTab.url
     });
-    browser.runtime.sendMessage({type:'getZoneAutomatic'}).then(
-        function(message) {
-            console.log('Restoring zone visual state for automatic to '+message.isZoneAutomatic);
-            document.getElementById('isZoneAutomatic').checked = message.isZoneAutomatic;
-        },
-        function(error) {
-            console.log('Error getting zone automatic: '+error);
-        }
-    );
+    popUpdateFilteringUi();
+    popShowReloadButton();
+}
 
-    const masterToggle = document.getElementById('isOnOff');
-    masterToggle.addEventListener('change', async function(e) {
-        POP_isMasterFilteringEnabled = e.target.checked;
+window.onload = async function() {
+    document.getElementById('isOnOff').addEventListener('change', async event => {
+        const previousValue = POP_isMasterFilteringEnabled;
+        POP_isMasterFilteringEnabled = event.target.checked;
         popUpdateFilteringUi();
         try {
             await browser.runtime.sendMessage({
@@ -69,32 +112,39 @@ window.onload = async function() {
             });
             popShowReloadButton();
         } catch (error) {
-            console.log('Error setting global filtering: '+error);
-        }
-    });
-
-    const siteToggle = document.getElementById('isSiteOnOff');
-    siteToggle.addEventListener('change', async function(e) {
-        if (!POP_activeTab || !POP_isSiteFilteringSupported) {
-            return;
-        }
-        try {
-            const state = await browser.runtime.sendMessage({
-                type: 'setSiteFilteringEnabled',
-                url: POP_activeTab.url,
-                enabled: e.target.checked
-            });
-            POP_isSiteFilteringSupported = !!state.supported;
-            POP_isSiteFilteringEnabled = !!state.enabled;
+            POP_isMasterFilteringEnabled = previousValue;
             popUpdateFilteringUi();
-            popShowReloadButton();
-        } catch (error) {
-            console.log('Error setting site filtering: '+error);
-            e.target.checked = POP_isSiteFilteringEnabled;
+            console.log('Error setting master filtering: '+error);
         }
     });
 
-    document.getElementById('reloadFilteringPage').addEventListener('click', async function() {
+    for (const input of document.querySelectorAll('input[name="siteMode"]')) {
+        input.addEventListener('click', async event => {
+            if (event.target.value === 'off' && !POP_isOnOffSwitchShown) {
+                popUpdateFilteringUi();
+                return;
+            }
+            try {
+                await popSendSiteChange({
+                    type: 'setSiteFilteringMode',
+                    mode: event.target.value
+                });
+            } catch (error) {
+                popUpdateFilteringUi();
+                console.log('Error setting site zone: '+error);
+            }
+        });
+    }
+
+    document.getElementById('resetSiteMode').addEventListener('click', async () => {
+        try {
+            await popSendSiteChange({ type: 'resetSiteFiltering' });
+        } catch (error) {
+            console.log('Error resetting site filtering: '+error);
+        }
+    });
+
+    document.getElementById('reloadFilteringPage').addEventListener('click', async () => {
         if (!POP_activeTab || !Number.isInteger(POP_activeTab.id)) {
             return;
         }
@@ -116,41 +166,27 @@ window.onload = async function() {
     try {
         const message = await browser.runtime.sendMessage({type:'getOnOff'});
         POP_isMasterFilteringEnabled = message.onOff === 'on';
-        masterToggle.checked = POP_isMasterFilteringEnabled;
     } catch (error) {
-        console.log('Error getting global filtering: '+error);
+        console.log('Error getting master filtering: '+error);
     }
 
     if (POP_activeTab && typeof POP_activeTab.url === 'string') {
         try {
-            const state = await browser.runtime.sendMessage({
+            POP_siteState = await browser.runtime.sendMessage({
                 type: 'getSiteFilteringState',
                 url: POP_activeTab.url
             });
-            POP_isSiteFilteringSupported = !!state.supported;
-            POP_isSiteFilteringEnabled = !!state.enabled;
-            document.getElementById('siteFilteringHostname').textContent = state.supported
-                ? state.hostname
-                : 'Unavailable on this page.';
         } catch (error) {
             console.log('Error getting site filtering: '+error);
-            document.getElementById('siteFilteringHostname').textContent = 'Unavailable on this page.';
         }
-    } else {
-        document.getElementById('siteFilteringHostname').textContent = 'Unavailable on this page.';
     }
     popUpdateFilteringUi();
 
     browser.runtime.sendMessage({type:'getOnOffSwitchShown'}).then(
-        function(message) {
-            console.log('Restoring filtering controls visibility to '+message.isOnOffSwitchShown);
-            document.querySelector('.filtering-control').classList.toggle(
-                'filtering-hidden',
-                !message.isOnOffSwitchShown
-            );
+        message => {
+            POP_isOnOffSwitchShown = message.isOnOffSwitchShown === true;
+            popUpdateFilteringUi();
         },
-        function(error) {
-            console.log('Error getting filtering controls visibility: '+error);
-        }
+        error => console.log('Error getting filtering controls visibility: '+error)
     );
 };

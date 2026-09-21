@@ -29,12 +29,7 @@ vm.runInContext(source + `
     this.whitelistTestApi = {
         isWhitelisted: whtIsWhitelisted,
         isBlacklisted: whtIsBlacklisted,
-        getRequestPolicy: whtGetRequestPolicy,
-        getTopLevelPageUrl: whtGetTopLevelPageUrl,
-        getTopLevelPageHostname: whtGetTopLevelPageHostname,
-        getSiteFilteringState: whtGetSiteFilteringState,
-        setSiteFilteringEnabled: whtSetSiteFilteringEnabled,
-        setDisabledSiteHosts: whtSetDisabledSiteHosts,
+        getUrlPolicy: whtGetUrlPolicy,
         setRules: whtSetUserRules,
         getDomainScopes: whtGetDomainScopes,
         addDomainRule: whtAddDomainRule
@@ -55,72 +50,6 @@ assert.deepStrictEqual(
     { host: 'example.co.uk', parentDomain: null }
 );
 assert.strictEqual(api.getDomainScopes('data:image/png;base64,abc'), null);
-
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    url: 'https://cdn.example/image.jpg',
-    documentUrl: 'https://frame.example/page',
-    frameAncestors: [
-        { url: 'https://frame.example/page' },
-        { url: 'https://TOP.example/home' }
-    ]
-}), 'top.example');
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    documentUrl: 'https://page.example/home',
-    frameAncestors: []
-}), 'page.example');
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'main_frame',
-    url: 'https://direct.example/photo.jpg'
-}), 'direct.example');
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    originUrl: 'https://origin.example/home'
-}), 'origin.example');
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    frameAncestors: [{ url: 'not a URL' }],
-    documentUrl: 'https://frame.example/page'
-}), null);
-
-const throwingDetails = { type: 'image' };
-Object.defineProperty(throwingDetails, 'frameAncestors', {
-    get() { throw new Error('native traversal failure'); }
-});
-assert.doesNotThrow(() => api.getTopLevelPageHostname(throwingDetails));
-assert.strictEqual(api.getTopLevelPageHostname(throwingDetails), null);
-
-const throwingAncestor = {};
-Object.defineProperty(throwingAncestor, 'url', {
-    get() { throw new Error('native ancestor URL failure'); }
-});
-assert.doesNotThrow(() => api.getTopLevelPageHostname({
-    type: 'image',
-    frameAncestors: [throwingAncestor]
-}));
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    frameAncestors: [throwingAncestor]
-}), null);
-
-const revokedAncestors = Proxy.revocable([], {});
-revokedAncestors.revoke();
-assert.doesNotThrow(() => api.getTopLevelPageHostname({
-    type: 'image',
-    frameAncestors: revokedAncestors.proxy
-}));
-assert.strictEqual(api.getTopLevelPageHostname({
-    type: 'image',
-    frameAncestors: revokedAncestors.proxy
-}), null);
-
-const throwingType = {};
-Object.defineProperty(throwingType, 'type', {
-    get() { throw new Error('native request type failure'); }
-});
-assert.doesNotThrow(() => api.getTopLevelPageHostname(throwingType));
-assert.strictEqual(api.getTopLevelPageHostname(throwingType), null);
 
 api.setRules({
     whitelist: {
@@ -148,33 +77,9 @@ assert.strictEqual(api.isWhitelisted('https://safe-image-sources.example/photo.j
 assert.strictEqual(api.isWhitelisted('https://images.example/allowed/photo.jpg'), true);
 assert.strictEqual(api.isBlacklisted('https://blocked.example.com/video.mp4'), true);
 assert.strictEqual(api.isBlacklisted('https://cdn.example/UNSAFE-42.JPG'), true);
-
-api.setDisabledSiteHosts(['top.example']);
-assert.strictEqual(api.getRequestPolicy({
-    type: 'image',
-    url: 'https://blocked.example.com/video.mp4',
-    frameAncestors: [{ url: 'https://top.example/page' }]
-}), 'site-disabled');
-assert.deepStrictEqual(
-    JSON.parse(JSON.stringify(api.getSiteFilteringState('https://top.example/page'))),
-    { supported: true, hostname: 'top.example', enabled: false }
-);
-assert.strictEqual(api.getSiteFilteringState('about:config').supported, false);
-api.setDisabledSiteHosts([]);
-assert.strictEqual(api.getRequestPolicy({
-    type: 'image',
-    url: 'https://blocked.example.com/video.mp4',
-    documentUrl: 'https://page.example/'
-}), 'url-blacklisted');
-assert.strictEqual(api.getRequestPolicy({
-    type: 'image',
-    url: 'https://safe.example.com/photo.jpg',
-    documentUrl: 'https://page.example/'
-}), 'url-whitelisted');
-Object.defineProperty(throwingDetails, 'url', {
-    value: 'https://blocked.example.com/video.mp4'
-});
-assert.strictEqual(api.getRequestPolicy(throwingDetails), 'url-blacklisted');
+assert.strictEqual(api.getUrlPolicy('https://blocked.example.com/video.mp4'), 'url-blacklisted');
+assert.strictEqual(api.getUrlPolicy('https://safe.example.com/photo.jpg'), 'url-whitelisted');
+assert.strictEqual(api.getUrlPolicy(null), 'filter');
 assert.strictEqual(api.isBlacklisted('https://cdn.example/UNSAFE-42.JPG'), true);
 
 api.setRules({
@@ -229,11 +134,6 @@ assert.strictEqual(api.isWhitelisted('https://www.google.com/recaptcha/api/image
     await api.addDomainRule('blacklist', 'google.com');
     assert.strictEqual(storedData.url_filter_rules.blacklist.domains.join('|'), 'google.com');
 
-    await api.setSiteFilteringEnabled('https://News.Example/path', false);
-    assert.strictEqual(storedData.site_filtering_disabled_hosts.join('|'), 'news.example');
-    assert.strictEqual(api.getSiteFilteringState('https://news.example/other').enabled, false);
-    await api.setSiteFilteringEnabled('https://news.example/path', true);
-    assert.strictEqual(storedData.site_filtering_disabled_hosts.length, 0);
     console.log('whitelist tests passed');
 })().catch(error => {
     console.error(error);
