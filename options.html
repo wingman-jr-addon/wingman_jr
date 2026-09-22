@@ -191,6 +191,19 @@
       margin-left: 8px;
       color: #18794e;
     }
+    .adaptive-memory-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      margin-top: 7px;
+    }
+    #adaptive_memory_status[data-state="error"] {
+      color: #b42318;
+    }
+    #adaptive_memory_status[data-state="saved"] {
+      color: #18794e;
+    }
   </style>
 </head>
 
@@ -216,6 +229,20 @@
           <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
           <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral"><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
           <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted"><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>
+        </div>
+      </section>
+
+      <section class="option-group" aria-labelledby="adaptive_memory_heading">
+        <h4 id="adaptive_memory_heading">Adaptive site memory</h4>
+        <p class="option-description">Remember non-neutral adaptive zones between browser restarts. This stores the top-level hostname and its current zone locally; it is not synced or transmitted. Private browsing does not update this memory.</p>
+        <label class="radio-option" for="remember_adaptive_zones">
+          <input type="checkbox" id="remember_adaptive_zones" checked>
+          <span>Remember adaptive zones between restarts</span>
+        </label>
+        <div class="adaptive-memory-actions">
+          <button type="button" id="clear_adaptive_zones">Clear remembered adaptive zones</button>
+          <span id="adaptive_memory_count">0 remembered sites</span>
+          <span id="adaptive_memory_status" role="status" aria-live="polite"></span>
         </div>
       </section>
 

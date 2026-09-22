@@ -236,9 +236,13 @@ async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob)
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
 
 let PROC_isSilentModeEnabled = true;
+function procGetPrimaryScore(sqrxrScore) {
+    return sqrxrScore[0][0];
+}
+
 async function procCommonCreateSvg(img, sqrxrScore, dataURL)
 {
-    let threshold = sqrxrScore[0][0];
+    let threshold = procGetPrimaryScore(sqrxrScore);
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     if(PROC_isSilentModeEnabled) {
@@ -267,7 +271,7 @@ async function procCommonCreateSvg(img, sqrxrScore, dataURL)
 }
 
 function procScoreToStr(sqrxrScore) {
-    return sqrxrScore[0][0].toFixed(5) + ' ('+
+    return procGetPrimaryScore(sqrxrScore).toFixed(5) + ' ('+
         sqrxrScore[1][0].toFixed(2)+', '+
         sqrxrScore[1][1].toFixed(2)+', '+
         sqrxrScore[1][2].toFixed(2)+', '+
@@ -275,7 +279,7 @@ function procScoreToStr(sqrxrScore) {
 }
 
 function procIsSafe(sqrxrScore, threshold) {
-    return sqrxrScore[0][0] < threshold;
+    return procGetPrimaryScore(sqrxrScore) < threshold;
 }
 
 const procLoadImagePromise = url => new Promise( (resolve, reject) => {
@@ -311,6 +315,7 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
+                result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     result.result = 'pass';
@@ -418,20 +423,25 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                 if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                     WJR_DEBUG && console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await procPredict(img);
+                    let adaptiveScore = procGetPrimaryScore(sqrxrScore);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
-                            requestId: b64Filter.requestId+'_'+imageId
+                            requestId: b64Filter.requestId+'_'+imageId,
+                            adaptiveContext: b64Filter.adaptiveContext,
+                            adaptiveScore: adaptiveScore
                         });
                         WJR_DEBUG && console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
                         outputPort.postMessage({
                             type:'stat',
                             result:'block',
-                            requestId: b64Filter.requestId+'_'+imageId
+                            requestId: b64Filter.requestId+'_'+imageId,
+                            adaptiveContext: b64Filter.adaptiveContext,
+                            adaptiveScore: adaptiveScore
                         });
                         let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
@@ -531,7 +541,9 @@ async function procCheckProcess() {
             PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
-                requestId: toProcess.requestId
+                requestId: toProcess.requestId,
+                adaptiveContext: toProcess.adaptiveContext,
+                adaptiveScore: result.adaptiveScore
             });
         } catch(e) {
             console.error('ERROR: Processor failed to communicate to background: '+e);
@@ -747,6 +759,7 @@ async function procOnPortMessage(m) {
                 url: m.url,
                 mimeType: m.mimeType,
                 threshold: m.threshold,
+                adaptiveContext: m.adaptiveContext || null,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -796,6 +809,7 @@ async function procOnPortMessage(m) {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
                 threshold: m.threshold,
+                adaptiveContext: m.adaptiveContext || null,
                 startTime: performance.now(),
                 fullStr: ''
             };
