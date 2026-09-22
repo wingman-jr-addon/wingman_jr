@@ -66,6 +66,7 @@ vm.runInContext(source.slice(start, end) + `
         initialize: bkInitializeAdaptiveZones,
         buildPlan: bkBuildRequestPlan,
         getState: bkGetAdaptiveState,
+        estimate: bkEstimateAdaptiveStats,
         getSiteState: bkGetSiteFilteringState,
         getAdaptiveDomain: bkGetAdaptiveDomain,
         record: bkRecordAdaptiveScore,
@@ -112,11 +113,13 @@ const api = context.adaptiveTestApi;
         api.record(adaptivePlan.adaptiveContext, 0.9);
     }
     assert.strictEqual(api.getState('a.example').zone, 'neutral');
+    assert.strictEqual(api.estimate(api.getState('a.example')), null);
     assert.strictEqual(api.getState('b.example').zone, 'neutral');
     assert.strictEqual(storageWriteCount, writesBeforeTransition);
 
     api.record(adaptivePlan.adaptiveContext, 0.9);
     assert.strictEqual(api.getState('a.example').zone, 'untrusted');
+    assert.strictEqual(api.estimate(api.getState('a.example')).sampleCount, 51);
     assert.strictEqual(
         api.getSiteState('https://a.example/new-tab').adaptiveZone,
         'untrusted',

@@ -210,6 +210,7 @@ const BK_ADAPTIVE_MEMORY_KEY = 'adaptive_zone_memory';
 const BK_ADAPTIVE_MEMORY_SCHEMA = 1;
 const BK_ADAPTIVE_MAX_ACTIVE_DOMAINS = 256;
 const BK_ADAPTIVE_MAX_REMEMBERED_DOMAINS = 10000;
+const BK_ADAPTIVE_MIN_PREDICTIONS = 51;
 const BK_COMMON_SECOND_LEVEL_SUFFIXES = new Set([
     'ac', 'co', 'com', 'edu', 'gov', 'mil', 'net', 'org'
 ]);
@@ -252,24 +253,32 @@ function bkSetDefaultZone(result) {
 }
 
 function bkCheckZone(state) {
-    bkCalculateAdaptiveStats(state);
-    if (!state.isEstimateValid) {
+    const estimate = bkEstimateAdaptiveStats(state);
+    if (!estimate) {
         return false;
     }
     let requestedZone = 'untrusted';
-    if (state.estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
+    if (estimate.estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
         requestedZone = 'trusted';
-    } else if (state.estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
+    } else if (estimate.estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
         requestedZone = 'neutral';
     }
     if (requestedZone === state.zone) {
         return false;
     }
-    WJR_DEBUG && console.log(
-        `ADAPTIVE: ${state.hostname} changed from ${state.zone} to ${requestedZone}`
-    );
+    const previousZone = state.zone;
     state.zone = requestedZone;
-    bkCalculateAdaptiveStats(state);
+    WJR_DEBUG && console.log(
+        `ADAPTIVE: ${state.hostname} changed from ${previousZone} to ${requestedZone}`,
+        {
+            isPrivate: state.isPrivate,
+            sampleCount: estimate.sampleCount,
+            blockCount: estimate.blockCount,
+            estimatedTruePositivePercentage: estimate.estimatedTruePositivePercentage,
+            threshold: estimate.threshold,
+            precision: estimate.precision
+        }
+    );
     bkRememberAdaptiveZone(state);
     return true;
 }
@@ -306,10 +315,7 @@ function bkGetAdaptiveState(hostname, isPrivate = false) {
             hostname: adaptiveDomain,
             isPrivate: isPrivate,
             zone: BK_rememberedAdaptiveZones[adaptiveDomain] || 'neutral',
-            predictionBuffer: [],
-            predictionBufferBlockCount: 0,
-            estimatedTruePositivePercentage: 0,
-            isEstimateValid: false
+            predictionBuffer: []
         };
     }
     BK_adaptiveStates.delete(stateKey);
@@ -320,16 +326,23 @@ function bkGetAdaptiveState(hostname, isPrivate = false) {
     return state;
 }
 
-function bkCalculateAdaptiveStats(state) {
+function bkEstimateAdaptiveStats(state) {
+    if (state.predictionBuffer.length < BK_ADAPTIVE_MIN_PREDICTIONS) {
+        return null;
+    }
     const profile = bkGetZoneProfile(state.zone);
-    state.predictionBufferBlockCount = state.predictionBuffer.reduce(
+    const blockCount = state.predictionBuffer.reduce(
         (count, score) => count + (score >= profile.threshold ? 1 : 0),
         0
     );
-    state.isEstimateValid = state.predictionBuffer.length > 50;
-    state.estimatedTruePositivePercentage = state.isEstimateValid
-        ? profile.precision * state.predictionBufferBlockCount / state.predictionBuffer.length
-        : 0;
+    return {
+        sampleCount: state.predictionBuffer.length,
+        blockCount: blockCount,
+        estimatedTruePositivePercentage:
+            profile.precision * blockCount / state.predictionBuffer.length,
+        threshold: profile.threshold,
+        precision: profile.precision
+    };
 }
 
 function bkRecordAdaptiveScore(context, score) {
