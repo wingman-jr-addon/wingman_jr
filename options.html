@@ -40,6 +40,28 @@
     .option-group {
       margin: 0 0 16px;
     }
+    .site-settings-group {
+      margin: 0 0 16px;
+      padding: 11px 12px 12px;
+      border: 1px solid rgba(31, 42, 68, 0.11);
+      border-radius: 8px;
+      background: rgba(31, 42, 68, 0.025);
+    }
+    .site-settings-heading {
+      margin: 0 0 10px;
+      color: #4f5b75;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .site-settings-group .option-group {
+      margin-bottom: 13px;
+    }
+    .site-settings-group .option-group:last-child {
+      margin-bottom: 0;
+      padding-top: 12px;
+      border-top: 1px solid rgba(31, 42, 68, 0.10);
+    }
     .option-description,
     .option-note {
       margin: 0 0 6px;
@@ -139,29 +161,71 @@
     #url_rules_status[data-state="saved"] {
       color: #18794e;
     }
+    .site-filter-list {
+      display: grid;
+      gap: 5px;
+      margin: 7px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .site-filter-list li {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 9px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 6px;
+    }
+    .site-filter-list code {
+      overflow-wrap: anywhere;
+    }
+    .site-filter-list button {
+      flex: 0 0 auto;
+    }
+    #site_filtering_empty {
+      margin: 5px 0 0;
+      color: #5a6478;
+    }
+    #site_filtering_status {
+      margin-left: 8px;
+      color: #18794e;
+    }
   </style>
 </head>
 
 <body>
   <form>
     <section class="option-group">
-      <h4>Which zone should be the default?</h4>
-      <p class="option-description">This addon uses the concept of "zones" to indicate how strictly it filters images.</p>
-      <div class="radio-group">
-        <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic"><span><b>Automatic</b> - Automatically change zones based on how many unsafe images have been detected recently</span></label>
-        <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
-        <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral" checked><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
-        <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted" checked><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>
-      </div>
-    </section>
-
-    <section class="option-group">
-      <h4>Show an on/off switch on the main menu?</h4>
-      <p class="option-description">Add a switch to turn filtering on and off quickly while browsing. This also controls the Reveal Blocked Image menu visibility. <b>Note:</b> already-blocked images will only reappear when the cache is cleared - hit shift+refresh on the page to reload it fully.</p>
+      <h4>Show on/off controls on the main menu?</h4>
+      <p class="option-description">Show controls for pausing filtering everywhere, including Smart Pause timers, or persistently turning it off for the current site. The Off site card is hidden with these controls; the other zone cards remain available. This also controls the Reveal Blocked Image menu visibility.</p>
       <div class="radio-group inline">
         <label class="radio-option inline" for="on_off_shown_yes"><input type="radio" name="on_off_shown" id="on_off_shown_yes" value="on_off_shown_yes"><span>Yes</span></label>
         <label class="radio-option inline" for="on_off_shown_no"><input type="radio" name="on_off_shown" id="on_off_shown_no" value="on_off_shown_no" checked><span>No</span></label>
       </div>
+    </section>
+
+    <section class="site-settings-group" aria-labelledby="site_settings_heading">
+      <h3 id="site_settings_heading" class="site-settings-heading">Site filtering</h3>
+
+      <section class="option-group">
+        <h4>Default site zone</h4>
+        <p class="option-description">Sites without an override use this zone. Adaptive automatically changes zones based on how many unsafe images have been detected recently.</p>
+        <div class="radio-group">
+          <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic" checked><span><b>Adaptive</b> - automatically change zones based on recent filtering results</span></label>
+          <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
+          <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral"><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
+          <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted"><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>
+        </div>
+      </section>
+
+      <section class="option-group" aria-labelledby="site_filtering_heading">
+        <h4 id="site_filtering_heading">Site filtering overrides</h4>
+        <p class="option-description">These zones apply to top-level page hostnames, not the domains serving individual images or videos. Adaptive is an explicit site override; Use default follows the Default site zone selection above.</p>
+        <ul id="site_filtering_hosts" class="site-filter-list"></ul>
+        <p id="site_filtering_empty">No sites have custom filtering settings.</p>
+        <span id="site_filtering_status" role="status" aria-live="polite"></span>
+      </section>
     </section>
 
     <section class="option-group">
@@ -188,7 +252,7 @@
     <section class="option-group url-lists" aria-labelledby="url_lists_heading">
       <h4 id="url_lists_heading">Whitelist and blacklist image/video URLs</h4>
       <div class="url-lists-content">
-        <p>Whitelist matches are allowed without scanning. Blacklist matches are always blocked. If both lists match, the blacklist wins. These rules apply to the requested image or video URL, which may use a different domain than the page. Tip: right-click an image to add its host or a broader parent domain.</p>
+        <p>When filtering is enabled for a site, whitelist matches are allowed without scanning and blacklist matches are blocked. If both lists match, the blacklist wins. These rules apply to the requested image or video URL, which may use a different domain than the page. Tip: right-click an image to add its host or a broader parent domain.</p>
         <div class="url-list-grid">
           <section class="url-list-card" aria-labelledby="whitelist_heading">
             <h5 id="whitelist_heading">Whitelist</h5>

@@ -45,7 +45,8 @@
           "background.js",
           "background_video.js",
           "background_gif.js",
-          "whitelist.js"
+          "whitelist.js",
+          "site_preferences.js"
         ]
     },
 

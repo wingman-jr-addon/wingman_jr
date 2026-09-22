@@ -58,7 +58,7 @@ function bkUpdateRevealMenuVisibility(isVisible) {
 function bkInitialize() {
     statusOnLoaded();
     bkUpdateFromSettings();
-    bkSetEnabled(true); //always start on
+    bkRestoreMasterFilteringState();
 }
 
 function bkOnClientConnected(port) {
@@ -212,6 +212,7 @@ function bkOnProcessorMessage(m) {
 
 /////////// ZONE START /////////////////////////
 var BK_isZoneAutomatic = true;
+var BK_defaultMode = 'adaptive';
 var BK_predictionBufferBlockCount = 0;
 var BK_predictionBuffer = [];
 var BK_estimatedTruePositivePercentage = 0;
@@ -261,20 +262,19 @@ function bkSetZoneAutomatic(isAutomatic) {
 function bkSetDefaultZone(result) {
     console.log('result');
     console.log(result);
-    if (!result.default_zone || result.default_zone === 'automatic') {
+    const requestedDefault = result && result.default_zone;
+    if (!['trusted', 'neutral', 'untrusted'].includes(requestedDefault)) {
+        BK_defaultMode = 'adaptive';
         bkSetZoneAutomatic(true);
-        BK_zone = 'neutral'
     } else {
+        BK_defaultMode = requestedDefault;
         bkSetZoneAutomatic(false);
-        BK_zone = result.default_zone;
     }
+    bkRefreshActiveBrowserActionZone();
 }
 
 function bkCheckZone() {
     if (!BK_isEstimateValid) {
-        return;
-    }
-    if (!BK_isZoneAutomatic) {
         return;
     }
     let requestedZone = 'untrusted';
@@ -294,6 +294,115 @@ var BK_zoneThreshold = ROC_neutralRoc.threshold;
 var BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
 WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
 var BK_zone = 'neutral';
+function bkGetZoneProfile(zone) {
+    switch (zone) {
+        case 'trusted':
+            return {
+                zone: 'trusted',
+                threshold: ROC_trustedRoc.threshold,
+                precision: rocCalculatePrecision(ROC_trustedRoc)
+            };
+        case 'untrusted':
+            return {
+                zone: 'untrusted',
+                threshold: ROC_untrustedRoc.threshold,
+                precision: rocCalculatePrecision(ROC_untrustedRoc)
+            };
+        default:
+            return {
+                zone: 'neutral',
+                threshold: ROC_neutralRoc.threshold,
+                precision: rocCalculatePrecision(ROC_neutralRoc)
+            };
+    }
+}
+
+function bkGetSiteFilteringState(pageUrl) {
+    const preference = siteGetPreferenceForUrl(pageUrl);
+    const mode = preference.mode || BK_defaultMode;
+    return {
+        ...preference,
+        mode: mode,
+        defaultMode: BK_defaultMode,
+        effectiveZone: mode === 'adaptive' || mode === 'off' ? BK_zone : mode
+    };
+}
+
+function bkBuildRequestPlan(details) {
+    const preference = siteGetPreference(details);
+    const mode = preference.mode || BK_defaultMode;
+    const effectiveZone = mode === 'adaptive' || mode === 'off' ? BK_zone : mode;
+    // Freeze the numeric threshold when the request is enqueued.
+    const profile = bkGetZoneProfile(effectiveZone);
+    const plan = {
+        preference: preference,
+        mode: mode,
+        effectiveZone: profile.zone,
+        threshold: profile.threshold
+    };
+    if (preference.supported && mode === 'off') {
+        return { ...plan, action: 'site-disabled' };
+    }
+
+    let requestUrl = null;
+    try {
+        requestUrl = details && details.url;
+    } catch (error) {
+    }
+    const urlPolicy = whtGetUrlPolicy(requestUrl);
+    if (urlPolicy === WHT_REQUEST_POLICY.URL_BLACKLISTED) {
+        return { ...plan, action: 'url-blacklisted' };
+    }
+    if (urlPolicy === WHT_REQUEST_POLICY.URL_WHITELISTED) {
+        return { ...plan, action: 'url-whitelisted' };
+    }
+
+    return { ...plan, action: 'scan' };
+}
+
+function bkSetStatusForZone(zone) {
+    switch (zone) {
+        case 'adaptive':
+            statusSetImageZoneAdaptive();
+            break;
+        case 'off':
+            statusSetImageZoneOff();
+            break;
+        case 'trusted':
+            statusSetImageZoneTrusted();
+            break;
+        case 'untrusted':
+            statusSetImageZoneUntrusted();
+            break;
+        default:
+            statusSetImageZoneNeutral();
+            break;
+    }
+}
+
+let BK_browserActionRefreshGeneration = 0;
+async function bkRefreshActiveBrowserActionZone(pageUrl = null) {
+    const refreshGeneration = ++BK_browserActionRefreshGeneration;
+    let resolvedUrl = pageUrl;
+    if (typeof resolvedUrl !== 'string') {
+        try {
+            const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+            resolvedUrl = Array.isArray(tabs) && tabs.length ? tabs[0].url : null;
+        } catch (error) {
+            resolvedUrl = null;
+        }
+    }
+    if (refreshGeneration !== BK_browserActionRefreshGeneration) {
+        return;
+    }
+    const state = bkGetSiteFilteringState(resolvedUrl);
+    if (!state.supported) {
+        bkSetStatusForZone('adaptive');
+    } else {
+        bkSetStatusForZone(state.mode === 'off' ? 'off' : state.effectiveZone);
+    }
+}
+
 function bkSetZone(newZone)
 {
     WJR_DEBUG && console.log('Zone request to: '+newZone);
@@ -302,7 +411,6 @@ function bkSetZone(newZone)
         case 'trusted':
             BK_zoneThreshold = ROC_trustedRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_trustedRoc);
-            statusSetImageZoneTrusted();
             BK_zone = newZone;
             didZoneChange = true;
             WJR_DEBUG && console.log('Zone is now trusted!');
@@ -310,7 +418,6 @@ function bkSetZone(newZone)
         case 'neutral':
             BK_zoneThreshold = ROC_neutralRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_neutralRoc);
-            statusSetImageZoneNeutral();
             BK_zone = newZone;
             didZoneChange = true;
             WJR_DEBUG && console.log('Zone is now neutral!');
@@ -318,13 +425,13 @@ function bkSetZone(newZone)
         case 'untrusted':
             BK_zoneThreshold = ROC_untrustedRoc.threshold;
             BK_zonePrecision = rocCalculatePrecision(ROC_untrustedRoc);
-            statusSetImageZoneUntrusted();
             BK_zone = newZone;
             didZoneChange = true;
             WJR_DEBUG && console.log('Zone is now untrusted!')
             break;
     }
     if(didZoneChange) {
+        bkRefreshActiveBrowserActionZone();
         WJR_DEBUG && console.log("Zone precision is: "+BK_zonePrecision);
         bkClearPredictionBuffer();
     }
@@ -541,7 +648,7 @@ function bkRevealRedirectListener(details) {
     }
 }
 
-async function bkImageListener(details, shouldBlockSilently = false) {
+async function bkImageListener(details, shouldBlockSilently = false, existingPlan = null) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
@@ -550,15 +657,20 @@ async function bkImageListener(details, shouldBlockSilently = false) {
         WJR_DEBUG && console.log('WEBREQ: Skipping filtering for silent collections preview', details.url);
         return;
     }
+    const requestPlan = existingPlan || bkBuildRequestPlan(details);
+    if (requestPlan.action === 'site-disabled') {
+        WJR_DEBUG && console.log('WEBREQ: Filtering disabled for page site', details.url);
+        return;
+    }
     if (bkIsRevealAllowed(details.url)) {
         WJR_DEBUG && console.log('WEBREQ: Reveal whitelist '+details.url);
         return;
     }
-    if (whtIsBlacklisted(details.url)) {
+    if (requestPlan.action === 'url-blacklisted') {
         WJR_DEBUG && console.log('WEBREQ: URL blacklist '+details.url);
         return { cancel: true };
     }
-    if (whtIsWhitelisted(details.url)) {
+    if (requestPlan.action === 'url-whitelisted') {
         WJR_DEBUG && console.log('WEBREQ: Normal whitelist '+details.url);
         return;
     }
@@ -576,13 +688,13 @@ async function bkImageListener(details, shouldBlockSilently = false) {
 
     let isGif = mimeType.startsWith('image/gif');
     if(isGif) {
-        return await gifListener(details);
+        return await gifListener(details, requestPlan.threshold);
     }
 
-    return await bkImageListenerNormal(details, mimeType);
+    return await bkImageListenerNormal(details, mimeType, requestPlan.threshold);
 }
 
-async function bkImageListenerNormal(details, mimeType) {
+async function bkImageListenerNormal(details, mimeType, threshold) {
     WJR_DEBUG && console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
     let filter = browser.webRequest.filterResponseData(details.requestId);
@@ -593,7 +705,7 @@ async function bkImageListenerNormal(details, mimeType) {
         requestId: details.requestId,
         mimeType: mimeType,
         url: details.url,
-        threshold: BK_zoneThreshold
+        threshold: threshold
     });
     statusStartImageCheck(details.requestId);
 
@@ -640,7 +752,12 @@ async function bkDirectTypedUrlListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
+    const requestPlan = bkBuildRequestPlan(details);
+    if (requestPlan.action === 'site-disabled') {
+        WJR_DEBUG && console.log('WEBREQ: Direct typed page-site filtering disabled '+details.url);
+        return;
+    }
+    if (requestPlan.action === 'url-whitelisted') {
         WJR_DEBUG && console.log('WEBREQ: Direct typed whitelist '+details.url);
         return;
     }
@@ -654,12 +771,12 @@ async function bkDirectTypedUrlListener(details) {
         if (header.name.toLowerCase() == "content-type") {
             let mimeType = header.value;
             if(mimeType.startsWith('image/')) {
-                if (whtIsBlacklisted(details.url)) {
+                if (requestPlan.action === 'url-blacklisted') {
                     WJR_DEBUG && console.log('WEBREQ: Direct typed URL blacklist '+details.url);
                     return { cancel: true };
                 }
                 WJR_DEBUG && console.log('WEBREQ: Direct URL: Forwarding based on mime type: '+mimeType+' for '+details.url);
-                return bkImageListener(details,true);
+                return bkImageListener(details, true, requestPlan);
             }
         }
     }
@@ -676,7 +793,12 @@ async function bkBase64ContentListener(details) {
     if (details.statusCode < 200 || 300 <= details.statusCode) {
         return;
     }
-    if (whtIsWhitelisted(details.url)) {
+    const requestPlan = bkBuildRequestPlan(details);
+    if (requestPlan.action === 'site-disabled') {
+        WJR_DEBUG && console.log('WEBREQ: Base64 page-site filtering disabled '+details.url);
+        return;
+    }
+    if (requestPlan.action === 'url-whitelisted') {
         WJR_DEBUG && console.log('WEBREQ: Base64 whitelist '+details.url);
         return;
     }
@@ -709,7 +831,7 @@ async function bkBase64ContentListener(details) {
     processor.postMessage({
         type: 'b64_start',
         requestId: details.requestId,
-        threshold: BK_zoneThreshold
+        threshold: requestPlan.threshold
     });
 
     filter.ondata = evt => {
@@ -1319,7 +1441,137 @@ function bkRefreshCallbackRegistration() {
     WJR_DEBUG && console.log('CONFIG: Callback wireup refresh complete!');
 }
 
+const BK_MASTER_PAUSE_STORAGE_KEY = 'master_smart_pause';
+const BK_MASTER_PAUSE_DURATIONS_MS = Object.freeze({
+    1: 1 * 60 * 1000,
+    5: 5 * 60 * 1000,
+    15: 15 * 60 * 1000
+});
+const BK_MASTER_PAUSE_STATUS_INTERVAL_MS = 1000;
 let BK_isEnabled = false;
+let BK_masterPauseUntil = null;
+let BK_masterPauseDurationMs = null;
+let BK_masterPauseTimer = null;
+
+function bkGetMasterFilteringState() {
+    const isPaused = !BK_isEnabled
+        && Number.isFinite(BK_masterPauseUntil)
+        && BK_masterPauseUntil > Date.now();
+    return {
+        onOff: BK_isEnabled ? 'on' : 'off',
+        mode: BK_isEnabled ? 'on' : (isPaused ? 'paused' : 'off'),
+        pauseUntil: isPaused ? BK_masterPauseUntil : null,
+        pauseDurationMs: isPaused ? BK_masterPauseDurationMs : null
+    };
+}
+
+function bkClearMasterPauseTimer() {
+    if (BK_masterPauseTimer !== null) {
+        clearTimeout(BK_masterPauseTimer);
+        BK_masterPauseTimer = null;
+    }
+}
+
+function bkUpdateMasterFilteringStatus() {
+    const state = bkGetMasterFilteringState();
+    statusSetMasterFilteringState(state.mode, state.pauseUntil);
+}
+
+function bkScheduleMasterPauseTimer() {
+    bkClearMasterPauseTimer();
+    function updatePauseStatus() {
+        const remainingMs = BK_masterPauseUntil - Date.now();
+        if (remainingMs <= 0) {
+            bkResumeMasterFiltering();
+            return;
+        }
+        bkUpdateMasterFilteringStatus();
+        BK_masterPauseTimer = setTimeout(
+            updatePauseStatus,
+            Math.min(BK_MASTER_PAUSE_STATUS_INTERVAL_MS, remainingMs)
+        );
+    }
+    if (Number.isFinite(BK_masterPauseUntil)) {
+        updatePauseStatus();
+    }
+}
+
+async function bkClearStoredMasterPause() {
+    try {
+        await browser.storage.local.remove(BK_MASTER_PAUSE_STORAGE_KEY);
+    } catch (error) {
+        console.error('CONFIG: Unable to clear Smart Pause', error);
+    }
+}
+
+async function bkResumeMasterFiltering() {
+    bkClearMasterPauseTimer();
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    await bkClearStoredMasterPause();
+    bkSetEnabled(true);
+    bkUpdateMasterFilteringStatus();
+    return bkGetMasterFilteringState();
+}
+
+async function bkSetMasterFilteringOff() {
+    bkClearMasterPauseTimer();
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    await bkClearStoredMasterPause();
+    bkSetEnabled(false);
+    bkUpdateMasterFilteringStatus();
+    return bkGetMasterFilteringState();
+}
+
+async function bkStartMasterPause(durationMinutes) {
+    const durationMs = BK_MASTER_PAUSE_DURATIONS_MS[durationMinutes];
+    if (!durationMs) {
+        return bkGetMasterFilteringState();
+    }
+    BK_masterPauseDurationMs = durationMs;
+    BK_masterPauseUntil = Date.now() + durationMs;
+    try {
+        await browser.storage.local.set({
+            [BK_MASTER_PAUSE_STORAGE_KEY]: {
+                until: BK_masterPauseUntil,
+                durationMs: BK_masterPauseDurationMs
+            }
+        });
+    } catch (error) {
+        console.error('CONFIG: Unable to persist Smart Pause', error);
+    }
+    bkSetEnabled(false);
+    bkScheduleMasterPauseTimer();
+    return bkGetMasterFilteringState();
+}
+
+async function bkRestoreMasterFilteringState() {
+    try {
+        const result = await browser.storage.local.get(BK_MASTER_PAUSE_STORAGE_KEY);
+        const storedPause = result[BK_MASTER_PAUSE_STORAGE_KEY];
+        const until = Number(storedPause?.until);
+        const durationMs = Number(storedPause?.durationMs);
+        if (Number.isFinite(until)
+            && Number.isFinite(durationMs)
+            && until > Date.now()
+            && Object.values(BK_MASTER_PAUSE_DURATIONS_MS).includes(durationMs)) {
+            BK_masterPauseUntil = until;
+            BK_masterPauseDurationMs = durationMs;
+            bkSetEnabled(false);
+            bkScheduleMasterPauseTimer();
+            return;
+        }
+        await bkClearStoredMasterPause();
+    } catch (error) {
+        console.error('CONFIG: Unable to restore Smart Pause', error);
+    }
+    BK_masterPauseUntil = null;
+    BK_masterPauseDurationMs = null;
+    bkSetEnabled(true);
+    bkUpdateMasterFilteringStatus();
+}
+
 function bkSetEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Setting enabled to '+isOn);
     if(isOn == BK_isEnabled) {
@@ -1426,10 +1678,39 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse({ isZoneAutomatic: BK_isZoneAutomatic });
     }
     else if (request.type == 'getOnOff') {
-        sendResponse({ onOff: BK_isEnabled ? 'on' : 'off' });
+        if (BK_masterPauseUntil !== null && BK_masterPauseUntil <= Date.now()) {
+            return bkResumeMasterFiltering();
+        }
+        sendResponse(bkGetMasterFilteringState());
     }
     else if (request.type == 'setOnOff') {
-        bkSetEnabled(request.onOff == 'on');
+        return request.onOff == 'on'
+            ? bkResumeMasterFiltering()
+            : bkSetMasterFilteringOff();
+    }
+    else if (request.type == 'setMasterPause') {
+        return bkStartMasterPause(request.durationMinutes);
+    }
+    else if (request.type == 'getSiteFilteringState') {
+        const siteState = bkGetSiteFilteringState(request.url);
+        bkRefreshActiveBrowserActionZone(request.url);
+        sendResponse(siteState);
+    }
+    else if (request.type == 'setSiteFilteringMode') {
+        return siteSetModeForUrl(request.url, request.mode)
+            .then(() => {
+                const siteState = bkGetSiteFilteringState(request.url);
+                bkRefreshActiveBrowserActionZone(request.url);
+                return siteState;
+            });
+    }
+    else if (request.type == 'resetSiteFiltering') {
+        return siteResetForUrl(request.url)
+            .then(() => {
+                const siteState = bkGetSiteFilteringState(request.url);
+                bkRefreshActiveBrowserActionZone(request.url);
+                return siteState;
+            });
     }
     else if (request.type == 'getOnOffSwitchShown') {
         sendResponse({ isOnOffSwitchShown: BK_isOnOffSwitchShown });
@@ -1449,6 +1730,10 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
     }
+    else if (request.type == 'setDefaultZone') {
+        return browser.storage.local.get('default_zone')
+            .then(bkSetDefaultZone);
+    }
     else if (request.type == 'revealBlockedImage') {
         console.log('REVEAL: Message received', request.url);
         bkRememberRevealUrl(request.url);
@@ -1456,11 +1741,17 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
 }
 browser.runtime.onMessage.addListener(bkHandleMessage);
+browser.tabs.onActivated.addListener(() => bkRefreshActiveBrowserActionZone());
+browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (tab.active && (changeInfo.url || changeInfo.status === 'loading')) {
+        bkRefreshActiveBrowserActionZone();
+    }
+});
+if (browser.windows?.onFocusChanged) {
+    browser.windows.onFocusChanged.addListener(() => bkRefreshActiveBrowserActionZone());
+}
 browser.storage.local.get('default_zone')
     .then(bkSetDefaultZone)
-    .then(() => {
-        bkSetZone(BK_zone);
-    })
     .then(() => {
         bkLoadBackendSettings(); //The loading of the first processor kicks off the rest of initialization
     });

@@ -29,6 +29,7 @@ vm.runInContext(source + `
     this.whitelistTestApi = {
         isWhitelisted: whtIsWhitelisted,
         isBlacklisted: whtIsBlacklisted,
+        getUrlPolicy: whtGetUrlPolicy,
         setRules: whtSetUserRules,
         getDomainScopes: whtGetDomainScopes,
         addDomainRule: whtAddDomainRule
@@ -76,6 +77,9 @@ assert.strictEqual(api.isWhitelisted('https://safe-image-sources.example/photo.j
 assert.strictEqual(api.isWhitelisted('https://images.example/allowed/photo.jpg'), true);
 assert.strictEqual(api.isBlacklisted('https://blocked.example.com/video.mp4'), true);
 assert.strictEqual(api.isBlacklisted('https://cdn.example/UNSAFE-42.JPG'), true);
+assert.strictEqual(api.getUrlPolicy('https://blocked.example.com/video.mp4'), 'url-blacklisted');
+assert.strictEqual(api.getUrlPolicy('https://safe.example.com/photo.jpg'), 'url-whitelisted');
+assert.strictEqual(api.getUrlPolicy(null), 'filter');
 assert.strictEqual(api.isBlacklisted('https://cdn.example/UNSAFE-42.JPG'), true);
 
 api.setRules({
@@ -129,6 +133,7 @@ assert.strictEqual(api.isWhitelisted('https://www.google.com/recaptcha/api/image
 
     await api.addDomainRule('blacklist', 'google.com');
     assert.strictEqual(storedData.url_filter_rules.blacklist.domains.join('|'), 'google.com');
+
     console.log('whitelist tests passed');
 })().catch(error => {
     console.error(error);

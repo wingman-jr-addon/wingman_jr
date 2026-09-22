@@ -1,4 +1,9 @@
 const WHT_URL_RULES_STORAGE_KEY = 'url_filter_rules';
+const WHT_REQUEST_POLICY = Object.freeze({
+    URL_BLACKLISTED: 'url-blacklisted',
+    URL_WHITELISTED: 'url-whitelisted',
+    FILTER: 'filter'
+});
 const WHT_COMMON_SECOND_LEVEL_SUFFIXES = new Set([
     'ac', 'co', 'com', 'edu', 'gov', 'mil', 'net', 'org'
 ]);
@@ -159,6 +164,19 @@ function whtIsWhitelisted(url) {
         return false;
     }
     return whtRuleSetMatches(url, whtUserRules.whitelist);
+}
+
+function whtGetUrlPolicy(requestUrl) {
+    if (typeof requestUrl !== 'string') {
+        return WHT_REQUEST_POLICY.FILTER;
+    }
+    if (whtIsBlacklisted(requestUrl)) {
+        return WHT_REQUEST_POLICY.URL_BLACKLISTED;
+    }
+    if (whtIsWhitelisted(requestUrl)) {
+        return WHT_REQUEST_POLICY.URL_WHITELISTED;
+    }
+    return WHT_REQUEST_POLICY.FILTER;
 }
 
 function whtSetUserRules(rules) {

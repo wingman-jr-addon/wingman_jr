@@ -21,6 +21,7 @@ async function optSaveOptions() {
     await browser.storage.local.set({
         default_zone: defaultZone
     });
+    browser.runtime.sendMessage({ type: 'setDefaultZone' });
 
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
     await browser.storage.local.set({
@@ -43,6 +44,117 @@ const OPT_DEFAULT_URL_FILTER_RULES = {
         regex: []
     }
 };
+
+const OPT_SITE_MODES = ['off', 'adaptive', 'trusted', 'neutral', 'untrusted'];
+
+function optNormalizeSiteSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        return {};
+    }
+    const normalized = {};
+    for (const [hostname, preference] of Object.entries(settings)) {
+        if (!hostname) {
+            continue;
+        }
+        let mode = OPT_SITE_MODES.includes(preference) ? preference : null;
+        if (!mode && preference && typeof preference === 'object') {
+            mode = preference.enabled === false
+                ? 'off'
+                : (OPT_SITE_MODES.includes(preference.mode) ? preference.mode : null);
+        }
+        if (mode) {
+            normalized[hostname.toLowerCase()] = mode;
+        }
+    }
+    return normalized;
+}
+
+function optMigrateDisabledSiteHosts(hosts) {
+    const settings = {};
+    if (Array.isArray(hosts)) {
+        for (const hostname of hosts) {
+            if (typeof hostname === 'string' && hostname.trim()) {
+                settings[hostname.trim().toLowerCase()] = 'off';
+            }
+        }
+    }
+    return settings;
+}
+
+async function optReadSiteSettings() {
+    const result = await browser.storage.local.get([
+        'site_filtering_settings',
+        'site_filtering_disabled_hosts'
+    ]);
+    return Object.prototype.hasOwnProperty.call(result, 'site_filtering_settings')
+        ? optNormalizeSiteSettings(result.site_filtering_settings)
+        : optMigrateDisabledSiteHosts(result.site_filtering_disabled_hosts);
+}
+
+function optRenderSiteSettings(settings) {
+    const list = document.getElementById('site_filtering_hosts');
+    const empty = document.getElementById('site_filtering_empty');
+    const normalizedSettings = optNormalizeSiteSettings(settings);
+    const hostnames = Object.keys(normalizedSettings).sort();
+    list.textContent = '';
+    empty.hidden = hostnames.length > 0;
+
+    for (const hostname of hostnames) {
+        const mode = normalizedSettings[hostname];
+        const item = document.createElement('li');
+        const hostText = document.createElement('code');
+        const modeSelect = document.createElement('select');
+        const removeButton = document.createElement('button');
+        hostText.textContent = hostname;
+        modeSelect.dataset.hostname = hostname;
+        for (const [value, label] of [
+            ['off', 'Off'],
+            ['adaptive', 'Adaptive'],
+            ['trusted', 'Trusted'],
+            ['neutral', 'Neutral'],
+            ['untrusted', 'Untrusted']
+        ]) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            modeSelect.append(option);
+        }
+        modeSelect.value = mode;
+        removeButton.type = 'button';
+        removeButton.textContent = 'Use default';
+        removeButton.dataset.hostname = hostname;
+        item.append(hostText, modeSelect, removeButton);
+        list.append(item);
+    }
+}
+
+async function optUpdateSiteSetting(hostname, value) {
+    const status = document.getElementById('site_filtering_status');
+    try {
+        const settings = await optReadSiteSettings();
+        settings[hostname] = value;
+        await browser.storage.local.set({ site_filtering_settings: settings });
+        optRenderSiteSettings(settings);
+        status.textContent = `Updated ${hostname}.`;
+    } catch (error) {
+        status.textContent = 'Could not update the site.';
+        console.error('Error updating site filtering preference', error);
+    }
+}
+
+async function optResetSiteSetting(hostname) {
+    const status = document.getElementById('site_filtering_status');
+    try {
+        const settings = await optReadSiteSettings();
+        delete settings[hostname];
+        await browser.storage.local.set({ site_filtering_settings: settings });
+        optRenderSiteSettings(settings);
+        status.textContent = `${hostname} now uses the default zone.`;
+    } catch (error) {
+        status.textContent = 'Could not reset the site.';
+        console.error('Error resetting site filtering preference', error);
+    }
+}
 
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
@@ -132,6 +244,8 @@ function optRestoreOptions() {
         document.getElementById('blacklist_domains').value = (blacklist.domains || []).join('\n');
         document.getElementById('blacklist_regex').value = (blacklist.regex || []).join('\n');
     }, onError);
+
+    optReadSiteSettings().then(optRenderSiteSettings, onError);
 }
 
 function optLinesFromTextarea(id) {
@@ -230,6 +344,18 @@ async function optSaveUrlRules() {
 
 document.addEventListener("DOMContentLoaded", optRestoreOptions);
 document.getElementById('save_url_rules').addEventListener('click', optSaveUrlRules);
+document.getElementById('site_filtering_hosts').addEventListener('click', event => {
+    const hostname = event.target?.dataset?.hostname;
+    if (hostname && event.target.tagName === 'BUTTON') {
+        optResetSiteSetting(hostname);
+    }
+});
+document.getElementById('site_filtering_hosts').addEventListener('change', event => {
+    const hostname = event.target?.dataset?.hostname;
+    if (hostname && event.target.tagName === 'SELECT') {
+        optUpdateSiteSetting(hostname, event.target.value);
+    }
+});
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
 for (var i = 0, max = radiosOnOff.length; i < max; i++) {
     radiosOnOff[i].onclick = function () {
