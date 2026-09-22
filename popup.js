@@ -13,6 +13,7 @@ let POP_siteState = {
     enabled: true,
     mode: 'adaptive',
     defaultMode: 'adaptive',
+    adaptiveZone: 'neutral',
     effectiveZone: 'neutral',
     isOverride: false
 };
@@ -137,12 +138,13 @@ function popUpdateFilteringUi() {
     }
 
     const adaptiveState = document.getElementById('adaptiveCurrentZone');
+    const adaptiveZone = POP_siteState.adaptiveZone || POP_siteState.effectiveZone;
     adaptiveState.textContent =
         POP_siteState.supported
-            ? popCapitalize(POP_siteState.effectiveZone) + ' now'
+            ? popCapitalize(adaptiveZone) + ' now'
             : 'Unavailable';
     adaptiveState.dataset.zone = POP_siteState.supported
-        ? POP_siteState.effectiveZone
+        ? adaptiveZone
         : 'off';
     resetButton.hidden = !POP_siteState.isOverride;
     resetButton.disabled = !canConfigureSite;
@@ -191,7 +193,8 @@ async function popSendSiteChange(message) {
     }
     POP_siteState = await browser.runtime.sendMessage({
         ...message,
-        url: POP_activeTab.url
+        url: POP_activeTab.url,
+        incognito: POP_activeTab.incognito === true
     });
     popUpdateFilteringUi();
     popShowReloadButton();
@@ -292,7 +295,8 @@ window.onload = async function() {
         try {
             POP_siteState = await browser.runtime.sendMessage({
                 type: 'getSiteFilteringState',
-                url: POP_activeTab.url
+                url: POP_activeTab.url,
+                incognito: POP_activeTab.incognito === true
             });
         } catch (error) {
             console.log('Error getting site filtering: '+error);

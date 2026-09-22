@@ -156,6 +156,49 @@ async function optResetSiteSetting(hostname) {
     }
 }
 
+function optRenderAdaptiveMemoryState(state) {
+    const enabled = state?.enabled !== false;
+    const count = Number.isInteger(state?.rememberedDomainCount)
+        ? state.rememberedDomainCount
+        : 0;
+    document.getElementById('remember_adaptive_zones').checked = enabled;
+    document.getElementById('adaptive_memory_count').textContent =
+        `${count} remembered ${count === 1 ? 'site' : 'sites'}`;
+}
+
+async function optSetAdaptiveMemoryEnabled(enabled) {
+    const status = document.getElementById('adaptive_memory_status');
+    try {
+        const state = await browser.runtime.sendMessage({
+            type: 'setAdaptiveZonePersistence',
+            enabled: enabled
+        });
+        optRenderAdaptiveMemoryState(state);
+        status.dataset.state = 'saved';
+        status.textContent = enabled
+            ? 'Adaptive zone memory enabled.'
+            : 'Adaptive zone memory disabled and saved zones removed.';
+    } catch (error) {
+        status.dataset.state = 'error';
+        status.textContent = 'Could not update adaptive zone memory.';
+        console.error('Error updating adaptive zone memory', error);
+    }
+}
+
+async function optClearAdaptiveMemory() {
+    const status = document.getElementById('adaptive_memory_status');
+    try {
+        const state = await browser.runtime.sendMessage({ type: 'clearAdaptiveZoneMemory' });
+        optRenderAdaptiveMemoryState(state);
+        status.dataset.state = 'saved';
+        status.textContent = 'Adaptive zones reset to neutral.';
+    } catch (error) {
+        status.dataset.state = 'error';
+        status.textContent = 'Could not clear adaptive zone memory.';
+        console.error('Error clearing adaptive zone memory', error);
+    }
+}
+
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
 
@@ -246,6 +289,8 @@ function optRestoreOptions() {
     }, onError);
 
     optReadSiteSettings().then(optRenderSiteSettings, onError);
+    browser.runtime.sendMessage({ type: 'getAdaptiveZoneMemoryState' })
+        .then(optRenderAdaptiveMemoryState, onError);
 }
 
 function optLinesFromTextarea(id) {
@@ -344,6 +389,10 @@ async function optSaveUrlRules() {
 
 document.addEventListener("DOMContentLoaded", optRestoreOptions);
 document.getElementById('save_url_rules').addEventListener('click', optSaveUrlRules);
+document.getElementById('remember_adaptive_zones').addEventListener('change', event => {
+    optSetAdaptiveMemoryEnabled(event.target.checked);
+});
+document.getElementById('clear_adaptive_zones').addEventListener('click', optClearAdaptiveMemory);
 document.getElementById('site_filtering_hosts').addEventListener('click', event => {
     const hostname = event.target?.dataset?.hostname;
     if (hostname && event.target.tagName === 'BUTTON') {
