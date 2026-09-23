@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up Wingman Jr.</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      --blue: #2f80ed;
+      --ink: #1f2a44;
+      --muted: #596780;
+      --line: rgba(31, 42, 68, 0.15);
+      --page: #f3f6fa;
+      --card: #fff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    main {
+      width: min(100%, 600px);
+      padding: 30px;
+      border: 1px solid rgba(31, 42, 68, 0.08);
+      border-radius: 16px;
+      background: var(--card);
+      box-shadow: 0 14px 38px rgba(31, 42, 68, 0.12);
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) minmax(150px, 190px);
+      align-items: start;
+      gap: 13px;
+      margin-bottom: 26px;
+    }
+
+    header img {
+      width: 48px;
+      height: 48px;
+    }
+
+    h1 {
+      margin: 0 0 3px;
+      font-size: 25px;
+      line-height: 1.15;
+    }
+
+    header p,
+    .choice small,
+    #setup-status {
+      color: var(--muted);
+    }
+
+    header p { margin: 0; }
+
+    .firefox-tip {
+      position: relative;
+      margin: -8px -8px 0 4px;
+      padding: 9px 48px 9px 10px;
+      border-radius: 8px;
+      background: rgba(47, 128, 237, 0.08);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .firefox-tip::after {
+      content: '↗';
+      position: absolute;
+      top: 50%;
+      right: 9px;
+      transform: translateY(-50%);
+      color: var(--blue);
+      font-size: 42px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .firefox-tip strong {
+      color: var(--ink);
+    }
+
+    fieldset {
+      min-width: 0;
+      margin: 0 0 24px;
+      padding: 0;
+      border: 0;
+    }
+
+    legend {
+      margin-bottom: 10px;
+      padding: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .choice {
+      position: relative;
+      display: flex;
+      min-height: 82px;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .choice.is-selected {
+      border-color: var(--blue);
+      background: rgba(47, 128, 237, 0.08);
+      box-shadow: 0 0 0 1px var(--blue);
+    }
+
+    .choice input {
+      width: 17px;
+      height: 17px;
+      margin: 2px 0 0;
+      accent-color: var(--blue);
+    }
+
+    .choice span { display: block; }
+
+    .choice strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .choice small {
+      display: block;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .recommended {
+      color: var(--blue);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.25px;
+      text-transform: uppercase;
+    }
+
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 2px;
+    }
+
+    button {
+      min-width: 82px;
+      padding: 9px 18px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+    }
+
+    button[type="submit"] {
+      border-color: var(--blue);
+      background: var(--blue);
+      color: #fff;
+    }
+
+    button:hover { filter: brightness(0.97); }
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    button:disabled { cursor: wait; opacity: 0.65; }
+
+    #setup-status {
+      flex: 1;
+      margin: 0;
+      font-size: 12px;
+    }
+
+    #setup-status[data-state="error"] { color: #b42318; }
+
+    @media (max-width: 520px) {
+      body { padding: 0; }
+      main {
+        min-height: 100vh;
+        padding: 24px 18px;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      header { grid-template-columns: auto minmax(0, 1fr); }
+      .firefox-tip {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
+      .choices { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8edf7;
+        --muted: #aeb9cc;
+        --line: rgba(232, 237, 247, 0.2);
+        --page: #141922;
+        --card: #202735;
+      }
+      button { background: #293243; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/wingman_icon_32.png" alt="">
+      <div>
+        <h1>Quick setup</h1>
+        <p>Two quick choices for you or your family.</p>
+      </div>
+      <aside class="firefox-tip">
+        Firefox may also ask about hidden tabs. Choose <strong>Keep Tabs Hidden</strong> so filtering keeps working.
+      </aside>
+    </header>
+
+    <form id="setup-form">
+      <fieldset>
+        <legend>When an image is blocked</legend>
+        <div class="choices">
+          <label class="choice is-selected">
+            <input type="radio" name="blocked-image" value="quiet" checked>
+            <span>
+              <strong>Replace it with a safe image</strong>
+              <small>Uses one already on the page when possible.</small>
+              <span class="recommended">Recommended</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="blocked-image" value="visible">
+            <span>
+              <strong>Show a blocked image</strong>
+              <small>Makes it clear Wingman Jr. blocked something.</small>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>On/off controls</legend>
+        <div class="choices">
+          <label class="choice is-selected">
+            <input type="radio" name="on-off-controls" value="hidden" checked>
+            <span>
+              <strong>Hide them</strong>
+              <small>Usually best for kids. Settings stay available.</small>
+              <span class="recommended">Recommended</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="on-off-controls" value="shown">
+            <span>
+              <strong>Show them</strong>
+              <small>Better for adults who want to pause or turn off filtering.</small>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
+      <footer>
+        <p id="setup-status" role="status" aria-live="polite"></p>
+        <button id="skip-setup" type="button">Skip</button>
+        <button type="submit">OK</button>
+      </footer>
+    </form>
+  </main>
+  <script src="setup.js"></script>
+</body>
+</html>

@@ -5,6 +5,26 @@
 browser.webRequest.handlerBehaviorChanged();
 
 
+const BK_SETUP_COMPLETED_KEY = 'setup_wizard_completed';
+const BK_SETUP_SETTING_KEYS = [
+    BK_SETUP_COMPLETED_KEY,
+    'is_silent_mode_enabled',
+    'is_on_off_shown'
+];
+
+function bkShouldOpenSetup(settings) {
+    const hasSavedSetting = Object.prototype.hasOwnProperty.call(settings, 'is_silent_mode_enabled')
+        || Object.prototype.hasOwnProperty.call(settings, 'is_on_off_shown');
+    return settings[BK_SETUP_COMPLETED_KEY] !== true && !hasSavedSetting;
+}
+
+async function bkOpenSetupForNewUser(forceOpen = false) {
+    const settings = await browser.storage.local.get(BK_SETUP_SETTING_KEYS);
+    if (forceOpen || bkShouldOpenSetup(settings)) {
+        await browser.tabs.create({ url: browser.runtime.getURL('setup.html') });
+    }
+}
+
 async function bkOnUpdate() {
     const url = 'https://docs.google.com/forms/d/e/1FAIpQLSfkmwmDvV0vK5x8s1rmgCNWRoj5d7FOxu4-4scyrzMy2nuJbQ/viewform?usp=sf_link';
     await browser.tabs.create({ url });
@@ -12,10 +32,14 @@ async function bkOnUpdate() {
 
 //User feedback
 browser.runtime.onInstalled.addListener(async ({ reason, temporary, }) => {
-    if (temporary) return; // skip during development
     switch (reason) {
+        case "install": {
+            await bkOpenSetupForNewUser(temporary === true);
+        } break;
         case "update": {
-            await bkOnUpdate();
+            if (!temporary) {
+                await bkOnUpdate();
+            }
         } break;
     }
 });
