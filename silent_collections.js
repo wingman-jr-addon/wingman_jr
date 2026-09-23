@@ -135,7 +135,7 @@ function getBuiltInCollection() {
     }));
     return {
         id: 'builtin',
-        name: 'Built-in collection',
+        name: 'Built-in collection with page reuse',
         images,
         isBuiltin: true
     };
@@ -175,11 +175,11 @@ function renderCollections() {
     const builtInCard = document.createElement('div');
     builtInCard.className = `collection-card ${activeCollectionId === 'builtin' ? 'active' : ''}`;
     builtInCard.innerHTML = `
-        <strong>Built-in collection</strong>
-        <div class="collection-meta">Safe images included with the add-on.</div>
+        <strong>Built-in collection with page reuse</strong>
+        <div class="collection-meta">Reuses suitable safe images from the current page, then falls back to images included with the add-on.</div>
         <div class="row">
           <button class="secondary" data-action="open" data-id="builtin">View details</button>
-          <button class="secondary" data-action="activate" data-id="builtin">Use built-in collection</button>
+          <button class="secondary" data-action="activate" data-id="builtin">Use built-in strategy</button>
           <a href="silent_credits.html" target="_blank" class="muted">View credits</a>
         </div>
     `;
@@ -225,7 +225,7 @@ function renderDetail(collection) {
     detailTitleEl.textContent = `Collection: ${collection.name}`;
     const sizeBytes = getCollectionSizeBytes(collection);
     detailMetaEl.textContent = collection.isBuiltin
-        ? `${collection.images.length} images · Built-in collection (read-only)`
+        ? `${collection.images.length} fallback images · Page reuse with built-in fallback (read-only)`
         : `${collection.images.length} images · ${formatBytes(sizeBytes)} of ${formatBytes(MAX_COLLECTION_BYTES)} used`;
     setActiveButton.textContent = activeCollectionId === collection.id
         ? 'Active collection'
