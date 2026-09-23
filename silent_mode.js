@@ -59,7 +59,7 @@ function SM_getActiveCollection() {
     return SM_customCollections.find(collection => collection.id === SM_activeCollectionId) || null;
 }
 
-function SM_pickReplacementSource() {
+function SM_pickReplacementSource(img, replacementContext) {
     const customCollection = SM_getActiveCollection();
     if (customCollection && customCollection.images && customCollection.images.length > 0) {
         const index = SM_getNextIndex(customCollection.id, customCollection.images.length);
@@ -68,6 +68,13 @@ function SM_pickReplacementSource() {
             src: entry.dataUrl,
             label: `custom-${customCollection.name}`
         };
+    }
+
+    if (typeof SMR_pickReplacementSource === 'function') {
+        const reusedSource = SMR_pickReplacementSource(img, replacementContext);
+        if (reusedSource) {
+            return reusedSource;
+        }
     }
 
     const index = SM_getNextIndex(SM_BUILTIN_COLLECTION_ID, SM_DATA.length);
@@ -79,7 +86,7 @@ function SM_pickReplacementSource() {
 }
 
 //Do best to format the image with matching dimensions
-async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
+async function smFormatImage(srcImg, targetWidth, targetHeight, id, formatting = null) {
     let targetCanvas = document.createElement('canvas');
     targetCanvas.width = targetWidth;
     targetCanvas.height = targetHeight;
@@ -88,23 +95,32 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id) {
 
     targetCtx.clearRect(0,0,targetWidth,targetHeight);
 
-    let scale = Math.max(targetWidth / srcImg.width, targetHeight / srcImg.height);
+    let zoom = formatting?.zoom || 1;
+    let focusX = formatting?.focusX ?? 0.5;
+    let focusY = formatting?.focusY ?? 0.5;
+    let scale = Math.max(targetWidth / srcImg.width, targetHeight / srcImg.height) * zoom;
     let scaledWidth = srcImg.width * scale;
     let scaledHeight = srcImg.height * scale;
-    let offsetX = (targetWidth - scaledWidth) / 2.0;
-    let offsetY = (targetHeight - scaledHeight) / 2.0;
+    let offsetX = -(scaledWidth - targetWidth) * focusX;
+    let offsetY = -(scaledHeight - targetHeight) * focusY;
     WJR_DEBUG && console.debug(`SILENT: Format image, id ${id}, src ${srcImg.width}x${srcImg.height} target ${targetWidth}x${targetHeight}`);
     targetCtx.drawImage(srcImg, offsetX, offsetY, scaledWidth, scaledHeight);
 
     return targetCanvas.toDataURL();
 }
 
-async function SM_getReplacementSVG(img, visibleScore, originalDataURL) {
+async function SM_getReplacementSVG(img, visibleScore, originalDataURL, replacementContext = null) {
     WJR_DEBUG && console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
 
-    let replacementSource = SM_pickReplacementSource();
+    let replacementSource = SM_pickReplacementSource(img, replacementContext);
     let replacementRawImage = await smLoadImagePromise(replacementSource.src);
-    let replacementImageDataURL = await smFormatImage(replacementRawImage, img.width, img.height, visibleScore);
+    let replacementImageDataURL = await smFormatImage(
+        replacementRawImage,
+        img.width,
+        img.height,
+        visibleScore,
+        replacementSource.formatting
+    );
 
     let fontSize = Math.round(img.height*0.08);
 
@@ -113,7 +129,9 @@ async function SM_getReplacementSVG(img, visibleScore, originalDataURL) {
     let svgText = '<?xml version="1.0" standalone="no"?> <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"> <svg width="'+img.width+'" height="'+img.height+'" version="1.1"      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'+originalAttr+'>'
     +'<g>'
     + '<image href="'+replacementImageDataURL+'" x="0" y="0" height="'+img.height+'px" width="'+img.width+'px" />'
-    +' <text transform="translate('+(img.width/2.0)+' '+(img.height/2.0)+')" font-size="'+fontSize+'" fill="grey" opacity="0.35">W'+visibleScore+'</text>'
+    + (replacementSource.isSamePageReuse && typeof SMR_getWatermarkSvg === 'function'
+        ? SMR_getWatermarkSvg(img.width, img.height)
+        : ' <text transform="translate('+(img.width/2.0)+' '+(img.height/2.0)+')" font-size="'+fontSize+'" fill="grey" opacity="0.35">W'+visibleScore+'</text>')
     +'</g>'
     +'</svg>';
     return svgText;

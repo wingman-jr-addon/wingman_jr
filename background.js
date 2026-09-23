@@ -821,7 +821,10 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
         mimeType: mimeType,
         url: details.url,
         threshold: requestPlan.threshold,
-        adaptiveContext: requestPlan.adaptiveContext
+        adaptiveContext: requestPlan.adaptiveContext,
+        reuseContext: typeof SMR_makeRequestContext === 'function'
+            ? SMR_makeRequestContext(details)
+            : null
     });
     statusStartImageCheck(details.requestId);
 
@@ -948,7 +951,10 @@ async function bkBase64ContentListener(details) {
         type: 'b64_start',
         requestId: details.requestId,
         threshold: requestPlan.threshold,
-        adaptiveContext: requestPlan.adaptiveContext
+        adaptiveContext: requestPlan.adaptiveContext,
+        reuseContext: typeof SMR_makeRequestContext === 'function'
+            ? SMR_makeRequestContext(details)
+            : null
     });
 
     filter.ondata = evt => {
