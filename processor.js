@@ -227,10 +227,10 @@ async function procCommonLogImgGeneric(img, message, logger)
     logger('%c '+message, blockedCSS);
 }
 
-async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob)
+async function procCommonCreateSvgFromBlob(img, sqrxrScore, blob, replacementContext = null)
 {
     let dataURL = PROC_isInReviewMode ? await procReadFileAsDataURL(blob) : null;
-    return procCommonCreateSvg(img, sqrxrScore, dataURL);
+    return procCommonCreateSvg(img, sqrxrScore, dataURL, replacementContext);
 }
 
 let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAD6AAAA+gBtXtSawAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAGxSURBVFiF7dW9j0xRHMbxjz1m2ESWkChkiW0kGgSFnkbsJqvQTEMoRSFRydDsP6CiEoJibfQEW2hssSMKiUI2UcluY0Ui6y2M4pyJYzK7cxczFPeb3OSe+zzn+f3uyzmXkpKSf0zAIXzApz7X3oR9sB6PsLOPxXfgIQZbFw7iOQ70ofgePBOf/C9cwGsc7WHxw5hLtToyhXnUCoRVQ6VyJlQqp1Et4K+l7KmVTJvFV/Ee57sE1kMIoyGEY7jcxXsOi3iBLd06PYJ3+Iwry3jWYFa88yoaGFjGO4GP4k0Vfr0T+J6O21jbpp/C02w8g5NtnoDr+IZmyizMAO6nic10viHTH+NGNr6J6Ww8iHvZ/AepoVWxHa+ykGlswxi+oJ556+naGLamBlvz5jCy2uItaljKwhqpkSbGM9941mQj8y8ptqJW5FoW2DoWMZR5hvC2g+/qnxaHdXjSFjybtBM4ns4bbZ4ZcZv/K+zFmyx8EqPinj4iLq+7mb6gB9v6WfFDa+IWdmXabtxJ2tfk7QmTqcjFDtolP59Oz9gobqfDHbRhvBT/8z1l/29qJSUl/yc/AP3+b58RpkSuAAAAAElFTkSuQmCC";
@@ -240,13 +240,13 @@ function procGetPrimaryScore(sqrxrScore) {
     return sqrxrScore[0][0];
 }
 
-async function procCommonCreateSvg(img, sqrxrScore, dataURL)
+async function procCommonCreateSvg(img, sqrxrScore, dataURL, replacementContext = null)
 {
     let threshold = procGetPrimaryScore(sqrxrScore);
     let confidence = rocFindConfidence(threshold);
     let visibleScore = Math.floor(confidence*100);
     if(PROC_isSilentModeEnabled) {
-        return await SM_getReplacementSVG(img, visibleScore, dataURL);
+        return await SM_getReplacementSVG(img, visibleScore, dataURL, replacementContext);
     } else {
         let escapedDataUrl = dataURL ? dataURL.replace(/"/g, '&quot;') : null;
         let originalAttr = escapedDataUrl ? ` data-wingman-original-href="${escapedDataUrl}"` : '';
@@ -318,12 +318,15 @@ async function procPerformFiltering(entry) {
                 result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+                    if (typeof SMR_observeSafeImage === 'function') {
+                        SMR_observeSafeImage(img, sqrxrScore, entry.threshold, entry.reuseContext);
+                    }
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();
                     result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob);
+                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob, entry.reuseContext);
                     procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
@@ -427,6 +430,12 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
+                        if (typeof SMR_observeSafeImage === 'function') {
+                            const reuseContext = typeof SMR_withSourceSuffix === 'function'
+                                ? SMR_withSourceSuffix(b64Filter.reuseContext, imageId)
+                                : b64Filter.reuseContext;
+                            SMR_observeSafeImage(img, sqrxrScore, b64Filter.threshold, reuseContext);
+                        }
                         outputPort.postMessage({
                             type:'stat',
                             result:'pass',
@@ -443,7 +452,10 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             adaptiveContext: b64Filter.adaptiveContext,
                             adaptiveScore: adaptiveScore
                         });
-                        let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src);
+                        const reuseContext = typeof SMR_withSourceSuffix === 'function'
+                            ? SMR_withSourceSuffix(b64Filter.reuseContext, imageId)
+                            : b64Filter.reuseContext;
+                        let svgText = await procCommonCreateSvg(img,sqrxrScore,img.src,reuseContext);
                         let svgURI='data:image/svg+xml;base64,'+window.btoa(svgText);
                         WJR_DEBUG && console.log('ML: base64 filter Blocked: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                         procCommonWarnImg(img, 'BLOCKED IMG BASE64 '+procScoreToStr(sqrxrScore));
@@ -760,6 +772,7 @@ async function procOnPortMessage(m) {
                 mimeType: m.mimeType,
                 threshold: m.threshold,
                 adaptiveContext: m.adaptiveContext || null,
+                reuseContext: m.reuseContext || null,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -810,6 +823,7 @@ async function procOnPortMessage(m) {
                 requestId: m.requestId,
                 threshold: m.threshold,
                 adaptiveContext: m.adaptiveContext || null,
+                reuseContext: m.reuseContext || null,
                 startTime: performance.now(),
                 fullStr: ''
             };
