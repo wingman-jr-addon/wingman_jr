@@ -10,7 +10,12 @@ vm.runInContext(source + `
     this.rocTestApi = {
         values: ROC_VALUES,
         byFpr: rocFindRocEntryByFpr,
-        confidence: rocFindConfidence
+        confidence: rocFindConfidence,
+        trusted: ROC_trustedRoc,
+        neutral: ROC_neutralRoc,
+        untrusted: ROC_untrustedRoc,
+        trustedToNeutralPercentage: ROC_trustedToNeutralPercentage,
+        neutralToUntrustedPercentage: ROC_neutralToUntrustedPercentage
     };
 `, context);
 
@@ -38,6 +43,12 @@ for (const [maximumFpr, threshold, fp, tp] of policies) {
     assert.strictEqual(entry.fp, fp);
     assert.strictEqual(entry.tp, tp);
 }
+
+assert.strictEqual(api.trusted, api.byFpr(0.004));
+assert.strictEqual(api.neutral, api.byFpr(0.015));
+assert.strictEqual(api.untrusted, api.byFpr(0.10));
+assert.strictEqual(api.trustedToNeutralPercentage, 0.04);
+assert.strictEqual(api.neutralToUntrustedPercentage, 0.18);
 
 assert.ok(Number.isFinite(api.confidence(0.5)));
 console.log('ROC model tests passed');
