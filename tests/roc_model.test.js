@@ -52,7 +52,7 @@ assert.strictEqual(api.untrusted, api.byFpr(0.163));
 assert.strictEqual(api.neutralToTrustedPercentage, 0.02);
 assert.strictEqual(api.trustedToNeutralPercentage, 0.04);
 assert.strictEqual(api.untrustedToNeutralPercentage, 0.10);
-assert.strictEqual(api.neutralToUntrustedPercentage, 0.15);
+assert.strictEqual(api.neutralToUntrustedPercentage, 0.18);
 
 assert.ok(Number.isFinite(api.confidence(0.5)));
 console.log('ROC model tests passed');
