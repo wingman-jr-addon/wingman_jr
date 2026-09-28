@@ -234,7 +234,20 @@ const BK_ADAPTIVE_MEMORY_KEY = 'adaptive_zone_memory';
 const BK_ADAPTIVE_MEMORY_SCHEMA = 1;
 const BK_ADAPTIVE_MAX_ACTIVE_DOMAINS = 256;
 const BK_ADAPTIVE_MAX_REMEMBERED_DOMAINS = 10000;
-const BK_ADAPTIVE_MIN_PREDICTIONS = 51;
+const BK_ADAPTIVE_MIN_ESCALATION_PREDICTIONS = 32;
+const BK_ADAPTIVE_MIN_DEESCALATION_PREDICTIONS = 96;
+const BK_ADAPTIVE_MAX_PREDICTIONS = 200;
+const BK_ADAPTIVE_PROBE_FPRS = [0.002, 0.006, 0.015, 0.03, 0.06, 0.10, 0.163, 0.25];
+const BK_ADAPTIVE_ROC_PROBES = BK_ADAPTIVE_PROBE_FPRS.map(targetFpr => {
+    const roc = rocFindRocEntryByFpr(targetFpr);
+    return {
+        targetFpr,
+        fpr: roc.fpr,
+        tpr: roc.tpr,
+        threshold: roc.threshold,
+        separation: roc.tpr - roc.fpr
+    };
+}).filter(probe => probe.separation > 0);
 const BK_COMMON_SECOND_LEVEL_SUFFIXES = new Set([
     'ac', 'co', 'com', 'edu', 'gov', 'mil', 'net', 'org'
 ]);
@@ -262,7 +275,7 @@ function bkGetAdaptiveDomain(hostname) {
 
 function bkAddToPredictionBuffer(state, score) {
     state.predictionBuffer.push(score);
-    if (state.predictionBuffer.length > 200) {
+    if (state.predictionBuffer.length > BK_ADAPTIVE_MAX_PREDICTIONS) {
         state.predictionBuffer.shift();
     }
     return bkCheckZone(state);
@@ -277,15 +290,36 @@ function bkSetDefaultZone(result) {
 }
 
 function bkCheckZone(state) {
-    const estimate = bkEstimateAdaptiveStats(state);
-    if (!estimate) {
+    const escalationEstimate = bkEstimateAdaptiveStats(
+        state,
+        BK_ADAPTIVE_MIN_ESCALATION_PREDICTIONS
+    );
+    if (!escalationEstimate) {
         return false;
     }
-    let requestedZone = 'untrusted';
-    if (estimate.estimatedTruePositivePercentage < ROC_trustedToNeutralPercentage) {
+    const deescalationEstimate = state.predictionBuffer.length >= BK_ADAPTIVE_MIN_DEESCALATION_PREDICTIONS
+        ? bkEstimateAdaptiveStats(state, BK_ADAPTIVE_MIN_DEESCALATION_PREDICTIONS)
+        : null;
+    const escalationPercentage = escalationEstimate.estimatedTruePositivePercentage;
+    const deescalationPercentage = deescalationEstimate?.estimatedTruePositivePercentage;
+    let requestedZone = state.zone;
+    let decisionEstimate = escalationEstimate;
+    if (state.zone === 'trusted') {
+        if (escalationPercentage >= ROC_neutralToUntrustedPercentage) {
+            requestedZone = 'untrusted';
+        } else if (escalationPercentage >= ROC_trustedToNeutralPercentage) {
+            requestedZone = 'neutral';
+        }
+    } else if (state.zone === 'untrusted') {
+        decisionEstimate = deescalationEstimate || escalationEstimate;
+        if (deescalationEstimate && deescalationPercentage < ROC_untrustedToNeutralPercentage) {
+            requestedZone = 'neutral';
+        }
+    } else if (escalationPercentage >= ROC_neutralToUntrustedPercentage) {
+        requestedZone = 'untrusted';
+    } else if (deescalationEstimate && deescalationPercentage < ROC_neutralToTrustedPercentage) {
         requestedZone = 'trusted';
-    } else if (estimate.estimatedTruePositivePercentage < ROC_neutralToUntrustedPercentage) {
-        requestedZone = 'neutral';
+        decisionEstimate = deescalationEstimate;
     }
     if (requestedZone === state.zone) {
         return false;
@@ -296,11 +330,12 @@ function bkCheckZone(state) {
         `ADAPTIVE: ${state.hostname} changed from ${previousZone} to ${requestedZone}`,
         {
             isPrivate: state.isPrivate,
-            sampleCount: estimate.sampleCount,
-            blockCount: estimate.blockCount,
-            estimatedTruePositivePercentage: estimate.estimatedTruePositivePercentage,
-            threshold: estimate.threshold,
-            precision: estimate.precision
+            sampleCount: decisionEstimate.sampleCount,
+            blockCount: decisionEstimate.blockCount,
+            estimatedTruePositivePercentage: decisionEstimate.estimatedTruePositivePercentage,
+            threshold: decisionEstimate.threshold,
+            probeCount: decisionEstimate.probeCount,
+            fitMeanSquaredError: decisionEstimate.fitMeanSquaredError
         }
     );
     bkRememberAdaptiveZone(state);
@@ -350,22 +385,55 @@ function bkGetAdaptiveState(hostname, isPrivate = false) {
     return state;
 }
 
-function bkEstimateAdaptiveStats(state) {
-    if (state.predictionBuffer.length < BK_ADAPTIVE_MIN_PREDICTIONS) {
+function bkEstimateAdaptiveStats(state, maximumSamples = state.predictionBuffer.length) {
+    const samples = state.predictionBuffer.slice(-maximumSamples);
+    const sampleCount = samples.length;
+    if (sampleCount < BK_ADAPTIVE_MIN_ESCALATION_PREDICTIONS) {
         return null;
     }
-    const profile = bkGetZoneProfile(state.zone);
-    const blockCount = state.predictionBuffer.reduce(
-        (count, score) => count + (score >= profile.threshold ? 1 : 0),
-        0
+    const probes = BK_ADAPTIVE_ROC_PROBES.map(probe => {
+        const blockCount = samples.reduce(
+            (count, score) => count + (score >= probe.threshold ? 1 : 0),
+            0
+        );
+        return {
+            ...probe,
+            blockCount,
+            observedRate: blockCount / sampleCount
+        };
+    });
+
+    // Fit the observed site survival curve to the safe/unsafe mixture implied
+    // by the ROC curve:
+    // observed(t) ~= FPR(t) + unsafeFraction * (TPR(t) - FPR(t)).
+    // This is the closed-form least-squares solution across the probe points.
+    let numerator = 0;
+    let denominator = 0;
+    for (const probe of probes) {
+        numerator += probe.separation * (probe.observedRate - probe.fpr);
+        denominator += probe.separation * probe.separation;
+    }
+    const estimatedUnsafeFraction = denominator > 0
+        ? Math.max(0, Math.min(1, numerator / denominator))
+        : 0;
+    const fitMeanSquaredError = probes.reduce((sum, probe) => {
+        const fittedRate = probe.fpr + estimatedUnsafeFraction * probe.separation;
+        const residual = probe.observedRate - fittedRate;
+        return sum + residual * residual;
+    }, 0) / Math.max(probes.length, 1);
+    const neutralProbe = probes.reduce(
+        (best, probe) => Math.abs(probe.targetFpr - 0.015) < Math.abs(best.targetFpr - 0.015)
+            ? probe
+            : best,
+        probes[0]
     );
     return {
-        sampleCount: state.predictionBuffer.length,
-        blockCount: blockCount,
-        estimatedTruePositivePercentage:
-            profile.precision * blockCount / state.predictionBuffer.length,
-        threshold: profile.threshold,
-        precision: profile.precision
+        sampleCount,
+        blockCount: neutralProbe.blockCount,
+        estimatedTruePositivePercentage: estimatedUnsafeFraction,
+        threshold: neutralProbe.threshold,
+        probeCount: probes.length,
+        fitMeanSquaredError
     };
 }
 

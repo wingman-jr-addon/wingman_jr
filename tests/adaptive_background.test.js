@@ -14,12 +14,6 @@ let refreshCount = 0;
 const context = {
     console,
     WJR_DEBUG: false,
-    ROC_trustedRoc: { threshold: 0.8, precision: 1 },
-    ROC_neutralRoc: { threshold: 0.5, precision: 1 },
-    ROC_untrustedRoc: { threshold: 0.2, precision: 1 },
-    ROC_trustedToNeutralPercentage: 0.04,
-    ROC_neutralToUntrustedPercentage: 0.18,
-    rocCalculatePrecision: roc => roc.precision,
     WHT_REQUEST_POLICY: {
         URL_BLACKLISTED: 'blacklisted',
         URL_WHITELISTED: 'whitelisted'
@@ -57,6 +51,8 @@ const context = {
 };
 vm.createContext(context);
 
+const rocSource = fs.readFileSync(path.join(__dirname, '..', 'roc.js'), 'utf8');
+vm.runInContext(rocSource, context);
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
 const start = source.indexOf("const BK_ADAPTIVE_MEMORY_ENABLED_KEY");
 const end = source.indexOf('function bkSetStatusForZone', start);
@@ -93,7 +89,7 @@ const api = context.adaptiveTestApi;
         JSON.parse(JSON.stringify(adaptivePlan.adaptiveContext)),
         { hostname: 'a.example', isPrivate: false }
     );
-    assert.strictEqual(adaptivePlan.threshold, 0.5);
+    assert.strictEqual(adaptivePlan.threshold, 0.8363367915153503);
 
     const fixedPlan = api.buildPlan({
         url: 'https://cdn.example/image.jpg',
@@ -109,17 +105,17 @@ const api = context.adaptiveTestApi;
     assert.strictEqual(privatePlan.adaptiveContext.isPrivate, true);
 
     const writesBeforeTransition = storageWriteCount;
-    for (let i = 0; i < 50; i++) {
-        api.record(adaptivePlan.adaptiveContext, 0.9);
+    for (let i = 0; i < 31; i++) {
+        api.record(adaptivePlan.adaptiveContext, 0.99);
     }
     assert.strictEqual(api.getState('a.example').zone, 'neutral');
     assert.strictEqual(api.estimate(api.getState('a.example')), null);
     assert.strictEqual(api.getState('b.example').zone, 'neutral');
     assert.strictEqual(storageWriteCount, writesBeforeTransition);
 
-    api.record(adaptivePlan.adaptiveContext, 0.9);
+    api.record(adaptivePlan.adaptiveContext, 0.99);
     assert.strictEqual(api.getState('a.example').zone, 'untrusted');
-    assert.strictEqual(api.estimate(api.getState('a.example')).sampleCount, 51);
+    assert.strictEqual(api.estimate(api.getState('a.example')).sampleCount, 32);
     assert.strictEqual(
         api.getSiteState('https://a.example/new-tab').adaptiveZone,
         'untrusted',
@@ -130,15 +126,44 @@ const api = context.adaptiveTestApi;
         'untrusted',
         'sibling hosts should share their registrable domain adaptive zone'
     );
-    assert.strictEqual(api.getState('a.example').predictionBuffer.length, 51,
+    assert.strictEqual(api.getState('a.example').predictionBuffer.length, 32,
         'raw score history should survive a zone transition');
     await api.waitForPersistence();
     assert.strictEqual(storedData.adaptive_zone_memory.zones['a.example'], 'untrusted');
 
+    const trustedAreaState = api.getState('trusted-area.example');
+    const untrustedAreaState = api.getState('untrusted-area.example');
+    trustedAreaState.zone = 'trusted';
+    untrustedAreaState.zone = 'untrusted';
+    trustedAreaState.predictionBuffer = Array(32).fill(0.85);
+    untrustedAreaState.predictionBuffer = Array(32).fill(0.85);
+    const trustedAreaEstimate = api.estimate(trustedAreaState);
+    const untrustedAreaEstimate = api.estimate(untrustedAreaState);
+    assert.ok(trustedAreaEstimate.estimatedTruePositivePercentage > 0.04,
+        'neutral-level scores should supply escalation evidence while trusted');
+    assert.strictEqual(
+        trustedAreaEstimate.estimatedTruePositivePercentage,
+        untrustedAreaEstimate.estimatedTruePositivePercentage,
+        'the same score history must produce the same estimate in every current zone'
+    );
+
+    const recentRiskContext = { hostname: 'recent-risk.example', isPrivate: false };
+    const recentRiskState = api.getState(recentRiskContext.hostname);
+    recentRiskState.zone = 'trusted';
+    recentRiskState.predictionBuffer = Array(168).fill(0).concat(Array(31).fill(0.85));
+    api.record(recentRiskContext, 0.85);
+    assert.notStrictEqual(
+        api.getState(recentRiskContext.hostname).zone,
+        'trusted',
+        'the recent escalation window must not be diluted by older safe scores'
+    );
+
     const writesBeforePrivateTransition = storageWriteCount;
-    for (let i = 0; i < 51; i++) {
+    for (let i = 0; i < 95; i++) {
         api.record(privatePlan.adaptiveContext, 0);
     }
+    assert.strictEqual(api.getState('a.example', true).zone, 'neutral');
+    api.record(privatePlan.adaptiveContext, 0);
     assert.strictEqual(api.getState('a.example', true).zone, 'trusted');
     assert.strictEqual(api.getState('a.example').zone, 'untrusted');
     assert.strictEqual(storageWriteCount, writesBeforePrivateTransition);
