@@ -105,7 +105,7 @@ const api = context.adaptiveTestApi;
     assert.strictEqual(privatePlan.adaptiveContext.isPrivate, true);
 
     const writesBeforeTransition = storageWriteCount;
-    for (let i = 0; i < 39; i++) {
+    for (let i = 0; i < 49; i++) {
         api.record(adaptivePlan.adaptiveContext, 0.99);
     }
     assert.strictEqual(api.getState('a.example').zone, 'neutral');
@@ -115,7 +115,7 @@ const api = context.adaptiveTestApi;
 
     api.record(adaptivePlan.adaptiveContext, 0.99);
     assert.strictEqual(api.getState('a.example').zone, 'untrusted');
-    assert.strictEqual(api.estimate(api.getState('a.example')).sampleCount, 40);
+    assert.strictEqual(api.estimate(api.getState('a.example')).sampleCount, 50);
     assert.strictEqual(
         api.getSiteState('https://a.example/new-tab').adaptiveZone,
         'untrusted',
@@ -126,7 +126,7 @@ const api = context.adaptiveTestApi;
         'untrusted',
         'sibling hosts should share their registrable domain adaptive zone'
     );
-    assert.strictEqual(api.getState('a.example').predictionBuffer.length, 40,
+    assert.strictEqual(api.getState('a.example').predictionBuffer.length, 50,
         'raw score history should survive a zone transition');
     await api.waitForPersistence();
     assert.strictEqual(storedData.adaptive_zone_memory.zones['a.example'], 'untrusted');
@@ -135,8 +135,8 @@ const api = context.adaptiveTestApi;
     const untrustedAreaState = api.getState('untrusted-area.example');
     trustedAreaState.zone = 'trusted';
     untrustedAreaState.zone = 'untrusted';
-    trustedAreaState.predictionBuffer = Array(40).fill(0.85);
-    untrustedAreaState.predictionBuffer = Array(40).fill(0.85);
+    trustedAreaState.predictionBuffer = Array(50).fill(0.85);
+    untrustedAreaState.predictionBuffer = Array(50).fill(0.85);
     const trustedAreaEstimate = api.estimate(trustedAreaState);
     const untrustedAreaEstimate = api.estimate(untrustedAreaState);
     assert.ok(trustedAreaEstimate.estimatedTruePositivePercentage > 0.04,
@@ -150,7 +150,7 @@ const api = context.adaptiveTestApi;
     const recentRiskContext = { hostname: 'recent-risk.example', isPrivate: false };
     const recentRiskState = api.getState(recentRiskContext.hostname);
     recentRiskState.zone = 'trusted';
-    recentRiskState.predictionBuffer = Array(160).fill(0).concat(Array(39).fill(0.85));
+    recentRiskState.predictionBuffer = Array(150).fill(0).concat(Array(49).fill(0.85));
     api.record(recentRiskContext, 0.85);
     assert.notStrictEqual(
         api.getState(recentRiskContext.hostname).zone,
