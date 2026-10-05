@@ -746,6 +746,39 @@ function procGetVideoUrl(requestId, mimeType, buffers) {
     }
 }
 
+const PROC_TURBO_SCAN_MAX_FRAMES = 4;
+
+function procCreateTurboScanCanvas() {
+    let canvas = document.createElement('canvas');
+    canvas.width = PROC_IMAGE_SIZE;
+    canvas.height = PROC_IMAGE_SIZE;
+    let ctx = canvas.getContext('2d', { alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = 'rgb(128, 128, 128)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas;
+}
+
+function procDrawTurboScanFrame(canvas, video, frameIndex) {
+    const columns = 2;
+    const tileSize = PROC_IMAGE_SIZE / columns;
+    const tileX = (frameIndex % columns) * tileSize;
+    const tileY = Math.floor(frameIndex / columns) * tileSize;
+    const sourceWidth = video.videoWidth || video.width;
+    const sourceHeight = video.videoHeight || video.height;
+    if(!sourceWidth || !sourceHeight) {
+        throw new Error('TurboScan cannot compose a frame without video dimensions');
+    }
+    const scale = Math.min(tileSize / sourceWidth, tileSize / sourceHeight);
+    const targetWidth = sourceWidth * scale;
+    const targetHeight = sourceHeight * scale;
+    const targetX = tileX + (tileSize - targetWidth) / 2;
+    const targetY = tileY + (tileSize - targetHeight) / 2;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(video, 0, 0, sourceWidth, sourceHeight,
+        targetX, targetY, targetWidth, targetHeight);
+}
+
 
 async function procGetVideoScanStatus(
     videoChainId,
@@ -758,9 +791,13 @@ async function procGetVideoScanStatus(
     scanStart,
     scanStep,
     scanMaxSteps,
-    scanBlockBailCount
+    scanBlockBailCount,
+    scanMode = 'enabled'
 ) {
     let inferenceVideo, videoUrl, sqrxrScore;
+    const isTurboScan = scanMode === 'turbo';
+    const turboCanvas = isTurboScan ? procCreateTurboScanCanvas() : null;
+    const turboFrameTimes = [];
 
     let scanResults = {
         type: 'vid_scan',
@@ -769,7 +806,8 @@ async function procGetVideoScanStatus(
         scanCount: 0,
         blockCount: 0,
         error: undefined,
-        frames: []
+        frames: [],
+        sourceFrameCount: 0
     };
     try {
         WJR_DEBUG && console.info('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
@@ -781,7 +819,10 @@ async function procGetVideoScanStatus(
         inferenceVideo.autoplay = false;
         videoUrl = procGetVideoUrl(requestId, mimeType, buffers);
 
-        for(var i=0; i<scanMaxSteps; i++) {
+        const maxSteps = isTurboScan
+            ? Math.min(scanMaxSteps, PROC_TURBO_SCAN_MAX_FRAMES)
+            : scanMaxSteps;
+        for(var i=0; i<maxSteps; i++) {
             let seekTime = scanStart+scanStep*i;
             await procVideoLoadedData(inferenceVideo, videoUrl, seekTime);
             let maxTime = procGetMaxVideoTime(inferenceVideo); //important to do this AFTER loading
@@ -790,10 +831,17 @@ async function procGetVideoScanStatus(
                 break; //invalid even though it tried to seek!
             }
 
+            if(isTurboScan) {
+                procDrawTurboScanFrame(turboCanvas, inferenceVideo, turboFrameTimes.length);
+                turboFrameTimes.push(seekTime);
+                continue;
+            }
+
             WJR_DEBUG && console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
-            
+
             sqrxrScore = await procPredict(inferenceVideo);
             scanResults.scanCount++;
+            scanResults.sourceFrameCount++;
             let frameStatus;
             if(procIsSafe(sqrxrScore, threshold))
             {
@@ -813,6 +861,24 @@ async function procGetVideoScanStatus(
                 WJR_DEBUG && console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId+' because of block count '+scanResults.blockCount);
                 break;
             }
+        }
+        if(isTurboScan && turboFrameTimes.length > 0) {
+            WJR_DEBUG && console.debug('MLV: TurboScan predicting '+turboFrameTimes.length+' combined frames for '+requestId+' in video group '+videoChainId);
+            sqrxrScore = await procPredict(turboCanvas);
+            scanResults.scanCount = 1;
+            scanResults.sourceFrameCount = turboFrameTimes.length;
+            let frameStatus;
+            if(procIsSafe(sqrxrScore, threshold)) {
+                WJR_DEBUG && console.log('MLV: TurboScan PASS video score for '+turboFrameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await procCommonLogImg(turboCanvas, 'MLV: TurboScan PASS VID '+procScoreToStr(sqrxrScore));
+                frameStatus = 'pass';
+            } else {
+                WJR_DEBUG && console.log('MLV: TurboScan BLOCKED video score for '+turboFrameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+                await procCommonWarnImg(turboCanvas, 'MLV: TurboScan BLOCKED VID '+procScoreToStr(sqrxrScore));
+                frameStatus = 'block';
+                scanResults.blockCount = 1;
+            }
+            scanResults.frames = turboFrameTimes.map(time => ({ 'time': time, 'status': frameStatus }));
         }
     } catch(e) {
         WJR_DEBUG && console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
@@ -923,7 +989,8 @@ async function procOnPortMessage(m) {
                 m.scanStart,
                 m.scanStep,
                 m.scanMaxSteps,
-                m.scanBlockBailCount
+                m.scanBlockBailCount,
+                m.scanMode
             );
             try {
                 PROC_port.postMessage(scanResults);

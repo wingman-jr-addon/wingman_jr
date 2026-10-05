@@ -1743,7 +1743,7 @@ function bkSetEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Callback wireups changed!');
 }
 
-let BK_videoScanMode = 'quick';
+let BK_videoScanMode = 'turbo';
 let BK_isVideoEnabled = true;
 function bkSetVideoEnabled(isOn) {
     WJR_DEBUG && console.log('CONFIG: Setting video enabled to '+isOn);
@@ -1757,10 +1757,10 @@ function bkSetVideoEnabled(isOn) {
 }
 
 function bkNormalizeVideoScanMode(mode) {
-    if(mode === 'enabled' || mode === 'quick' || mode === 'disabled') {
+    if(mode === 'enabled' || mode === 'quick' || mode === 'turbo' || mode === 'disabled') {
         return mode;
     }
-    return 'quick';
+    return 'turbo';
 }
 
 function bkSetVideoScanMode(mode) {
@@ -1786,7 +1786,7 @@ function bkUpdateFromSettings() {
             } else if(videoBlockingResult.is_video_blocking_disabled === false) {
                 mode = 'enabled';
             } else {
-                mode = 'quick';
+                mode = 'turbo';
             }
         }
         bkSetVideoScanMode(mode);

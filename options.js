@@ -228,7 +228,7 @@ function optRestoreOptions() {
             } else if (isVideoBlockingDisabled === false) {
                 coercedResult = 'enabled';
             } else {
-                coercedResult = 'quick';
+                coercedResult = 'turbo';
             }
         }
         console.log('OPTION: Setting video blocking mode to ' + coercedResult);
