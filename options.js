@@ -23,6 +23,11 @@ async function optSaveOptions() {
     });
     browser.runtime.sendMessage({ type: 'setDefaultZone' });
 
+    let modelSelection = document.querySelector('input[name="model_selection"]:checked').value;
+    await browser.storage.local.set({
+        model_selection: modelSelection
+    });
+
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
     await browser.storage.local.set({
         backend_selection: backendSelection
@@ -257,6 +262,12 @@ function optRestoreOptions() {
         browser.runtime.sendMessage({ type: 'setBackendSelection', value: coercedResult });
     }
 
+    function setCurrentModelSelectionChoice(rawResult) {
+        const result = rawResult.model_selection === 'sqrxr_112' ? 'sqrxr_112' : 'n017';
+        console.log('OPTION: Setting model to ' + result);
+        document.getElementById('model_selection_' + result).checked = true;
+    }
+
     function onError(error) {
         console.log(`Error restoring: ${error}`);
     }
@@ -275,6 +286,9 @@ function optRestoreOptions() {
 
     let gettingBackendSelection = browser.storage.local.get('backend_selection');
     gettingBackendSelection.then(setCurrentBackendSelectionSwitchChoice, onError);
+
+    let gettingModelSelection = browser.storage.local.get('model_selection');
+    gettingModelSelection.then(setCurrentModelSelectionChoice, onError);
 
     browser.storage.local.get('url_filter_rules').then(rawResult => {
         const rules = Object.prototype.hasOwnProperty.call(rawResult, 'url_filter_rules') && rawResult.url_filter_rules
@@ -435,6 +449,13 @@ for (var i = 0, max = radiosDefaultZone.length; i < max; i++) {
 var radiosBackendSelection = document.forms[0].elements["backend_selection"];
 for (var i = 0, max = radiosBackendSelection.length; i < max; i++) {
     radiosBackendSelection[i].onclick = function () {
+        optSaveOptions();
+    }
+}
+
+var radiosModelSelection = document.forms[0].elements["model_selection"];
+for (var i = 0, max = radiosModelSelection.length; i < max; i++) {
+    radiosModelSelection[i].onclick = function () {
         optSaveOptions();
     }
 }

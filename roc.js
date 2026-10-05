@@ -11186,8 +11186,45 @@ let ROC_VALUES =
   }
 ]
 ;
-var ROC_trustedRoc = rocFindRocEntryByFpr(0.004);
+const ROC_N017_VALUES = ROC_VALUES;
+let ROC_SQRXR_112_VALUES = null;
+let ROC_activeModelSelection = 'n017';
+var ROC_trustedRoc;
 var ROC_trustedToNeutralPercentage = 0.04;
-var ROC_neutralRoc = rocFindRocEntryByFpr(0.015);
+var ROC_neutralRoc;
 var ROC_neutralToUntrustedPercentage = 0.18;
-var ROC_untrustedRoc = rocFindRocEntryByFpr(0.10);
+var ROC_untrustedRoc;
+
+function rocApplyValues(values, modelSelection) {
+    ROC_VALUES = values;
+    ROC_activeModelSelection = modelSelection;
+    ROC_trustedRoc = rocFindRocEntryByFpr(0.004);
+    ROC_neutralRoc = rocFindRocEntryByFpr(0.015);
+    ROC_untrustedRoc = rocFindRocEntryByFpr(0.10);
+}
+
+async function rocSelectModel(modelSelection) {
+    const normalizedSelection = modelSelection === 'sqrxr_112' ? 'sqrxr_112' : 'n017';
+    if (normalizedSelection === 'sqrxr_112' && !ROC_SQRXR_112_VALUES) {
+        const relativePath = 'sqrxr_112_roc.json';
+        const url = typeof browser !== 'undefined' && browser.runtime?.getURL
+            ? browser.runtime.getURL(relativePath)
+            : relativePath;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Unable to load SQRXR 112 ROC data (${response.status})`);
+        }
+        const values = await response.json();
+        if (!Array.isArray(values) || values.length === 0) {
+            throw new Error('SQRXR 112 ROC data is empty or invalid');
+        }
+        ROC_SQRXR_112_VALUES = values;
+    }
+    rocApplyValues(
+        normalizedSelection === 'sqrxr_112' ? ROC_SQRXR_112_VALUES : ROC_N017_VALUES,
+        normalizedSelection
+    );
+    return normalizedSelection;
+}
+
+rocApplyValues(ROC_N017_VALUES, 'n017');
