@@ -1,4 +1,14 @@
-const PROC_MODEL_PATH = 'sqrxr_112_graphopt/model.json'
+const PROC_DEFAULT_MODEL_SELECTION = 'n017';
+const PROC_MODEL_CONFIGS = Object.freeze({
+    n017: Object.freeze({
+        path: 'n017_graph_model/model.json',
+        preprocessing: 'n017'
+    }),
+    sqrxr_112: Object.freeze({
+        path: 'sqrxr_112_graphopt/model.json',
+        preprocessing: 'sqrxr_112'
+    })
+});
 const PROC_IMAGE_SIZE = 224;
 const PROC_MIN_IMAGE_SIZE = 36;
 const PROC_MIN_IMAGE_BYTES = 1024;
@@ -12,11 +22,50 @@ function procOnModelLoadProgress(percentage) {
 let PROC_isInReviewMode = false;
 let PROC_wingman;
 let PROC_loadedBackend;
-let PROC_SCALE_TENSOR;
-let PROC_SHIFT_TENSOR;
-const procWingmanStartup = async (backendRequested) => {
+let PROC_activeModelSelection = PROC_DEFAULT_MODEL_SELECTION;
+let PROC_PIXEL_SCALE_TENSOR;
+let PROC_MEAN_TENSOR;
+let PROC_STD_TENSOR;
+let PROC_CLASSIC_SCALE_TENSOR;
+let PROC_CLASSIC_SHIFT_TENSOR;
+
+function procNormalizeModelSelection(modelRequested) {
+    return Object.prototype.hasOwnProperty.call(PROC_MODEL_CONFIGS, modelRequested)
+        ? modelRequested
+        : PROC_DEFAULT_MODEL_SELECTION;
+}
+
+function procDisposeModelState() {
+    if (PROC_wingman && typeof PROC_wingman.dispose === 'function') {
+        PROC_wingman.dispose();
+    }
+    PROC_wingman = null;
+    for (const tensor of [
+        PROC_PIXEL_SCALE_TENSOR,
+        PROC_MEAN_TENSOR,
+        PROC_STD_TENSOR,
+        PROC_CLASSIC_SCALE_TENSOR,
+        PROC_CLASSIC_SHIFT_TENSOR
+    ]) {
+        if (tensor && typeof tensor.dispose === 'function') {
+            tensor.dispose();
+        }
+    }
+    PROC_PIXEL_SCALE_TENSOR = null;
+    PROC_MEAN_TENSOR = null;
+    PROC_STD_TENSOR = null;
+    PROC_CLASSIC_SCALE_TENSOR = null;
+    PROC_CLASSIC_SHIFT_TENSOR = null;
+}
+
+const procWingmanStartup = async (backendRequested, modelRequested = PROC_DEFAULT_MODEL_SELECTION) => {
+    procDisposeModelState();
+    PROC_activeModelSelection = procNormalizeModelSelection(modelRequested);
+    const modelConfig = PROC_MODEL_CONFIGS[PROC_activeModelSelection];
+    await rocSelectModel(PROC_activeModelSelection);
     WJR_DEBUG && console.log('LIFECYCLE: Launching TF.js!');
     WJR_DEBUG && console.log('LIFECYCLE: Backend requested '+backendRequested);
+    WJR_DEBUG && console.log('LIFECYCLE: Model requested '+PROC_activeModelSelection);
     if(backendRequested != 'default') {
         tf.setBackend(backendRequested || 'wasm');
     }
@@ -31,11 +80,17 @@ const procWingmanStartup = async (backendRequested) => {
         PROC_wingman = null;
         return;
     }
-    PROC_SCALE_TENSOR = PROC_SCALE_TENSOR || tf.scalar(127.5);
-    PROC_SHIFT_TENSOR = PROC_SHIFT_TENSOR || tf.scalar(1);
+    if (modelConfig.preprocessing === 'n017') {
+        PROC_PIXEL_SCALE_TENSOR = tf.scalar(255);
+        PROC_MEAN_TENSOR = tf.tensor1d([0.485, 0.456, 0.406]);
+        PROC_STD_TENSOR = tf.tensor1d([0.229, 0.224, 0.225]);
+    } else {
+        PROC_CLASSIC_SCALE_TENSOR = tf.scalar(127.5);
+        PROC_CLASSIC_SHIFT_TENSOR = tf.scalar(1);
+    }
     WJR_DEBUG && console.log('LIFECYCLE: Loading model...');
-    PROC_wingman = await tf.loadGraphModel(PROC_MODEL_PATH, { onProgress: procOnModelLoadProgress });
-    WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_wingman+' at '+performance.now());
+    PROC_wingman = await tf.loadGraphModel(modelConfig.path, { onProgress: procOnModelLoadProgress });
+    WJR_DEBUG && console.log('LIFECYCLE: Model loaded: ' + PROC_activeModelSelection+' '+PROC_wingman+' at '+performance.now());
 
     WJR_DEBUG && console.log('LIFECYCLE: Warming up...');
     let dummy_data = tf.zeros([1, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE, 3]);
@@ -99,40 +154,48 @@ let PROC_processingSinceDataEndTimeTotal = 0;
 let PROC_processingSinceImageLoadTimeTotal = 0;
 let PROC_processingCountTotal = 0;
 
-function tileImage(c, imgElement) {
+function prepareN017Image(c, imgElement) {
+    const sourceWidth = imgElement.naturalWidth || imgElement.videoWidth || imgElement.width;
+    const sourceHeight = imgElement.naturalHeight || imgElement.videoHeight || imgElement.height;
+    const scale = Math.min(PROC_IMAGE_SIZE / sourceWidth, PROC_IMAGE_SIZE / sourceHeight);
+    const targetWidth = sourceWidth * scale;
+    const targetHeight = sourceHeight * scale;
+    const targetX = (PROC_IMAGE_SIZE - targetWidth) / 2;
+    const targetY = (PROC_IMAGE_SIZE - targetHeight) / 2;
+
+    c.ctx.fillStyle = 'rgb(128, 128, 128)';
+    c.ctx.fillRect(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
+    c.ctx.drawImage(imgElement, 0, 0, sourceWidth, sourceHeight,
+        targetX, targetY, targetWidth, targetHeight);
+    WJR_DEBUG && console.log(`N017: Padded ${sourceWidth}x${sourceHeight} to ${PROC_IMAGE_SIZE}x${PROC_IMAGE_SIZE}`);
+}
+
+function prepareSqrxr112Image(c, imgElement) {
+    const sourceWidth = imgElement.naturalWidth || imgElement.videoWidth || imgElement.width;
+    const sourceHeight = imgElement.naturalHeight || imgElement.videoHeight || imgElement.height;
     c.ctx.clearRect(0, 0, PROC_IMAGE_SIZE, PROC_IMAGE_SIZE);
-    if(imgElement.width >= imgElement.height) {
-        let widthMultiplier = Math.floor(imgElement.width / imgElement.height);
-        widthMultiplier = Math.ceil(Math.sqrt(widthMultiplier));
-        let dstTileWidth = PROC_IMAGE_SIZE;
-        let dstTileHeight = PROC_IMAGE_SIZE / widthMultiplier;
-        let srcTileWidth = imgElement.width / widthMultiplier;
-        let srcTileHeight = imgElement.height;
-        for(let i=0; i<widthMultiplier; i++) {
-            c.ctx.drawImage(imgElement, i*srcTileWidth, 0, srcTileWidth, srcTileHeight, 0, i*dstTileHeight, dstTileWidth, dstTileHeight);
-            //Debug line
-            if(WJR_DEBUG && widthMultiplier > 1) {
-                c.ctx.fillStyle = 'red';
-                c.ctx.fillRect(0, i*dstTileHeight, dstTileWidth, 1);
-            }
+    if (sourceWidth >= sourceHeight) {
+        let tileCount = Math.floor(sourceWidth / sourceHeight);
+        tileCount = Math.ceil(Math.sqrt(tileCount));
+        const destinationTileHeight = PROC_IMAGE_SIZE / tileCount;
+        const sourceTileWidth = sourceWidth / tileCount;
+        for (let index = 0; index < tileCount; index++) {
+            c.ctx.drawImage(imgElement,
+                index * sourceTileWidth, 0, sourceTileWidth, sourceHeight,
+                0, index * destinationTileHeight, PROC_IMAGE_SIZE, destinationTileHeight);
         }
-        WJR_DEBUG && console.log(`TILE: Horizontal ${widthMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
     } else {
-        let heightMultiplier = Math.floor(imgElement.height / imgElement.width);
-        heightMultiplier = Math.ceil(Math.sqrt(heightMultiplier));
-        let dstTileWidth = PROC_IMAGE_SIZE / heightMultiplier;
-        let dstTileHeight = PROC_IMAGE_SIZE;
-        let srcTileWidth = imgElement.width;
-        let srcTileHeight = imgElement.height / heightMultiplier;
-        for(let i=0; i<heightMultiplier; i++) {
-            c.ctx.drawImage(imgElement, 0, i*srcTileHeight, srcTileWidth, srcTileHeight, i*dstTileWidth, 0, dstTileWidth, dstTileHeight);
-            if(WJR_DEBUG && heightMultiplier > 1) {
-                c.ctx.fillStyle = 'red';
-                c.ctx.fillRect(i*dstTileWidth, 0, 1, dstTileHeight);
-            }
+        let tileCount = Math.floor(sourceHeight / sourceWidth);
+        tileCount = Math.ceil(Math.sqrt(tileCount));
+        const destinationTileWidth = PROC_IMAGE_SIZE / tileCount;
+        const sourceTileHeight = sourceHeight / tileCount;
+        for (let index = 0; index < tileCount; index++) {
+            c.ctx.drawImage(imgElement,
+                0, index * sourceTileHeight, sourceWidth, sourceTileHeight,
+                index * destinationTileWidth, 0, destinationTileWidth, PROC_IMAGE_SIZE);
         }
-        WJR_DEBUG && console.log(`TILE: Vertical ${heightMultiplier} ${imgElement.width}x${imgElement.height} for src ${srcTileWidth}x${srcTileHeight}`);
     }
+    WJR_DEBUG && console.log(`SQRXR 112: Tiled ${sourceWidth}x${sourceHeight} to ${PROC_IMAGE_SIZE}x${PROC_IMAGE_SIZE}`);
 }
 
 function drawImage(c, imgElement) {
@@ -143,8 +206,12 @@ async function procPredict(imgElement) {
     let c = procGetCtx();
     try {
         const drawStartTime = performance.now();
-        tileImage(c, imgElement);
-        WJR_DEBUG && (await procCommonLogImg(c.canvas, `TILE: Output`));
+        if (PROC_activeModelSelection === 'sqrxr_112') {
+            prepareSqrxr112Image(c, imgElement);
+        } else {
+            prepareN017Image(c, imgElement);
+        }
+        WJR_DEBUG && (await procCommonLogImg(c.canvas, `${PROC_activeModelSelection}: Input`));
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
@@ -152,12 +219,15 @@ async function procPredict(imgElement) {
         const syncedResult = tf.tidy(() => {
             const rightSizeImageDataTF = tf.browser.fromPixels(c.canvas);
             const floatImg = rightSizeImageDataTF.toFloat();
-            //EfficientNet
-            //const centered = floatImg.sub(tf.tensor1d([0.485 * 255, 0.456 * 255, 0.406 * 255]));
-            //const normalized = centered.div(tf.tensor1d([0.229 * 255, 0.224 * 255, 0.225 * 255]));
-            //MobileNet V2
-            const scaled = floatImg.div(PROC_SCALE_TENSOR);
-            const normalized = scaled.sub(PROC_SHIFT_TENSOR);
+            let normalized;
+            if (PROC_activeModelSelection === 'sqrxr_112') {
+                const scaled = floatImg.div(PROC_CLASSIC_SCALE_TENSOR);
+                normalized = scaled.sub(PROC_CLASSIC_SHIFT_TENSOR);
+            } else {
+                const scaled = floatImg.div(PROC_PIXEL_SCALE_TENSOR);
+                const centered = scaled.sub(PROC_MEAN_TENSOR);
+                normalized = centered.div(PROC_STD_TENSOR);
+            }
             // Reshape to a single-element batch so we can pass it to predict.
             const batched = normalized.expandDims(0);
             const result = PROC_wingman.predict(batched, {batchSize: 1});

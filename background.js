@@ -87,7 +87,13 @@ function bkInitialize() {
 
 function bkOnClientConnected(port) {
     WJR_DEBUG && console.log(`LIFECYCLE: Processor ${port.name} connected.`);
-    let registration = { port: port, tabId: null, processorId: port.name, backend: 'unknown' };
+    let registration = {
+        port: port,
+        tabId: null,
+        processorId: port.name,
+        backend: 'unknown',
+        model: 'unknown'
+    };
     BK_connectedClients[registration.processorId] = registration;
     WJR_DEBUG && console.log(`LIFECYCLE: There are now ${Object.keys(BK_connectedClients).length} processors`);
     port.onMessage.addListener(bkOnProcessorMessage);
@@ -134,6 +140,8 @@ browser.runtime.onConnect.addListener(bkOnClientConnected);
 
 
 let BK_processorBackendPreference = [];
+const BK_DEFAULT_MODEL_SELECTION = 'n017';
+let BK_modelSelection = BK_DEFAULT_MODEL_SELECTION;
 
 function bkReloadProcessors() {
     WJR_DEBUG && console.log('LIFECYCLE: Cleaning up old processors.');
@@ -162,11 +170,11 @@ function bkReloadProcessors() {
                 const requestedBackend = backend;
                 const effectiveBackend = 'webgl';
                 console.log(`LIFECYCLE: Probe for inprocwebgl failed, launching tab processor (requested=${requestedBackend}, effective=${effectiveBackend})`);
-                browser.tabs.create({url:`/processor.html?backend=${effectiveBackend}&id=${effectiveBackend}-1`, active: false})
+                browser.tabs.create({url:`/processor.html?backend=${effectiveBackend}&model=${encodeURIComponent(BK_modelSelection)}&id=${effectiveBackend}-1`, active: false})
                     .then(async tab=>await browser.tabs.hide(tab.id));
             }
         } else {
-            browser.tabs.create({url:`/processor.html?backend=${backend}&id=${backend}-1`, active: false})
+            browser.tabs.create({url:`/processor.html?backend=${backend}&model=${encodeURIComponent(BK_modelSelection)}&id=${backend}-1`, active: false})
                 .then(async tab=>await browser.tabs.hide(tab.id));
         }
     }
@@ -222,6 +230,7 @@ function bkOnProcessorMessage(m) {
             WJR_DEBUG && console.dir(BK_connectedClients);
             WJR_DEBUG && console.log(`LIFECYCLE: Registration of processor ${m.processorId} with tab ID ${m.tabId}`);
             BK_connectedClients[m.processorId].backend = m.backend;
+            BK_connectedClients[m.processorId].model = m.model;
             BK_connectedClients[m.processorId].tabId = m.tabId;
         }
             break;
@@ -1786,22 +1795,39 @@ function bkUpdateFromSettings() {
         BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
         bkBroadcastProcessorSettings();
     });
-    bkLoadBackendSettings();
+    bkLoadBackendSettings().catch(error => {
+        console.error('LIFECYCLE: Unable to apply processor settings', error);
+    });
 }
 
 function bkLoadBackendSettings() {
-    browser.storage.local.get('backend_selection').then(result => {
+    return browser.storage.local.get(['backend_selection', 'model_selection']).then(async result => {
         let backends = result.backend_selection ? result.backend_selection.split('_') : ['webgl'];
-        let hasChanged = backends.length != BK_processorBackendPreference.length;
-        for (let i = 0; i < backends.length && !hasChanged; i++) {
-            hasChanged = backends[i] != BK_processorBackendPreference[i];
+        const modelSelection = result.model_selection === 'sqrxr_112'
+            ? 'sqrxr_112'
+            : BK_DEFAULT_MODEL_SELECTION;
+        const modelChanged = modelSelection !== BK_modelSelection;
+        let backendsChanged = backends.length != BK_processorBackendPreference.length;
+        for (let i = 0; i < backends.length && !backendsChanged; i++) {
+            backendsChanged = backends[i] != BK_processorBackendPreference[i];
         }
-        if(hasChanged) {
-            WJR_DEBUG && console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
+        if (modelChanged) {
+            await rocSelectModel(modelSelection);
+            BK_modelSelection = modelSelection;
+            BK_adaptiveStates.clear();
+            CRASH_DETECTION_EXPECTED_RESULT = undefined;
+            CRASH_DETECTION_WARMUPS_LEFT = 3;
+            CRASH_BAD_STATE_ENCOUNTERED_COUNT = 0;
+            WJR_DEBUG && console.log(`LIFECYCLE: Model changed to ${BK_modelSelection}`);
+        }
+        if (backendsChanged) {
             BK_processorBackendPreference = backends;
+            WJR_DEBUG && console.log(`LIFECYCLE: Requested backends changed to ${backends.join(',')}`);
+        }
+        if (modelChanged || backendsChanged) {
             bkReloadProcessors();
         } else {
-            WJR_DEBUG && console.log(`LIFECYCLE: Backend selected remained the same: ${backends.join(',')}`);
+            WJR_DEBUG && console.log(`LIFECYCLE: Processor settings remained the same: ${BK_modelSelection}, ${backends.join(',')}`);
         }
     });
 }
@@ -1882,6 +1908,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'setBackendSelection') {
         bkUpdateFromSettings();
     }
+    else if (request.type == 'setModelSelection') {
+        bkUpdateFromSettings();
+    }
     else if (request.type == 'setDefaultZone') {
         return browser.storage.local.get('default_zone')
             .then(bkSetDefaultZone);
@@ -1906,10 +1935,10 @@ Promise.all([
     browser.storage.local.get('default_zone').then(bkSetDefaultZone),
     bkInitializeAdaptiveZones()
 ])
-    .then(() => {
-        bkLoadBackendSettings(); //The loading of the first processor kicks off the rest of initialization
-    })
+    .then(() => bkLoadBackendSettings()) //The loading of the first processor kicks off the rest of initialization
     .catch(error => {
         console.error('LIFECYCLE: Unable to initialize adaptive filtering', error);
-        bkLoadBackendSettings();
+        return bkLoadBackendSettings().catch(retryError => {
+            console.error('LIFECYCLE: Unable to load processor settings', retryError);
+        });
     });

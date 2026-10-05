@@ -34,7 +34,7 @@ function bkTryStartupBackgroundJsProcessor() {
     delete inferenceCtx;
     delete inferenceCanvas;
     //Initialize and fake out a port pair for processor and background
-    procWingmanStartup('webgl')
+    procWingmanStartup('webgl', BK_modelSelection)
     .then(async ()=>
     {
         let backgroundPort = null;
@@ -83,7 +83,8 @@ function bkTryStartupBackgroundJsProcessor() {
             type: 'registration',
             tabId: 'fake',
             processorId: PROC_processorId,
-            backend: PROC_loadedBackend
+            backend: PROC_loadedBackend,
+            model: PROC_activeModelSelection
         });
     });
     return inferenceCtxType;
