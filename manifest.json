@@ -43,6 +43,7 @@
           "processor.js",
           "processor_backgroundstartup.js",
 
+          "audit.js",
           "background.js",
           "background_video.js",
           "background_gif.js",

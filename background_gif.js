@@ -294,7 +294,8 @@ async function gifPerformGifFrameScan(
     return p;
 }
 
-async function gifListener(details, threshold) {
+async function gifListener(details, requestPlan) {
+    const threshold = requestPlan.threshold;
     let expectedContentLength = -1;
     try {
         for(let i=0; i<details.responseHeaders.length; i++) {
@@ -323,6 +324,24 @@ async function gifListener(details, threshold) {
     let totalScanCount = 0;
     let totalBlockCount = 0;
     let totalErrorCount = 0;
+    let auditBestScore = null;
+    let auditBlockedThumbnail = null;
+    let auditFinalized = false;
+
+    function finalizeAudit(result) {
+        if (auditFinalized || !Number.isFinite(auditBestScore)) {
+            return;
+        }
+        auditFinalized = true;
+        if (typeof auditRecordScan === 'function') {
+            auditRecordScan(
+                requestPlan.auditContext,
+                result,
+                auditBestScore,
+                result === 'block' ? auditBlockedThumbnail : null
+            );
+        }
+    }
 
     let status = 'pass_so_far'; //pass_so_far, scanning, pass, block, error
     let parsedGif = null;
@@ -376,8 +395,15 @@ async function gifListener(details, threshold) {
                         );
                         gifFrameCount++;
                         thisScanCount++;
+                        if (Number.isFinite(gifScan.adaptiveScore)
+                            && (!Number.isFinite(auditBestScore) || gifScan.adaptiveScore > auditBestScore)) {
+                            auditBestScore = gifScan.adaptiveScore;
+                        }
                         if(gifScan.result == 'block') {
                             thisBlockCount++;
+                            if (!auditBlockedThumbnail && gifScan.auditThumbnail instanceof ArrayBuffer) {
+                                auditBlockedThumbnail = gifScan.auditThumbnail;
+                            }
                         }
                     }
                     
@@ -412,6 +438,7 @@ async function gifListener(details, threshold) {
                         }
                         filter.close();
                         statusCompleteVideoCheck(details.requestId, status);
+                        finalizeAudit('block');
                     } else if(shouldError) {
                         console.warn(`DEFG: ERROR Parsing request ${details.requestId} for ${parseRange} at ${parsedGif.errorIndex}`);
                         status = 'error';
@@ -428,6 +455,7 @@ async function gifListener(details, threshold) {
                             filter.write(disconnectBuffer);
                             filter.disconnect();
                             statusCompleteVideoCheck(details.requestId, status);
+                            finalizeAudit('pass');
                         } else {
                             WJR_DEBUG && console.info(`DEFG: PASS so far ${details.requestId} for ${parseRange}`);
                             status = 'pass_so_far';
@@ -452,6 +480,11 @@ async function gifListener(details, threshold) {
                 WJR_DEBUG && console.log(`DEFG: Filter close for ${details.requestId} final status ${status} parse range ${parseRange}`);
                 filter.close();
                 statusCompleteVideoCheck(details.requestId, status);
+                if (status === 'block') {
+                    finalizeAudit('block');
+                } else if (status === 'pass' || status === 'pass_so_far') {
+                    finalizeAudit('pass');
+                }
             }
         }
     }

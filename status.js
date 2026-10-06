@@ -33,6 +33,7 @@ let STATUS_videoLastBlockProgressCounter = -999;
 
 let STATUS_masterFilteringMode = 'on';
 let STATUS_masterPauseUntil = null;
+let STATUS_auditMode = 'off';
 
 const STATUS_ICON_SIZE = 32;
 let STATUS_iconCanvas = document.createElement('canvas');
@@ -45,6 +46,7 @@ let STATUS_isAdaptiveOutline = false;
 let STATUS_lastZoneFill = '';
 let STATUS_lastIsAdaptiveOutline = false;
 let STATUS_lastMasterFilteringMode = '';
+let STATUS_lastAuditMode = '';
 let STATUS_lastProgressWidth = 0;
 let STATUS_lastIsVideoInProgress = true;
 let STATUS_lastIsVideoBlockShown = true;
@@ -77,6 +79,7 @@ function statusRegenerateIcon(force = false) {
         STATUS_zoneFill == STATUS_lastZoneFill &&
         STATUS_isAdaptiveOutline == STATUS_lastIsAdaptiveOutline &&
         STATUS_masterFilteringMode == STATUS_lastMasterFilteringMode &&
+        STATUS_auditMode == STATUS_lastAuditMode &&
         currentProgressWidth == STATUS_lastProgressWidth &&
         isVideoInProgress == STATUS_lastIsVideoInProgress &&
         isVideoBlockShown == STATUS_lastIsVideoBlockShown) {
@@ -87,6 +90,7 @@ function statusRegenerateIcon(force = false) {
     STATUS_lastZoneFill = STATUS_zoneFill;
     STATUS_lastIsAdaptiveOutline = STATUS_isAdaptiveOutline;
     STATUS_lastMasterFilteringMode = STATUS_masterFilteringMode;
+    STATUS_lastAuditMode = STATUS_auditMode;
     STATUS_lastProgressWidth = currentProgressWidth;
     STATUS_lastIsVideoInProgress = isVideoInProgress;
     STATUS_lastIsVideoBlockShown = isVideoBlockShown;
@@ -174,6 +178,17 @@ function statusRegenerateIcon(force = false) {
         }
     }
 
+    // Audit/accountability marker. The upper-right corner is kept separate
+    // from the existing video and master-filtering indicators.
+    if (STATUS_auditMode !== 'off') {
+        ctx.fillStyle = '#1F2A44';
+        ctx.fillRect(23, 0, 9, 9);
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 7px sans-serif';
+        ctx.textBaseline = 'top';
+        ctx.fillText('A', 25, 1);
+    }
+
     let imageData = ctx.getImageData(0,0,STATUS_ICON_SIZE,STATUS_ICON_SIZE);
     browser.browserAction.setIcon({ imageData: imageData });
 }
@@ -201,6 +216,13 @@ function statusFormatPauseRemaining(pauseUntil) {
 function statusSetMasterFilteringState(mode, pauseUntil) {
     STATUS_masterFilteringMode = mode;
     STATUS_masterPauseUntil = mode === 'paused' ? pauseUntil : null;
+    statusUpdateVisuals();
+}
+
+function statusSetAuditMode(mode) {
+    STATUS_auditMode = mode === 'audit' || mode === 'accountability'
+        ? mode
+        : 'off';
     statusUpdateVisuals();
 }
 
@@ -308,7 +330,11 @@ function statusUpdateVisuals() {
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
+    const auditTitle = STATUS_auditMode === 'accountability'
+        ? 'Accountability tracking is active\r\n'
+        : (STATUS_auditMode === 'audit' ? 'Audit tracking is active\r\n' : '');
     browser.browserAction.setTitle({ title: statusGetMasterFilteringTitle()
+        + auditTitle
         + 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'
         + '               ' + STATUS_videoCounts['block']+'/'+STATUS_videoCheckCount+' videos\r\n'
         + openRequestIds.length +' open requests: \r\n'+openRequestIds.join('\r\n') });

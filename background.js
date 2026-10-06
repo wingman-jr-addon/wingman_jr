@@ -132,7 +132,9 @@ let BK_isSilentModeEnabled = false;
 function bkBroadcastProcessorSettings() {
     bkBroadcastMessageToProcessors({
         type: 'settings',
-        isSilentModeEnabled: BK_isSilentModeEnabled
+        isSilentModeEnabled: BK_isSilentModeEnabled,
+        auditEnabled: typeof AUDIT_settings !== 'undefined'
+            && AUDIT_settings.mode !== 'off'
     });
 }
 
@@ -224,6 +226,14 @@ function bkOnProcessorMessage(m) {
             }
             statusCompleteImageCheck(m.requestId, m.result);
             bkRecordAdaptiveScore(m.adaptiveContext, m.adaptiveScore);
+            if (typeof auditRecordScan === 'function') {
+                auditRecordScan(
+                    m.auditContext,
+                    m.result,
+                    m.adaptiveScore,
+                    m.auditThumbnail
+                );
+            }
         }
             break;
         case 'registration': {
@@ -517,7 +527,14 @@ function bkBuildRequestPlan(details) {
         mode: mode,
         effectiveZone: profile.zone,
         threshold: profile.threshold,
-        adaptiveContext: adaptiveContext
+        adaptiveContext: adaptiveContext,
+        auditContext: preference.supported ? {
+            hostname: preference.hostname,
+            isPrivate: isIncognito,
+            effectiveZone: profile.zone,
+            threshold: profile.threshold,
+            model: typeof BK_modelSelection === 'string' ? BK_modelSelection : 'n017'
+        } : null
     };
     if (preference.supported && mode === 'off') {
         return { ...plan, action: 'site-disabled' };
@@ -836,7 +853,7 @@ async function bkImageListener(details, shouldBlockSilently = false, existingPla
 
     let isGif = mimeType.startsWith('image/gif');
     if(isGif) {
-        return await gifListener(details, requestPlan.threshold);
+        return await gifListener(details, requestPlan);
     }
 
     return await bkImageListenerNormal(details, mimeType, requestPlan);
@@ -855,6 +872,7 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
         url: details.url,
         threshold: requestPlan.threshold,
         adaptiveContext: requestPlan.adaptiveContext,
+        auditContext: requestPlan.auditContext,
         reuseContext: typeof SMR_makeRequestContext === 'function'
             ? SMR_makeRequestContext(details)
             : null
@@ -985,6 +1003,7 @@ async function bkBase64ContentListener(details) {
         requestId: details.requestId,
         threshold: requestPlan.threshold,
         adaptiveContext: requestPlan.adaptiveContext,
+        auditContext: requestPlan.auditContext,
         reuseContext: typeof SMR_makeRequestContext === 'function'
             ? SMR_makeRequestContext(details)
             : null
@@ -1420,6 +1439,14 @@ if (browser.menus) {
             return;
         }
 
+        if (typeof auditAppendEvent === 'function') {
+            const revealSite = siteGetPreferenceForUrl(tab?.url || '');
+            auditAppendEvent('page-image-revealed', {
+                hostname: revealSite.supported ? revealSite.hostname : '(unsupported page)',
+                private: tab?.incognito === true
+            }).catch(() => {});
+        }
+
         if (targetInfo.src.startsWith('data:image/svg+xml')) {
             console.log('REVEAL: Handling SVG data URL');
             await browser.tabs.executeScript(tab.id, {
@@ -1845,11 +1872,21 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse(bkGetMasterFilteringState());
     }
     else if (request.type == 'setOnOff') {
+        if (typeof auditAppendEvent === 'function') {
+            auditAppendEvent('master-filtering-changed', {
+                to: request.onOff == 'on' ? 'on' : 'off'
+            }).catch(() => {});
+        }
         return request.onOff == 'on'
             ? bkResumeMasterFiltering()
             : bkSetMasterFilteringOff();
     }
     else if (request.type == 'setMasterPause') {
+        if (typeof auditAppendEvent === 'function') {
+            auditAppendEvent('master-filtering-paused', {
+                minutes: Number(request.durationMinutes) || 0
+            }).catch(() => {});
+        }
         return bkStartMasterPause(request.durationMinutes);
     }
     else if (request.type == 'getSiteFilteringState') {
@@ -1918,6 +1955,13 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'revealBlockedImage') {
         console.log('REVEAL: Message received', request.url);
         bkRememberRevealUrl(request.url);
+        if (typeof auditAppendEvent === 'function') {
+            const revealSite = siteGetPreferenceForUrl(sender?.tab?.url || '');
+            auditAppendEvent('page-image-revealed', {
+                hostname: revealSite.supported ? revealSite.hostname : '(unsupported page)',
+                private: sender?.tab?.incognito === true
+            }).catch(() => {});
+        }
         sendResponse({ ok: true });
     }
 }
