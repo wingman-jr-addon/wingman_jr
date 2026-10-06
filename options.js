@@ -221,7 +221,9 @@ function optRestoreOptions() {
     function setCurrentVideoBlockingChoice(rawResult) {
         let result = rawResult.video_blocking_mode;
         let isVideoBlockingDisabled = rawResult.is_video_blocking_disabled;
-        let coercedResult = result;
+        let coercedResult = (result === 'enabled' || result === 'quick' || result === 'disabled')
+            ? result
+            : null;
         if (!coercedResult) {
             if (isVideoBlockingDisabled === true) {
                 coercedResult = 'disabled';
