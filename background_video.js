@@ -1,7 +1,6 @@
 let VID_PLACEHOLDER_MP4 = null;
 let VID_PLACEHOLDER_WEBM = null;
-const VID_QUICK_SCAN_MAX_FRAMES = 3;
-const VID_TURBO_SCAN_MAX_FRAMES = 4;
+const VID_COMPOSITE_SCAN_MAX_FRAMES = 4;
 fetch('wingman_placeholder.mp4')
 .then(async r => VID_PLACEHOLDER_MP4 = await r.arrayBuffer());
 
@@ -38,33 +37,19 @@ function vidDetectType(u8Array) {
     }
 }
 
-function vidGetLimitedScanMaxSteps(scanMaxSteps, totalScanCount) {
+function vidGetScanMaxSteps(scanMaxSteps, totalScanCount) {
     if (BK_videoScanMode === 'quick') {
-        let remaining = VID_QUICK_SCAN_MAX_FRAMES - totalScanCount;
-        return Math.max(0, Math.min(scanMaxSteps, remaining));
-    }
-    if (BK_videoScanMode === 'turbo') {
-        return totalScanCount === 0 ? Math.min(scanMaxSteps, VID_TURBO_SCAN_MAX_FRAMES) : 0;
+        return totalScanCount === 0 ? Math.min(scanMaxSteps, VID_COMPOSITE_SCAN_MAX_FRAMES) : 0;
     }
     return scanMaxSteps;
 }
 
-function vidShouldLimitedScanBlock(scanResults) {
-    return (BK_videoScanMode === 'quick' || BK_videoScanMode === 'turbo')
-        && scanResults.blockCount > 0;
+function vidShouldQuickScanBlock(scanResults) {
+    return BK_videoScanMode === 'quick' && scanResults.blockCount > 0;
 }
 
-function vidShouldLimitedScanPass(totalScanCount) {
-    return (BK_videoScanMode === 'quick' && totalScanCount >= VID_QUICK_SCAN_MAX_FRAMES)
-        || (BK_videoScanMode === 'turbo' && totalScanCount >= 1);
-}
-
-function vidGetLimitedScanLabel() {
-    return BK_videoScanMode === 'turbo' ? 'TurboScan' : 'Quick scan';
-}
-
-function vidGetLimitedScanAction() {
-    return BK_videoScanMode === 'turbo' ? 'pass-turbo' : 'pass-quick';
+function vidShouldQuickScanPass(totalScanCount) {
+    return BK_videoScanMode === 'quick' && totalScanCount >= 1;
 }
 
 async function vidPrerequestListener(details) {
@@ -118,8 +103,7 @@ async function vidPerformVideoScan(
         scanStart: scanStart,
         scanStep: scanStep,
         scanMaxSteps: scanMaxSteps,
-        scanBlockBailCount: scanBlockBailCount,
-        scanMode: BK_videoScanMode
+        scanBlockBailCount: scanBlockBailCount
     })
     return p;
 }
@@ -321,7 +305,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                 //Setup async work as promise
                 scanAndTransitionPromise = async ()=>{
                     WJR_DEBUG && console.info(`DEFV: Performing scan for ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
-                    let effectiveScanMaxSteps = vidGetLimitedScanMaxSteps(scanMaxSteps, totalScanCount);
+                    let effectiveScanMaxSteps = vidGetScanMaxSteps(scanMaxSteps, totalScanCount);
                     if(effectiveScanMaxSteps <= 0) {
                         status = 'pass';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
@@ -345,29 +329,29 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         scanBlockBailCount
                     );
                     let scanPerfTotalTime = performance.now() - scanPerfStartTime;
-                    WJR_DEBUG && console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}/${scanResults.scanCount}=${(scanPerfTotalTime/scanResults.scanCount).toFixed(1)} for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
+                    WJR_DEBUG && console.log(`DEFV: Scan results ${details.requestId} timing ${scanPerfTotalTime}ms for ${scanResults.sourceFrameCount} source frames in ${scanResults.scanCount} composite scans for buffers [${flushIndexStart}-${flushIndexEnd}) was ${scanResults.blockCount}/${scanResults.scanCount}, error? ${scanResults.error}`);
                     totalScanCount += scanResults.scanCount;
                     totalBlockCount += scanResults.blockCount;
-                    let isLimitedScanBlock = vidShouldLimitedScanBlock(scanResults);
+                    let isQuickScanBlock = vidShouldQuickScanBlock(scanResults);
                     let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
                         || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
                     let isTotalScanBlock = (totalScanCount >= 8 && totalBlockCount / totalScanCount >= 0.5)
                              || (totalScanCount >= 20 && totalBlockCount / totalScanCount >= 0.15);
-                    let shouldBlock = isLimitedScanBlock || isThisScanBlock || isTotalScanBlock;
+                    let shouldBlock = isQuickScanBlock || isThisScanBlock || isTotalScanBlock;
                     if(scanResults.error) {
                         console.warn(`DEFV: Scan error ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}): ${scanResults.error}`);
                         totalErrorCount++;
                     }
                     let shouldError = totalErrorCount >= 5;
-                    let shouldLimitedScanPass = vidShouldLimitedScanPass(totalScanCount);
+                    let shouldQuickScanPass = vidShouldQuickScanPass(totalScanCount);
 
                     // Note that due the wonders of async, buffers may have data beyond
                     // what is in flushBuffers, so we need to flush everything so that
                     // for any condition where we disconnect we don't have any stragglers
                     // causing "holes"
                     if(shouldBlock) {
-                        if(isLimitedScanBlock) {
-                            console.warn(`DEFV: ${vidGetLimitedScanLabel()} BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked scan results`);
+                        if(isQuickScanBlock) {
+                            console.warn(`DEFV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked composite scans`);
                         }
                         console.warn(`DEFV: BLOCK ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd}) with global stats ${totalBlockCount}/${totalScanCount}`);
                         status = 'block';
@@ -398,8 +382,8 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
                         finalizeFilter('disconnect', status);
-                    } else if(shouldLimitedScanPass) {
-                        WJR_DEBUG && console.log(`DEFV: ${vidGetLimitedScanLabel()} PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
+                    } else if(shouldQuickScanPass) {
+                        WJR_DEBUG && console.log(`DEFV: Quick scan PASS ${details.requestId} for buffers [${flushIndexStart}-${flushIndexEnd})`);
                         status = 'pass';
                         let disconnectBuffers = allBuffers.slice(flushIndexStart);
                         disconnectBuffers.forEach(b=>filter.write(b));
@@ -421,21 +405,21 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
                             flushBuffers.forEach(b=>filter.write(b));
 
                             //Check if perf was bad enough that we should ratchet.
-                            if(scanResults.scanCount > 0) {
-                                let timePerFrameSecs = (scanPerfTotalTime / scanResults.scanCount) / 1000.0; //super noisy
+                            if(scanResults.sourceFrameCount > 0) {
+                                let timePerFrameSecs = (scanPerfTotalTime / scanResults.sourceFrameCount) / 1000.0; //super noisy
                                 if(timePerFrameSecs > scanStepIncreaseThreshold*scanStep) {
                                     if(scanStep >= scanStepMax) {
                                         console.warn(`DEFV: RATCHET maxed ${details.requestId}: ${timePerFrameSecs}`);
                                     } else {
                                         scanStep += scanStepRatchet;
-                                        console.warn(`DEFV: RATCHET increased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.scanCount} frames`);
+                                        console.warn(`DEFV: RATCHET increased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.sourceFrameCount} source frames`);
                                     }
                                 } else if(timePerFrameSecs < scanStepDecreaseThreshold*scanStep) {
                                     if(scanStep <= scanStepMin) {
                                         WJR_DEBUG && console.info(`DEFV: RATCHET minned ${details.requestId}: ${timePerFrameSecs}`);
                                     } else {
                                         scanStep -= scanStepRatchet;
-                                        console.warn(`DEFV: RATCHET decreased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.scanCount} frames`);
+                                        console.warn(`DEFV: RATCHET decreased ${details.requestId} to scanStep ${scanStep}: ${timePerFrameSecs} over ${scanResults.sourceFrameCount} source frames`);
                                     }
                                 }
                             }
@@ -495,6 +479,7 @@ function vidCheckCreateDashGroup(url) {
             fmp4: null,
             webm: null,
             scanCount: 0,
+            sourceFrameCount: 0,
             blockCount: 0
         };
         VID_DASH_GROUPS[url] = dashGroup;
@@ -604,6 +589,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                     initSegment: initSegment,
                     videoChainId: videoChainId,
                     scanCount: 0,
+                    sourceFrameCount: 0,
                     blockCount: 0,
                     isAudioOnly: isAudioOnly
                 };
@@ -681,14 +667,14 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
             let maxScanGroupSteps = 15.0;
             let scanMaxSteps = fragments[0].wasMdatFallback ? maxScanGroupSteps : 10.0;
             let scanBlockBailCount = 4.0;
-            let effectiveScanMaxSteps = vidGetLimitedScanMaxSteps(scanMaxSteps, dashGroup.scanCount);
+            let effectiveScanMaxSteps = vidGetScanMaxSteps(scanMaxSteps, dashGroup.scanCount);
 
             WJR_DEBUG && console.debug(`DASHVMP4: Scanning for ${details.requestId} at range start ${range.start}`);
             let processor = bkGetNextProcessor();
             if(effectiveScanMaxSteps <= 0) {
                 status = 'pass';
                 dashGroup.status = 'pass';
-                dashGroup.actions.push({ requestId: details.requestId, range: range, action: vidGetLimitedScanAction()});
+                dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-quick'});
                 buffers.forEach(b=>filter.write(b));
                 filter.disconnect();
                 statusCompleteVideoCheck(details.requestId, status);
@@ -708,21 +694,23 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 effectiveScanMaxSteps,
                 scanBlockBailCount
             );
-            WJR_DEBUG && console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount}  for ${details.requestId} at range start ${range.start} for url ${url}`);
+            WJR_DEBUG && console.info(`DASHVMP4: Scan complete ${scanResults.blockCount}/${scanResults.scanCount} composite scans across ${scanResults.sourceFrameCount} source frames for ${details.requestId} at range start ${range.start} for url ${url}`);
             statusIndicateVideoProgress(details.requestId);
             fmp4.scanCount += scanResults.scanCount;
+            fmp4.sourceFrameCount += scanResults.sourceFrameCount;
             fmp4.blockCount += scanResults.blockCount;
             dashGroup.scanCount += scanResults.scanCount;
+            dashGroup.sourceFrameCount += scanResults.sourceFrameCount;
             dashGroup.blockCount += scanResults.blockCount;
-            let isLimitedScanBlock = vidShouldLimitedScanBlock(scanResults);
+            let isQuickScanBlock = vidShouldQuickScanBlock(scanResults);
             let isThisScanBlock = (scanResults.blockCount >= scanBlockBailCount
                                     || (scanResults.scanCount >= 3 && scanResults.blockCount / scanResults.scanCount >= 0.66));
             let isThisStreamBlock = (fmp4.scanCount >= 20 && fmp4.blockCount / fmp4.scanCount >= 0.15);
             let isThisGroupBlock = (dashGroup.scanCount >= 20 && dashGroup.blockCount / dashGroup.scanCount >= 0.15);
             WJR_DEBUG && console.log(`DASHVMP4/MLV: Scan status for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
-            if(isLimitedScanBlock || isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
-                if(isLimitedScanBlock) {
-                    console.warn(`DASHVMP4/MLV: ${vidGetLimitedScanLabel()} BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked scan results for url ${url}`);
+            if(isQuickScanBlock || isThisScanBlock || isThisStreamBlock || isThisGroupBlock) {
+                if(isQuickScanBlock) {
+                    console.warn(`DASHVMP4/MLV: Quick scan BLOCK ${details.requestId} due to ${scanResults.blockCount} blocked composite scans for url ${url}`);
                 }
                 console.warn(`DASHVMP4/MLV: Considering total block for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                 status = 'block';
@@ -732,11 +720,11 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'block'});
             } else {
                 status = 'pass';
-                if(vidShouldLimitedScanPass(dashGroup.scanCount)) {
-                    WJR_DEBUG && console.log(`DASHVMP4/MLV: ${vidGetLimitedScanLabel()} PASS ${details.requestId} for url ${url}`);
+                if(vidShouldQuickScanPass(dashGroup.scanCount)) {
+                    WJR_DEBUG && console.log(`DASHVMP4/MLV: Quick scan PASS ${details.requestId} for url ${url}`);
                     dashGroup.status = 'pass';
-                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: vidGetLimitedScanAction()});
-                } else if(dashGroup.scanCount >= maxScanGroupSteps) {
+                    dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-quick'});
+                } else if(dashGroup.sourceFrameCount >= maxScanGroupSteps) {
                     WJR_DEBUG && console.log(`DASHVMP4/MLV: Considering total pass for ${details.requestId}: ${scanResults.blockCount}/${scanResults.scanCount} < ${fmp4.blockCount}/${fmp4.scanCount} < ${dashGroup.blockCount}/${dashGroup.scanCount} for url ${url}`);
                     dashGroup.status = 'pass';
                     dashGroup.actions.push({ requestId: details.requestId, range: range, action: 'pass-total'});

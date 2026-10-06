@@ -260,11 +260,10 @@
       <p class="option-description">Video blocking requires quite a bit of processing, and the accuracy is currently lower due to technical limitations. Additionally, not all video sites are supported because video data is delivered to the browser in many ways.</p>
       <div class="radio-group inline">
         <label class="radio-option inline" for="video_blocking_mode_enabled"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_enabled" value="enabled"><span>Enabled</span></label>
-        <label class="radio-option inline" for="video_blocking_mode_turbo"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_turbo" value="turbo" checked><span>TurboScan</span></label>
-        <label class="radio-option inline" for="video_blocking_mode_quick"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_quick" value="quick"><span>Quick Scan</span></label>
+        <label class="radio-option inline" for="video_blocking_mode_quick"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_quick" value="quick" checked><span>Quick Scan</span></label>
         <label class="radio-option inline" for="video_blocking_mode_disabled"><input type="radio" name="video_blocking_mode" id="video_blocking_mode_disabled" value="disabled"><span>Disabled</span></label>
       </div>
-      <p class="option-note">TurboScan combines up to four early frames into one low-resolution image, performs a single ML scan, and then lets the rest of the video flow through. It is the default mode.</p>
+      <p class="option-note">All video scans combine up to four frames into each low-resolution ML scan. Quick Scan performs one combined scan and then lets the rest of the video flow through. It is the default mode.</p>
     </section>
 
     <section class="option-group">

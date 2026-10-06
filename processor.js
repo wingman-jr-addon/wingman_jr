@@ -746,9 +746,9 @@ function procGetVideoUrl(requestId, mimeType, buffers) {
     }
 }
 
-const PROC_TURBO_SCAN_MAX_FRAMES = 4;
+const PROC_VIDEO_COMPOSITE_MAX_FRAMES = 4;
 
-function procCreateTurboScanCanvas() {
+function procCreateVideoCompositeCanvas() {
     let canvas = document.createElement('canvas');
     canvas.width = PROC_IMAGE_SIZE;
     canvas.height = PROC_IMAGE_SIZE;
@@ -759,7 +759,7 @@ function procCreateTurboScanCanvas() {
     return canvas;
 }
 
-function procDrawTurboScanFrame(canvas, video, frameIndex) {
+function procDrawVideoCompositeFrame(canvas, video, frameIndex) {
     const columns = 2;
     const tileSize = PROC_IMAGE_SIZE / columns;
     const tileX = (frameIndex % columns) * tileSize;
@@ -767,7 +767,7 @@ function procDrawTurboScanFrame(canvas, video, frameIndex) {
     const sourceWidth = video.videoWidth || video.width;
     const sourceHeight = video.videoHeight || video.height;
     if(!sourceWidth || !sourceHeight) {
-        throw new Error('TurboScan cannot compose a frame without video dimensions');
+        throw new Error('Cannot compose a video frame without dimensions');
     }
     const scale = Math.min(tileSize / sourceWidth, tileSize / sourceHeight);
     const targetWidth = sourceWidth * scale;
@@ -777,6 +777,34 @@ function procDrawTurboScanFrame(canvas, video, frameIndex) {
     const ctx = canvas.getContext('2d', { alpha: false });
     ctx.drawImage(video, 0, 0, sourceWidth, sourceHeight,
         targetX, targetY, targetWidth, targetHeight);
+}
+
+async function procEvaluateVideoComposite(
+    canvas,
+    frameTimes,
+    scanResults,
+    threshold,
+    requestId,
+    requestType,
+    mimeType,
+    videoChainId
+) {
+    WJR_DEBUG && console.debug('MLV: Composite scan predicting '+frameTimes.length+' combined frames for '+requestId+' in video group '+videoChainId);
+    const sqrxrScore = await procPredict(canvas);
+    scanResults.scanCount++;
+    scanResults.sourceFrameCount += frameTimes.length;
+    let frameStatus;
+    if(procIsSafe(sqrxrScore, threshold)) {
+        WJR_DEBUG && console.log('MLV: Composite scan PASS video score for '+frameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        await procCommonLogImg(canvas, 'MLV: Composite scan PASS VID '+procScoreToStr(sqrxrScore));
+        frameStatus = 'pass';
+    } else {
+        WJR_DEBUG && console.log('MLV: Composite scan BLOCKED video score for '+frameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        await procCommonWarnImg(canvas, 'MLV: Composite scan BLOCKED VID '+procScoreToStr(sqrxrScore));
+        frameStatus = 'block';
+        scanResults.blockCount++;
+    }
+    scanResults.frames.push(...frameTimes.map(time => ({ 'time': time, 'status': frameStatus })));
 }
 
 
@@ -791,13 +819,9 @@ async function procGetVideoScanStatus(
     scanStart,
     scanStep,
     scanMaxSteps,
-    scanBlockBailCount,
-    scanMode = 'enabled'
+    scanBlockBailCount
 ) {
-    let inferenceVideo, videoUrl, sqrxrScore;
-    const isTurboScan = scanMode === 'turbo';
-    const turboCanvas = isTurboScan ? procCreateTurboScanCanvas() : null;
-    const turboFrameTimes = [];
+    let inferenceVideo, videoUrl;
 
     let scanResults = {
         type: 'vid_scan',
@@ -819,10 +843,9 @@ async function procGetVideoScanStatus(
         inferenceVideo.autoplay = false;
         videoUrl = procGetVideoUrl(requestId, mimeType, buffers);
 
-        const maxSteps = isTurboScan
-            ? Math.min(scanMaxSteps, PROC_TURBO_SCAN_MAX_FRAMES)
-            : scanMaxSteps;
-        for(var i=0; i<maxSteps; i++) {
+        let compositeCanvas = procCreateVideoCompositeCanvas();
+        let compositeFrameTimes = [];
+        for(var i=0; i<scanMaxSteps; i++) {
             let seekTime = scanStart+scanStep*i;
             await procVideoLoadedData(inferenceVideo, videoUrl, seekTime);
             let maxTime = procGetMaxVideoTime(inferenceVideo); //important to do this AFTER loading
@@ -831,54 +854,39 @@ async function procGetVideoScanStatus(
                 break; //invalid even though it tried to seek!
             }
 
-            if(isTurboScan) {
-                procDrawTurboScanFrame(turboCanvas, inferenceVideo, turboFrameTimes.length);
-                turboFrameTimes.push(seekTime);
+            procDrawVideoCompositeFrame(compositeCanvas, inferenceVideo, compositeFrameTimes.length);
+            compositeFrameTimes.push(seekTime);
+            if(compositeFrameTimes.length < PROC_VIDEO_COMPOSITE_MAX_FRAMES) {
                 continue;
             }
-
-            WJR_DEBUG && console.debug('MLV: predicting video '+requestId+' WxH '+inferenceVideo.width+','+inferenceVideo.height+' at '+seekTime+' for video group '+videoChainId);
-
-            sqrxrScore = await procPredict(inferenceVideo);
-            scanResults.scanCount++;
-            scanResults.sourceFrameCount++;
-            let frameStatus;
-            if(procIsSafe(sqrxrScore, threshold))
-            {
-                WJR_DEBUG && console.log('MLV: SCAN PASS video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await procCommonLogImg(inferenceVideo, 'MLV: SCAN PASS VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
-                frameStatus = 'pass';
-            }
-            else
-            {
-                WJR_DEBUG && console.log('MLV: SCAN BLOCKED video score @'+seekTime+': '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await procCommonWarnImg(inferenceVideo, 'MLV: SCAN BLOCKED VID @'+seekTime+' '+procScoreToStr(sqrxrScore));
-                frameStatus = 'block';
-                scanResults.blockCount++;
-            }
-            scanResults.frames.push({ 'time': seekTime, 'status': frameStatus});
+            await procEvaluateVideoComposite(
+                compositeCanvas,
+                compositeFrameTimes,
+                scanResults,
+                threshold,
+                requestId,
+                requestType,
+                mimeType,
+                videoChainId
+            );
+            compositeFrameTimes = [];
             if(scanResults.blockCount >= scanBlockBailCount) {
                 WJR_DEBUG && console.log('MLV: Bailing on '+requestId+' for video chain '+videoChainId+' because of block count '+scanResults.blockCount);
                 break;
             }
+            compositeCanvas = procCreateVideoCompositeCanvas();
         }
-        if(isTurboScan && turboFrameTimes.length > 0) {
-            WJR_DEBUG && console.debug('MLV: TurboScan predicting '+turboFrameTimes.length+' combined frames for '+requestId+' in video group '+videoChainId);
-            sqrxrScore = await procPredict(turboCanvas);
-            scanResults.scanCount = 1;
-            scanResults.sourceFrameCount = turboFrameTimes.length;
-            let frameStatus;
-            if(procIsSafe(sqrxrScore, threshold)) {
-                WJR_DEBUG && console.log('MLV: TurboScan PASS video score for '+turboFrameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await procCommonLogImg(turboCanvas, 'MLV: TurboScan PASS VID '+procScoreToStr(sqrxrScore));
-                frameStatus = 'pass';
-            } else {
-                WJR_DEBUG && console.log('MLV: TurboScan BLOCKED video score for '+turboFrameTimes.length+' frames: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
-                await procCommonWarnImg(turboCanvas, 'MLV: TurboScan BLOCKED VID '+procScoreToStr(sqrxrScore));
-                frameStatus = 'block';
-                scanResults.blockCount = 1;
-            }
-            scanResults.frames = turboFrameTimes.map(time => ({ 'time': time, 'status': frameStatus }));
+        if(compositeFrameTimes.length > 0 && scanResults.blockCount < scanBlockBailCount) {
+            await procEvaluateVideoComposite(
+                compositeCanvas,
+                compositeFrameTimes,
+                scanResults,
+                threshold,
+                requestId,
+                requestType,
+                mimeType,
+                videoChainId
+            );
         }
     } catch(e) {
         WJR_DEBUG && console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
@@ -989,8 +997,7 @@ async function procOnPortMessage(m) {
                 m.scanStart,
                 m.scanStep,
                 m.scanMaxSteps,
-                m.scanBlockBailCount,
-                m.scanMode
+                m.scanBlockBailCount
             );
             try {
                 PROC_port.postMessage(scanResults);
