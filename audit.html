@@ -278,6 +278,18 @@
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     th, td { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
+    .audit-log-wrap {
+      max-height: min(50vh, 440px);
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    .audit-log-wrap th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface);
+      box-shadow: 0 1px var(--border);
+    }
     .drawer {
       position: fixed;
       inset: 0 0 0 auto;
@@ -350,7 +362,7 @@
 <body>
   <main>
     <h1>Audit history</h1>
-    <p class="muted">Review local filtering scores, private browsing coverage, blocked images, and configuration events.</p>
+    <p class="muted">Review browsing activity, blocked images, and important changes.</p>
 
     <section class="card" aria-labelledby="mode-heading">
       <div class="row spaced">
@@ -363,11 +375,10 @@
         <label><input type="radio" name="audit-mode" value="accountability"> Accountability</label>
       </div>
       <div class="warning">
-        Audit and Accountability modes intentionally store page-site domains, timestamps, filtering scores, audit events, and 128×128 thumbnails of blocked images on this device. When Firefox allows Wingman Jr. in private windows, private browsing activity is stored too.
-        Hash chaining, coverage checks, and runtime heartbeats provide visible tamper signals; they are not tamper-proof against someone with full local browser access.
+        Audit and Accountability save visited sites, times, filtering results, important changes, and small previews of blocked images on this device. Private browsing is included only when Firefox allows Wingman Jr. to run there.
       </div>
       <div id="private-help" class="warning" hidden>
-        <b>Private browsing is not covered.</b> In Firefox Add-ons, open Wingman Jr. and set <i>Run in Private Windows</i> to <i>Allow</i>, then check again. Without this, private windows are invisible to Wingman Jr.
+        <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr. and set <i>Run in Private Windows</i> to <i>Allow</i>, then check again.
         <div class="row">
           <button type="button" id="check-private">Check again</button>
         </div>
@@ -381,11 +392,11 @@
       </div>
       <label id="private-ack" hidden>
         <input type="checkbox" id="allow-incomplete-private">
-        I understand that private browsing cannot be recorded until Firefox grants access.
+        I understand that private browsing will not be included.
       </label>
       <div class="row" style="margin-top: 12px">
         <button type="button" class="primary" id="apply-mode">Apply mode</button>
-        <button type="button" class="danger" id="reset-password" hidden>Forgot password — destroy all audit data</button>
+        <button type="button" class="danger" id="reset-password" hidden>Forgot password — erase all saved history</button>
       </div>
       <div id="mode-status" class="status" role="status" aria-live="polite"></div>
     </section>
@@ -403,18 +414,18 @@
         <div class="summary"><strong id="summary-checks">0</strong>checks</div>
         <div class="summary"><strong id="summary-blocked">0</strong>blocked</div>
         <div class="summary"><strong id="summary-private">0</strong>private checks</div>
-        <div class="summary"><strong id="summary-events">0</strong>audit events</div>
+        <div class="summary"><strong id="summary-events">0</strong>recorded events</div>
       </div>
       <div class="legend">
-        <span style="--legend-color:#8bb9e8">Below threshold</span>
-        <span style="--legend-color:#f4b43c">Near threshold</span>
-        <span style="--legend-color:#d33b2f">Above threshold</span>
+        <span style="--legend-color:#8bb9e8">Low concern</span>
+        <span style="--legend-color:#f4b43c">Worth a look</span>
+        <span style="--legend-color:#d33b2f">High concern</span>
         <span style="--legend-color:#7257b4">Private browsing</span>
-        <span style="--legend-color:#b42318">Private coverage unavailable</span>
-        <span style="--legend-color:#334a68">Audit event</span>
-        <span class="timeline-block-legend">Numbered outline = blocked images; click to review</span>
+        <span style="--legend-color:#b42318">Private browsing not included</span>
+        <span style="--legend-color:#334a68">Recorded event</span>
+        <span class="timeline-block-legend">Blocked images</span>
       </div>
-      <p class="muted" style="margin-top:8px">Each day is a 6×4 grid read left-to-right, top-to-bottom from midnight through 11 PM. Unnumbered fill shows mean hourly log-odds. Numbered-cell fill balances block severity with both the number and share of blocked checks, so an isolated false positive stays restrained while a sustained pattern becomes warmer. A neutral outline marks cells that open image review; click any other sampled cell for its sample count.</p>
+      <p class="muted" style="margin-top:8px">Each square is one hour. Warmer colors suggest more concern, and a number shows blocked images. Click any colored square for details.</p>
       <div class="timeline-wrap">
         <div id="timeline" aria-label="Hourly audit activity by site"></div>
       </div>
@@ -431,9 +442,9 @@
     <section class="card" aria-labelledby="log-heading">
       <div class="row spaced">
         <h2 id="log-heading">Audit log</h2>
-        <span id="integrity-status" class="coverage" data-covered="true">Hash chain not checked</span>
+        <span id="integrity-status" class="coverage" data-covered="true">Checking history…</span>
       </div>
-      <div style="overflow:auto">
+      <div class="audit-log-wrap" role="region" aria-label="Audit events" tabindex="0">
         <table>
           <thead><tr><th>Time</th><th>Event</th><th>Details</th></tr></thead>
           <tbody id="audit-log"></tbody>

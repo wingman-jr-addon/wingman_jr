@@ -83,8 +83,8 @@ function audPageRenderModeControls() {
     const coverage = document.getElementById('coverage');
     coverage.dataset.covered = String(AUDPAGE_state.privateAccessAllowed);
     coverage.textContent = AUDPAGE_state.privateAccessAllowed
-        ? 'Private browsing covered'
-        : 'Private browsing not covered';
+        ? 'Private browsing included'
+        : 'Private browsing not included';
     document.getElementById('private-help').hidden = AUDPAGE_state.privateAccessAllowed;
     document.getElementById('reset-password').hidden = AUDPAGE_state.mode !== 'accountability';
     audPageUpdateModeForm();
@@ -106,7 +106,7 @@ function audPageUpdateModeForm() {
         ? 'Create accountability password'
         : 'Current accountability password';
     document.getElementById('password-help').textContent = selected === 'accountability'
-        ? 'At least 8 characters. It will be required to reveal thumbnails or lower this mode.'
+        ? 'At least 8 characters. You will need it to view blocked images or lower this mode.'
         : 'Required to lower or turn off Accountability.';
     const incomplete = selected === 'accountability' && !AUDPAGE_state.privateAccessAllowed;
     document.getElementById('private-ack').hidden = !incomplete;
@@ -146,8 +146,8 @@ async function audPageCheckPrivate() {
         audPageSetStatus(
             'mode-status',
             AUDPAGE_state.privateAccessAllowed
-                ? 'Private browsing coverage is enabled.'
-                : 'Private browsing coverage is still unavailable.',
+                ? 'Private browsing is included.'
+                : 'Private browsing is still not included.',
             AUDPAGE_state.privateAccessAllowed ? 'saved' : 'error'
         );
         await audPageLoadTimeline();
@@ -157,14 +157,14 @@ async function audPageCheckPrivate() {
 }
 
 async function audPageResetPassword() {
-    if (!confirm('Destroy all retained audit history and thumbnails, turn tracking off, and leave only a reset tombstone?')) {
+    if (!confirm('Erase all saved history and blocked images, turn tracking off, and record that the history was reset?')) {
         return;
     }
-    audPageSetStatus('mode-status', 'Destroying retained audit data…');
+    audPageSetStatus('mode-status', 'Erasing saved history…');
     try {
         AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.resetPassword' });
         audPageRenderModeControls();
-        audPageSetStatus('mode-status', 'Audit data destroyed. A reset tombstone remains.', 'saved');
+        audPageSetStatus('mode-status', 'Saved history erased. The reset was recorded.', 'saved');
         await audPageLoadTimeline();
     } catch (error) {
         audPageSetStatus('mode-status', error.message || String(error), 'error');
@@ -383,17 +383,17 @@ function audPageEventLabel(type) {
     const labels = {
         'mode-changed': 'Mode changed',
         'tracking-turned-off': 'Tracking turned off',
-        'tracking-runtime-started': 'Tracking runtime started',
-        'score-buffer-overflow': 'Score buffer overflow',
-        'accountability-reset': 'Accountability reset',
-        'private-coverage-enabled': 'Private coverage enabled',
-        'private-coverage-unavailable': 'Private coverage unavailable',
-        'private-coverage-revoked': 'Private coverage revoked',
+        'tracking-runtime-started': 'Wingman Jr. started',
+        'score-buffer-overflow': 'Some older activity was removed',
+        'accountability-reset': 'History reset',
+        'private-coverage-enabled': 'Private browsing included',
+        'private-coverage-unavailable': 'Private browsing not included',
+        'private-coverage-revoked': 'Private browsing access removed',
         'private-session-started': 'Private browsing started',
         'private-session-observed': 'Private browsing active',
         'private-session-ended': 'Private browsing ended',
-        'blocked-image-revealed': 'Stored image revealed',
-        'page-image-revealed': 'Page image revealed',
+        'blocked-image-revealed': 'Blocked image viewed',
+        'page-image-revealed': 'Image viewed',
         'master-filtering-changed': 'Filtering changed',
         'master-filtering-paused': 'Filtering paused',
         'site-mode-changed': 'Site filtering mode changed',
@@ -434,8 +434,8 @@ function audPageCreateSignalRow(data) {
     signalLabel.className = 'timeline-site-label';
     const signalTitle = document.createElement('strong');
     const signalDetail = document.createElement('small');
-    signalTitle.textContent = 'Privacy & audit';
-    signalDetail.textContent = 'Sessions, gaps, events';
+    signalTitle.textContent = 'Private browsing & changes';
+    signalDetail.textContent = 'Activity and important events';
     signalLabel.append(signalTitle, signalDetail);
     signalRow.append(signalLabel);
     for (let day = 0; day < AUDPAGE_DAYS_PER_WEEK; day++) {
@@ -457,7 +457,7 @@ function audPageCreateSignalRow(data) {
                 descriptions.push('private browsing active');
             }
             if (coverageGap) {
-                descriptions.push('private coverage unavailable');
+                descriptions.push('private browsing not included');
             }
             if (events.length) {
                 cell.classList.add('has-audit-events');
@@ -576,8 +576,8 @@ function audPageRenderTimeline(data) {
         details.hidden = !AUDPAGE_detailsExpanded;
         expanderButton.setAttribute('aria-expanded', String(AUDPAGE_detailsExpanded));
         expanderButton.textContent = AUDPAGE_detailsExpanded
-            ? '▾ Hide privacy, audit & site details'
-            : `▸ Show privacy, audit & ${data.rows.length.toLocaleString()} ${data.rows.length === 1 ? 'site' : 'sites'}`;
+            ? '▾ Hide private browsing, changes & sites'
+            : `▸ Show private browsing, changes & ${data.rows.length.toLocaleString()} ${data.rows.length === 1 ? 'site' : 'sites'}`;
         document.getElementById('site-pager').hidden = !AUDPAGE_detailsExpanded;
     };
     expanderButton.addEventListener('click', () => {
@@ -592,21 +592,23 @@ function audPageRenderTimeline(data) {
         : 'Sites 0–0 of 0';
     document.getElementById('previous-sites').disabled = AUDPAGE_sitePage === 0;
     document.getElementById('next-sites').disabled = AUDPAGE_sitePage >= pageCount - 1;
-    audPageSetStatus('timeline-status', data.rows.length ? '' : 'No filtering scores in this week.');
+    audPageSetStatus('timeline-status', data.rows.length ? '' : 'No browsing activity this week.');
 }
 
 function audPageRenderIntegrity(integrity) {
     const badge = document.getElementById('integrity-status');
     const valid = integrity?.valid === true;
-    badge.dataset.covered = String(valid);
     if (!integrity || integrity.checked === 0) {
-        badge.textContent = 'No chained events in range';
+        badge.dataset.covered = 'true';
+        badge.textContent = 'No changes recorded';
     } else if (valid) {
+        badge.dataset.covered = 'true';
         badge.textContent = integrity.headChecked
-            ? `Hash chain verified · ${integrity.checked.toLocaleString()} events`
-            : `Hash chain verified through week · ${integrity.checked.toLocaleString()} events`;
+            ? 'No tampering detected'
+            : 'No tampering detected through this week';
     } else {
-        badge.textContent = 'Hash chain verification failed';
+        badge.dataset.covered = 'false';
+        badge.textContent = 'History may have been changed';
     }
 }
 
@@ -637,7 +639,7 @@ function audPageRenderLog(events) {
         const cell = document.createElement('td');
         cell.colSpan = 3;
         cell.className = 'muted';
-        cell.textContent = 'No audit events in this week.';
+        cell.textContent = 'No events recorded this week.';
         row.append(cell);
         body.append(row);
     }
@@ -712,7 +714,7 @@ function audPageRenderSelectedBlock() {
     document.getElementById('previous-thumbnail').disabled = AUDPAGE_selectedBlockIndex === 0;
     document.getElementById('next-thumbnail').disabled = AUDPAGE_selectedBlockIndex >= AUDPAGE_selectedBlocks.length - 1;
     const ratingLabel = rating === 'safe' ? 'Safe' : (rating ? rating.toUpperCase() : 'Unknown rating');
-    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · ${ratingLabel} · score ${(block.score * 100).toFixed(1)}%${block.private ? ' · private window' : ''}`;
+    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · ${ratingLabel}${block.private ? ' · private window' : ''}`;
     const image = document.getElementById('thumbnail');
     image.hidden = true;
     image.removeAttribute('src');
@@ -723,7 +725,7 @@ function audPageRenderSelectedBlock() {
     audPageSetStatus('thumbnail-status', '');
     if (!block.thumbnailId) {
         document.getElementById('thumbnail-password-row').hidden = true;
-        audPageSetStatus('thumbnail-status', 'This block remains in score history, but its bounded thumbnail has expired.', 'error');
+        audPageSetStatus('thumbnail-status', 'This block remains in history, but its image has expired.', 'error');
         return;
     }
     document.getElementById('thumbnail-password-row').hidden = AUDPAGE_state.mode !== 'accountability';
