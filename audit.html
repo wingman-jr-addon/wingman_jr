@@ -17,6 +17,15 @@
       --warning-ink: #704810;
       --danger: #b42318;
       --success: #18794e;
+      --timeline-empty: #edf0f4;
+      --timeline-heat-0: #a9c9e8;
+      --timeline-heat-1: #6aa9dc;
+      --timeline-heat-2: #efc858;
+      --timeline-heat-3: #e88942;
+      --timeline-heat-4: #c83d35;
+      --timeline-block-frame: #334a68;
+      --timeline-cell-size: 16px;
+      --timeline-day-width: 106px;
     }
     * { box-sizing: border-box; }
     body {
@@ -116,9 +125,144 @@
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: #fff;
+      background: var(--surface);
     }
-    #timeline { display: block; min-width: 920px; width: 100%; }
+    #timeline {
+      width: max-content;
+      min-width: 100%;
+      padding: 12px;
+    }
+    .timeline-heading-row,
+    .timeline-site-row,
+    .timeline-signal-row {
+      display: grid;
+      grid-template-columns: 150px repeat(7, var(--timeline-day-width));
+      gap: 8px;
+      align-items: center;
+    }
+    .timeline-heading-row { margin-bottom: 7px; }
+    .timeline-day-heading {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: center;
+    }
+    .timeline-site-row,
+    .timeline-signal-row {
+      padding: 6px 0;
+      border-top: 1px solid var(--border);
+    }
+    .timeline-site-row:nth-child(even) { background: rgba(47, 128, 237, 0.025); }
+    .timeline-overview-row {
+      padding-top: 8px;
+      padding-bottom: 8px;
+      border-top: 0;
+      background: rgba(47, 128, 237, 0.04);
+    }
+    .timeline-site-label { min-width: 0; padding-left: 2px; }
+    .timeline-site-label strong,
+    .timeline-site-label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline-site-label strong { font-size: 0.82rem; }
+    .timeline-site-label small { margin-top: 2px; color: var(--muted); font-size: 0.72rem; }
+    .timeline-day-grid {
+      display: grid;
+      grid-template-columns: repeat(6, var(--timeline-cell-size));
+      grid-template-rows: repeat(4, var(--timeline-cell-size));
+      gap: 2px;
+    }
+    .timeline-hour-cell {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: var(--timeline-cell-size);
+      height: var(--timeline-cell-size);
+      padding: 0;
+      border: 0;
+      border-radius: 2px;
+      background: var(--timeline-empty);
+      color: #1f2a44;
+      font-size: 0.55rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    button.timeline-hour-cell { cursor: pointer; }
+    button.timeline-hour-cell:hover,
+    button.timeline-hour-cell:focus-visible { box-shadow: 0 0 0 2px var(--blue); transform: scale(1.08); z-index: 1; }
+    .timeline-hour-cell.heat-level-0 { background: var(--timeline-heat-0); }
+    .timeline-hour-cell.heat-level-1 { background: var(--timeline-heat-1); }
+    .timeline-hour-cell.heat-level-2 { background: var(--timeline-heat-2); }
+    .timeline-hour-cell.heat-level-3 { background: var(--timeline-heat-3); }
+    .timeline-hour-cell.heat-level-4 { background: var(--timeline-heat-4); color: #fff; }
+    .timeline-hour-cell.has-blocks { outline: 2px solid var(--timeline-block-frame); outline-offset: -2px; }
+    .timeline-count-label { display: inline-flex; align-items: baseline; letter-spacing: -0.35px; line-height: 1; }
+    .timeline-count-plus { position: relative; top: -1px; margin-left: -0.5px; font-size: 0.62em; }
+    .timeline-cell-popover {
+      position: fixed;
+      z-index: 10;
+      width: max-content;
+      max-width: min(290px, calc(100vw - 20px));
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #1f2a44;
+      color: #fff;
+      box-shadow: 0 5px 16px rgba(31, 42, 68, 0.24);
+      font-size: 0.74rem;
+      font-weight: 400;
+      line-height: 1.3;
+      pointer-events: none;
+      white-space: normal;
+    }
+    .timeline-hour-cell.private-checks::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: #7257b4;
+    }
+    .timeline-signal-cell { font-weight: 600; }
+    .timeline-signal-cell.private-session { box-shadow: inset 0 3px #7257b4; }
+    .timeline-signal-cell.coverage-gap { box-shadow: inset 0 0 0 2px rgba(180, 35, 24, 0.7); }
+    .timeline-signal-cell.private-session.coverage-gap { box-shadow: inset 0 3px #7257b4, inset 0 0 0 2px rgba(180, 35, 24, 0.7); }
+    .timeline-signal-cell.has-audit-events::after {
+      content: "";
+      position: absolute;
+      inset: auto 3px 2px;
+      height: 3px;
+      border-radius: 1px;
+      background: #334a68;
+    }
+    .timeline-expander {
+      display: flex;
+      align-items: center;
+      margin: 6px 0 2px 158px;
+    }
+    .timeline-expander button {
+      padding: 4px 9px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .timeline-details[hidden] { display: none; }
+    .timeline-details .timeline-signal-row { margin-top: 4px; }
+    .timeline-block-legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend .timeline-block-legend::before {
+      content: "3";
+      display: grid;
+      place-items: center;
+      width: 14px;
+      height: 14px;
+      margin-right: 0;
+      border: 2px solid var(--timeline-block-frame);
+      border-radius: 2px;
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.55rem;
+      font-weight: 700;
+    }
     .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.83rem; color: var(--muted); }
     .pager { margin-top: 10px; }
     .legend span::before {
@@ -187,10 +331,19 @@
         --border: rgba(255, 255, 255, 0.14);
         --warning-bg: #3c301c;
         --warning-ink: #f6d79b;
+        --timeline-empty: #202733;
+        --timeline-heat-0: #315e82;
+        --timeline-heat-1: #397fb3;
+        --timeline-heat-2: #8e762e;
+        --timeline-heat-3: #a6532d;
+        --timeline-heat-4: #a93431;
+        --timeline-block-frame: #aab5cb;
       }
       button { background: #252f41; }
       .timeline-wrap, .drawer { background: #1d2432; }
-      #timeline { background: #fff; }
+      .timeline-site-row:nth-child(even) { background: rgba(120, 174, 250, 0.035); }
+      .timeline-overview-row { background: rgba(120, 174, 250, 0.06); }
+      .timeline-hour-cell { color: var(--ink); }
     }
   </style>
 </head>
@@ -257,13 +410,15 @@
         <span style="--legend-color:#f4b43c">Near threshold</span>
         <span style="--legend-color:#d33b2f">Above threshold</span>
         <span style="--legend-color:#7257b4">Private browsing</span>
+        <span style="--legend-color:#b42318">Private coverage unavailable</span>
         <span style="--legend-color:#334a68">Audit event</span>
+        <span class="timeline-block-legend">Numbered outline = blocked images; click to review</span>
       </div>
-      <p class="muted" style="margin-top:8px">Color shows the mean log-odds distance from the filtering threshold. Nearby blocks are combined into a numbered red marker; click it to inspect every retained thumbnail in that time cluster.</p>
+      <p class="muted" style="margin-top:8px">Each day is a 6×4 grid read left-to-right, top-to-bottom from midnight through 11 PM. Unnumbered fill shows mean hourly log-odds. Numbered-cell fill balances block severity with both the number and share of blocked checks, so an isolated false positive stays restrained while a sustained pattern becomes warmer. A neutral outline marks cells that open image review; click any other sampled cell for its sample count.</p>
       <div class="timeline-wrap">
-        <canvas id="timeline" width="1120" height="260"></canvas>
+        <div id="timeline" aria-label="Hourly audit activity by site"></div>
       </div>
-      <div class="row spaced pager">
+      <div id="site-pager" class="row spaced pager" hidden>
         <span id="site-page" class="muted">Sites 0–0 of 0</span>
         <div class="row">
           <button type="button" id="previous-sites">Previous sites</button>

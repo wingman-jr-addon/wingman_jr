@@ -987,6 +987,7 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
                     row.blocks.push({
                         timestamp: scoreEvent.timestamp,
                         score: scoreEvent.score,
+                        threshold: scoreEvent.threshold,
                         private: scoreEvent.private,
                         rating: scoreEvent.rating || thumbnail?.rating || null,
                         thumbnailId: thumbnail?.id || null

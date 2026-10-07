@@ -1,16 +1,16 @@
 let AUDPAGE_state = null;
 let AUDPAGE_window = null;
-let AUDPAGE_blockMarkers = [];
 let AUDPAGE_selectedBlock = null;
 let AUDPAGE_selectedBlocks = [];
 let AUDPAGE_selectedBlockIndex = 0;
 let AUDPAGE_thumbnailRequestId = 0;
 let AUDPAGE_thumbnailBlur = 5;
 let AUDPAGE_sitePage = 0;
-const AUDPAGE_TIMELINE_RENDER_SCALE = 2;
+let AUDPAGE_detailsExpanded = false;
+let AUDPAGE_cellPopover = null;
 const AUDPAGE_SITES_PER_PAGE = 50;
-const AUDPAGE_BLOCK_CLUSTER_DISTANCE = 24;
-const AUDPAGE_BLOCK_CLUSTER_MAX_MS = 4 * 60 * 60 * 1000;
+const AUDPAGE_HOURS_PER_DAY = 24;
+const AUDPAGE_DAYS_PER_WEEK = 7;
 
 function audPageStartOfWeek(date = new Date()) {
     const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -171,98 +171,212 @@ async function audPageResetPassword() {
     }
 }
 
-function audPageHeatColor(heat, count) {
-    const strength = Math.max(0, Math.min(1, (heat + 6) / 12));
-    const alpha = Math.max(0.22, Math.min(1, 0.28 + Math.log2(count + 1) / 4));
-    let red;
-    let green;
-    let blue;
-    if (strength < 0.5) {
-        const t = strength * 2;
-        red = Math.round(139 + (244 - 139) * t);
-        green = Math.round(185 + (180 - 185) * t);
-        blue = Math.round(232 + (60 - 232) * t);
-    } else {
-        const t = (strength - 0.5) * 2;
-        red = Math.round(244 + (211 - 244) * t);
-        green = Math.round(180 + (59 - 180) * t);
-        blue = Math.round(60 + (47 - 60) * t);
+function audPageHeatLevel(heat) {
+    if (!Number.isFinite(heat)) {
+        return -1;
     }
-    return `rgba(${red},${green},${blue},${alpha})`;
+    if (heat < -3) {
+        return 0;
+    }
+    if (heat < -0.75) {
+        return 1;
+    }
+    if (heat < 0.75) {
+        return 2;
+    }
+    if (heat < 3) {
+        return 3;
+    }
+    return 4;
 }
 
-function audPageTimeX(timestamp, startTime, endTime, left, width) {
-    return left + Math.max(0, Math.min(1, (timestamp - startTime) / (endTime - startTime))) * width;
+function audPageBinIndex(timestamp, startTime, endTime, binCount = 168) {
+    if (!Number.isFinite(timestamp)
+        || !Number.isFinite(startTime)
+        || !Number.isFinite(endTime)
+        || endTime <= startTime
+        || binCount <= 0
+        || timestamp < startTime
+        || timestamp >= endTime) {
+        return -1;
+    }
+    return Math.min(
+        binCount - 1,
+        Math.max(0, Math.floor((timestamp - startTime) / (endTime - startTime) * binCount))
+    );
 }
 
-function audPageDrawDiamond(ctx, x, y, size) {
-    ctx.beginPath();
-    ctx.moveTo(x, y - size);
-    ctx.lineTo(x + size, y);
-    ctx.lineTo(x, y + size);
-    ctx.lineTo(x - size, y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+function audPageIntervalOverlapsBin(interval, binStart, binEnd) {
+    return interval && interval.start < binEnd && interval.end > binStart;
 }
 
-function audPageClusterBlocks(
-    blocks,
-    startTime,
-    endTime,
-    left,
-    plotWidth,
-    maxDistance = AUDPAGE_BLOCK_CLUSTER_DISTANCE,
-    maxTimeDistance = AUDPAGE_BLOCK_CLUSTER_MAX_MS
-) {
-    const positioned = blocks
-        .map(block => ({
-            block,
-            x: audPageTimeX(block.timestamp, startTime, endTime, left, plotWidth)
-        }))
-        .sort((leftBlock, rightBlock) => leftBlock.x - rightBlock.x);
-    const clusters = [];
-    for (const item of positioned) {
-        const current = clusters[clusters.length - 1];
-        if (!current
-            || item.x - current.anchorX > maxDistance
-            || item.block.timestamp - current.anchorTimestamp > maxTimeDistance) {
-            clusters.push({
-                anchorX: item.x,
-                anchorTimestamp: item.block.timestamp,
-                xTotal: item.x,
-                x: item.x,
-                blocks: [item.block]
-            });
-            continue;
+function audPageCountLabel(count) {
+    return count > 99 ? '99+' : String(count || '');
+}
+
+function audPageWorstRating(blocks) {
+    const ranks = { safe: 0, q: 1, r: 2, x: 3 };
+    let worst = null;
+    for (const block of blocks || []) {
+        const rating = audPageRatingForBlock(block);
+        if (rating && (worst === null || ranks[rating] > ranks[worst])) {
+            worst = rating;
         }
-        current.blocks.push(item.block);
-        current.xTotal += item.x;
-        current.x = current.xTotal / current.blocks.length;
     }
-    return clusters;
+    return worst;
 }
 
-function audPageDrawBlockCluster(ctx, cluster, y) {
-    if (cluster.blocks.length === 1) {
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#d52b1e';
-        ctx.lineWidth = 1.6;
-        audPageDrawDiamond(ctx, cluster.x, y, 4.5);
-        return 8;
+function audPageRelativeLogit(score, threshold) {
+    if (!Number.isFinite(score) || !Number.isFinite(threshold)) {
+        return null;
     }
-    ctx.beginPath();
-    ctx.arc(cluster.x, y, 9, 0, Math.PI * 2);
-    ctx.fillStyle = '#d52b1e';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.font = '700 9px Segoe UI, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(cluster.blocks.length > 9 ? '9+' : String(cluster.blocks.length), cluster.x, y + 0.5);
-    return 12;
+    const epsilon = 1e-6;
+    const safeScore = Math.max(epsilon, Math.min(1 - epsilon, score));
+    const safeThreshold = Math.max(epsilon, Math.min(1 - epsilon, threshold));
+    return Math.log(safeScore / (1 - safeScore))
+        - Math.log(safeThreshold / (1 - safeThreshold));
+}
+
+function audPageBlockedHeatLevel(blocks) {
+    const ratingLevel = { safe: 2, q: 2, r: 3, x: 4 };
+    let level = ratingLevel[audPageWorstRating(blocks)] ?? 2;
+    for (const block of blocks || []) {
+        const relativeHeat = audPageRelativeLogit(block.score, block.threshold);
+        if (relativeHeat !== null) {
+            level = Math.max(level, audPageHeatLevel(relativeHeat));
+        }
+    }
+    return Math.max(2, level);
+}
+
+function audPageDisplayHeatLevel(bin, blocks) {
+    const rawBaseLevel = Math.max(0, audPageHeatLevel(bin?.heat));
+    const blockCount = blocks?.length || 0;
+    if (!blockCount) {
+        return audPageHeatLevel(bin?.heat);
+    }
+    const checkCount = Math.max(blockCount, Number(bin?.count) || blockCount);
+    const blockShare = Math.min(1, blockCount / checkCount);
+    const checkEvidence = 1 - Math.exp(-checkCount / 12);
+    const baseLevel = rawBaseLevel * checkEvidence;
+    const volumeEvidence = 1 - Math.exp(-blockCount / 12);
+    const evidence = Math.min(1, volumeEvidence * 0.6 + Math.sqrt(blockShare) * 0.4);
+    const severityLevel = audPageBlockedHeatLevel(blocks);
+    let displayLevel = Math.round(baseLevel + (severityLevel - baseLevel) * evidence);
+    if (evidence >= 0.55 || blockShare >= 0.15) {
+        displayLevel = Math.max(2, displayLevel);
+    }
+    return Math.max(0, Math.min(4, displayLevel));
+}
+
+function audPageAppendCountLabel(cell, count) {
+    const label = document.createElement('span');
+    label.className = 'timeline-count-label';
+    if (count > 99) {
+        label.append(document.createTextNode('99'));
+        const plus = document.createElement('span');
+        plus.className = 'timeline-count-plus';
+        plus.textContent = '+';
+        label.append(plus);
+    } else {
+        label.textContent = String(count);
+    }
+    cell.append(label);
+}
+
+function audPageDismissCellPopover() {
+    if (AUDPAGE_cellPopover) {
+        AUDPAGE_cellPopover.remove();
+        AUDPAGE_cellPopover = null;
+    }
+}
+
+function audPageShowCellPopover(cell, message) {
+    audPageDismissCellPopover();
+    const popover = document.createElement('div');
+    popover.className = 'timeline-cell-popover';
+    popover.setAttribute('role', 'status');
+    popover.textContent = message;
+    document.body.append(popover);
+
+    const cellBounds = cell.getBoundingClientRect();
+    const popoverBounds = popover.getBoundingClientRect();
+    const margin = 8;
+    const centeredLeft = cellBounds.left + cellBounds.width / 2 - popoverBounds.width / 2;
+    const left = Math.max(margin, Math.min(window.innerWidth - popoverBounds.width - margin, centeredLeft));
+    const below = cellBounds.bottom + 6;
+    const top = below + popoverBounds.height <= window.innerHeight - margin
+        ? below
+        : Math.max(margin, cellBounds.top - popoverBounds.height - 6);
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+    AUDPAGE_cellPopover = popover;
+}
+
+function audPageAggregateRows(rows, binCount) {
+    const aggregateBins = new Map();
+    const aggregate = {
+        hostname: 'All sites',
+        count: 0,
+        blocked: 0,
+        privateCount: 0,
+        bins: [],
+        blocks: []
+    };
+    for (const row of rows || []) {
+        aggregate.count += row.count || 0;
+        aggregate.blocked += row.blocked || 0;
+        aggregate.privateCount += row.privateCount || 0;
+        for (const bin of row.bins || []) {
+            if (bin.index < 0 || bin.index >= binCount) {
+                continue;
+            }
+            let target = aggregateBins.get(bin.index);
+            if (!target) {
+                target = { index: bin.index, count: 0, heatTotal: 0, privateCount: 0 };
+                aggregateBins.set(bin.index, target);
+            }
+            target.count += bin.count;
+            target.heatTotal += bin.heat * bin.count;
+            target.privateCount += bin.privateCount || 0;
+        }
+        for (const block of row.blocks || []) {
+            aggregate.blocks.push({ ...block, hostname: row.hostname });
+        }
+    }
+    aggregate.bins = Array.from(aggregateBins.values()).map(bin => ({
+        index: bin.index,
+        count: bin.count,
+        heat: bin.count ? bin.heatTotal / bin.count : 0,
+        privateCount: bin.privateCount
+    }));
+    return aggregate;
+}
+
+function audPageHourLabel(startTime, binIndex) {
+    const start = new Date(startTime + binIndex * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const day = start.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    const time = `${start.toLocaleTimeString(undefined, { hour: 'numeric' })}–${end.toLocaleTimeString(undefined, { hour: 'numeric' })}`;
+    return `${day}, ${time}`;
+}
+
+function audPageShortHourLabel(startTime, binIndex) {
+    const start = new Date(startTime + binIndex * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const formatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
+    if (typeof formatter.formatRange === 'function') {
+        return formatter.formatRange(start, end);
+    }
+    return `${formatter.format(start)}–${formatter.format(end)}`;
+}
+
+function audPageActivityCellLabel(startTime, binIndex, checks, blockCount) {
+    const checkLabel = `${checks.toLocaleString()} ${checks === 1 ? 'check' : 'checks'}`;
+    const blockLabel = blockCount
+        ? `, ${blockCount.toLocaleString()} ${blockCount === 1 ? 'block' : 'blocks'}`
+        : '';
+    return `${audPageShortHourLabel(startTime, binIndex)}, ${checkLabel}${blockLabel}`;
 }
 
 function audPageEventLabel(type) {
@@ -288,130 +402,189 @@ function audPageEventLabel(type) {
     return labels[type] || type.replace(/-/g, ' ');
 }
 
+function audPageCreateTimelineHeading(data) {
+    const duration = data.endTime - data.startTime;
+    const heading = document.createElement('div');
+    heading.className = 'timeline-heading-row';
+    heading.append(document.createElement('span'));
+    for (let day = 0; day < AUDPAGE_DAYS_PER_WEEK; day++) {
+        const label = document.createElement('div');
+        label.className = 'timeline-day-heading';
+        label.textContent = new Date(data.startTime + duration * day / AUDPAGE_DAYS_PER_WEEK)
+            .toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+        heading.append(label);
+    }
+    return heading;
+}
+
+function audPageCreateSignalRow(data) {
+    const duration = data.endTime - data.startTime;
+    const binDuration = duration / data.binCount;
+    const eventBins = Array.from({ length: data.binCount }, () => []);
+    for (const event of data.events) {
+        const index = audPageBinIndex(event.timestamp, data.startTime, data.endTime, data.binCount);
+        if (index >= 0) {
+            eventBins[index].push(event);
+        }
+    }
+
+    const signalRow = document.createElement('div');
+    signalRow.className = 'timeline-signal-row';
+    const signalLabel = document.createElement('div');
+    signalLabel.className = 'timeline-site-label';
+    const signalTitle = document.createElement('strong');
+    const signalDetail = document.createElement('small');
+    signalTitle.textContent = 'Privacy & audit';
+    signalDetail.textContent = 'Sessions, gaps, events';
+    signalLabel.append(signalTitle, signalDetail);
+    signalRow.append(signalLabel);
+    for (let day = 0; day < AUDPAGE_DAYS_PER_WEEK; day++) {
+        const dayGrid = document.createElement('div');
+        dayGrid.className = 'timeline-day-grid';
+        for (let hour = 0; hour < AUDPAGE_HOURS_PER_DAY; hour++) {
+            const index = day * AUDPAGE_HOURS_PER_DAY + hour;
+            const binStart = data.startTime + index * binDuration;
+            const binEnd = binStart + binDuration;
+            const privateActive = data.privateSessions.some(interval => audPageIntervalOverlapsBin(interval, binStart, binEnd));
+            const coverageGap = data.coverageGaps.some(interval => audPageIntervalOverlapsBin(interval, binStart, binEnd));
+            const events = eventBins[index] || [];
+            const cell = document.createElement('span');
+            cell.className = 'timeline-hour-cell timeline-signal-cell';
+            cell.classList.toggle('private-session', privateActive);
+            cell.classList.toggle('coverage-gap', coverageGap);
+            const descriptions = [];
+            if (privateActive) {
+                descriptions.push('private browsing active');
+            }
+            if (coverageGap) {
+                descriptions.push('private coverage unavailable');
+            }
+            if (events.length) {
+                cell.classList.add('has-audit-events');
+                const eventLabels = events.slice(0, 4).map(event => audPageEventLabel(event.type));
+                if (events.length > eventLabels.length) {
+                    eventLabels.push(`+${events.length - eventLabels.length} more`);
+                }
+                descriptions.push(`${events.length} audit ${events.length === 1 ? 'event' : 'events'}: ${eventLabels.join(', ')}`);
+            }
+            cell.title = `${audPageHourLabel(data.startTime, index)}${descriptions.length ? ` · ${descriptions.join(' · ')}` : ' · no privacy or audit signals'}`;
+            cell.setAttribute('aria-label', cell.title);
+            dayGrid.append(cell);
+        }
+        signalRow.append(dayGrid);
+    }
+    return signalRow;
+}
+
+function audPageCreateActivityRow(row, data, overview = false) {
+    const rowElement = document.createElement('div');
+    rowElement.className = `timeline-site-row${overview ? ' timeline-overview-row' : ''}`;
+    const label = document.createElement('div');
+    label.className = 'timeline-site-label';
+    const hostname = document.createElement('strong');
+    const detail = document.createElement('small');
+    hostname.textContent = row.hostname;
+    detail.textContent = `${row.count.toLocaleString()} checks · ${(row.blocked || 0).toLocaleString()} blocked${row.privateCount ? ` · ${row.privateCount.toLocaleString()} private` : ''}`;
+    label.append(hostname, detail);
+    rowElement.append(label);
+
+    const bins = new Map(row.bins.map(bin => [bin.index, bin]));
+    const blocks = Array.from({ length: data.binCount }, () => []);
+    for (const block of row.blocks) {
+        const index = audPageBinIndex(block.timestamp, data.startTime, data.endTime, data.binCount);
+        if (index >= 0) {
+            blocks[index].push({ ...block, hostname: block.hostname || row.hostname });
+        }
+    }
+
+    for (let day = 0; day < AUDPAGE_DAYS_PER_WEEK; day++) {
+        const dayGrid = document.createElement('div');
+        dayGrid.className = 'timeline-day-grid';
+        for (let hour = 0; hour < AUDPAGE_HOURS_PER_DAY; hour++) {
+            const index = day * AUDPAGE_HOURS_PER_DAY + hour;
+            const bin = bins.get(index);
+            const cellBlocks = blocks[index];
+            const checks = bin?.count || 0;
+            const hasSamples = checks > 0;
+            const cellLabel = audPageActivityCellLabel(data.startTime, index, checks, cellBlocks.length);
+            const cell = document.createElement(cellBlocks.length || hasSamples ? 'button' : 'span');
+            cell.className = 'timeline-hour-cell';
+            if (cell.tagName === 'BUTTON') {
+                cell.type = 'button';
+            }
+            const heatLevel = audPageDisplayHeatLevel(bin, cellBlocks);
+            if (heatLevel >= 0) {
+                cell.classList.add(`heat-level-${heatLevel}`);
+            }
+            if (cellBlocks.length) {
+                audPageAppendCountLabel(cell, cellBlocks.length);
+                cell.classList.add('has-blocks');
+                cell.addEventListener('click', () => {
+                    audPageDismissCellPopover();
+                    audPageOpenBlockCluster(cellBlocks);
+                });
+            } else if (hasSamples) {
+                cell.addEventListener('click', event => {
+                    event.stopPropagation();
+                    audPageCloseThumbnailDrawer();
+                    audPageShowCellPopover(cell, cellLabel);
+                });
+            }
+            if (bin) {
+                cell.classList.toggle('private-checks', bin.privateCount > 0);
+            }
+            cell.title = cellLabel;
+            cell.setAttribute('aria-label', cell.title);
+            dayGrid.append(cell);
+        }
+        rowElement.append(dayGrid);
+    }
+    return rowElement;
+}
+
 function audPageRenderTimeline(data) {
-    const canvas = document.getElementById('timeline');
-    const wrapWidth = canvas.parentElement.clientWidth || 1120;
-    const width = Math.max(920, wrapWidth);
+    audPageDismissCellPopover();
+    const timeline = document.getElementById('timeline');
+    timeline.textContent = '';
     const pageCount = Math.max(1, Math.ceil(data.rows.length / AUDPAGE_SITES_PER_PAGE));
     AUDPAGE_sitePage = Math.max(0, Math.min(AUDPAGE_sitePage, pageCount - 1));
     const pageStart = AUDPAGE_sitePage * AUDPAGE_SITES_PER_PAGE;
     const visibleRows = data.rows.slice(pageStart, pageStart + AUDPAGE_SITES_PER_PAGE);
-    const left = 185;
-    const right = 18;
-    const plotWidth = width - left - right;
-    const headerHeight = 48;
-    const laneHeight = 30;
-    const rowHeight = 36;
-    const rowsTop = headerHeight + laneHeight * 2 + 8;
-    const height = rowsTop + Math.max(1, visibleRows.length) * rowHeight + 24;
-    canvas.dataset.logicalWidth = String(width);
-    canvas.dataset.logicalHeight = String(height);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    canvas.width = Math.ceil(width * AUDPAGE_TIMELINE_RENDER_SCALE);
-    canvas.height = Math.ceil(height * AUDPAGE_TIMELINE_RENDER_SCALE);
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(
-        canvas.width / width,
-        0,
-        0,
-        canvas.height / height,
-        0,
-        0
-    );
-    ctx.imageSmoothingEnabled = true;
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.font = '12px Segoe UI, sans-serif';
-    ctx.textBaseline = 'middle';
-    AUDPAGE_blockMarkers = [];
 
-    for (let day = 0; day <= 7; day++) {
-        const x = left + plotWidth * day / 7;
-        ctx.strokeStyle = day === 0 || day === 7 ? '#aab5c4' : '#dfe4ec';
-        ctx.beginPath();
-        ctx.moveTo(x, 28);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-        if (day < 7) {
-            const date = new Date(data.startTime + day * 24 * 60 * 60 * 1000);
-            ctx.fillStyle = '#4f5b75';
-            ctx.textAlign = 'center';
-            ctx.fillText(date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }), x + plotWidth / 14, 18);
-        }
+    timeline.append(audPageCreateTimelineHeading(data));
+    const overview = audPageAggregateRows(data.rows, data.binCount);
+    timeline.append(audPageCreateActivityRow(overview, data, true));
+
+    const expander = document.createElement('div');
+    expander.className = 'timeline-expander';
+    const expanderButton = document.createElement('button');
+    expanderButton.type = 'button';
+    expanderButton.setAttribute('aria-controls', 'timeline-details');
+    expander.append(expanderButton);
+    timeline.append(expander);
+
+    const details = document.createElement('div');
+    details.id = 'timeline-details';
+    details.className = 'timeline-details';
+    details.append(audPageCreateSignalRow(data));
+    for (const row of visibleRows) {
+        details.append(audPageCreateActivityRow(row, data));
     }
+    timeline.append(details);
 
-    const lanes = [
-        { label: 'Private browsing', intervals: data.privateSessions, color: 'rgba(114,87,180,0.55)' },
-        { label: 'Coverage unavailable', intervals: data.coverageGaps, color: 'rgba(180,35,24,0.38)' }
-    ];
-    lanes.forEach((lane, index) => {
-        const y = headerHeight + index * laneHeight;
-        ctx.fillStyle = '#f5f7fa';
-        ctx.fillRect(0, y, width, laneHeight - 2);
-        ctx.fillStyle = '#1f2a44';
-        ctx.textAlign = 'left';
-        ctx.fillText(lane.label, 10, y + (laneHeight - 2) / 2);
-        for (const interval of lane.intervals) {
-            const x1 = audPageTimeX(interval.start, data.startTime, data.endTime, left, plotWidth);
-            const x2 = audPageTimeX(interval.end, data.startTime, data.endTime, left, plotWidth);
-            ctx.fillStyle = lane.color;
-            ctx.fillRect(x1, y + 5, Math.max(2, x2 - x1), laneHeight - 12);
-        }
+    const updateExpandedState = () => {
+        details.hidden = !AUDPAGE_detailsExpanded;
+        expanderButton.setAttribute('aria-expanded', String(AUDPAGE_detailsExpanded));
+        expanderButton.textContent = AUDPAGE_detailsExpanded
+            ? '▾ Hide privacy, audit & site details'
+            : `▸ Show privacy, audit & ${data.rows.length.toLocaleString()} ${data.rows.length === 1 ? 'site' : 'sites'}`;
+        document.getElementById('site-pager').hidden = !AUDPAGE_detailsExpanded;
+    };
+    expanderButton.addEventListener('click', () => {
+        AUDPAGE_detailsExpanded = !AUDPAGE_detailsExpanded;
+        updateExpandedState();
     });
-
-    visibleRows.forEach((row, rowIndex) => {
-        const y = rowsTop + rowIndex * rowHeight;
-        if (rowIndex % 2 === 0) {
-            ctx.fillStyle = '#fafbfd';
-            ctx.fillRect(0, y, width, rowHeight);
-        }
-        ctx.fillStyle = '#1f2a44';
-        ctx.textAlign = 'left';
-        ctx.font = '600 12px Segoe UI, sans-serif';
-        ctx.fillText(row.hostname, 10, y + 12);
-        ctx.fillStyle = '#69778f';
-        ctx.font = '11px Segoe UI, sans-serif';
-        ctx.fillText(`${row.count.toLocaleString()} checks${row.privateCount ? ` · ${row.privateCount.toLocaleString()} private` : ''}`, 10, y + 27);
-        const binWidth = plotWidth / data.binCount;
-        for (const bin of row.bins) {
-            const x = left + bin.index * binWidth;
-            ctx.fillStyle = audPageHeatColor(bin.heat, bin.count);
-            ctx.fillRect(x + 0.5, y + 7, Math.max(1, binWidth - 1), rowHeight - 14);
-            if (bin.privateCount > 0) {
-                ctx.fillStyle = 'rgba(87,61,150,0.9)';
-                ctx.fillRect(x + 0.5, y + 7, Math.max(1, binWidth - 1), 2);
-            }
-        }
-        const blockClusters = audPageClusterBlocks(
-            row.blocks.map(block => ({ ...block, hostname: row.hostname })),
-            data.startTime,
-            data.endTime,
-            left,
-            plotWidth
-        );
-        for (const cluster of blockClusters) {
-            const markerY = y + rowHeight / 2;
-            const radius = audPageDrawBlockCluster(ctx, cluster, markerY);
-            AUDPAGE_blockMarkers.push({
-                x: cluster.x,
-                y: markerY,
-                radius,
-                blocks: cluster.blocks
-            });
-        }
-    });
-
-    for (const event of data.events) {
-        const x = audPageTimeX(event.timestamp, data.startTime, data.endTime, left, plotWidth);
-        ctx.strokeStyle = 'rgba(31, 67, 113, 0.46)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, headerHeight);
-        ctx.lineTo(x, height - 12);
-        ctx.stroke();
-    }
+    updateExpandedState();
 
     const pageEnd = Math.min(data.rows.length, pageStart + visibleRows.length);
     document.getElementById('site-page').textContent = data.rows.length
@@ -518,6 +691,11 @@ function audPageClusterTimeSummary(blocks) {
     const firstText = first.toLocaleString();
     const lastText = last.toLocaleString();
     return `${blocks.length.toLocaleString()} blocked images between ${firstText} and ${lastText}.`;
+}
+
+function audPageCloseThumbnailDrawer() {
+    AUDPAGE_thumbnailRequestId++;
+    document.getElementById('thumbnail-drawer').hidden = true;
 }
 
 function audPageRenderSelectedBlock() {
@@ -629,34 +807,6 @@ async function audPageFetchThumbnail(password) {
     }
 }
 
-function audPageMarkerFromPointer(event) {
-    const canvas = document.getElementById('timeline');
-    const rect = canvas.getBoundingClientRect();
-    const logicalWidth = Number(canvas.dataset.logicalWidth) || rect.width;
-    const logicalHeight = Number(canvas.dataset.logicalHeight) || rect.height;
-    const x = (event.clientX - rect.left) * logicalWidth / rect.width;
-    const y = (event.clientY - rect.top) * logicalHeight / rect.height;
-    return AUDPAGE_blockMarkers.find(candidate =>
-        Math.hypot(candidate.x - x, candidate.y - y) <= candidate.radius
-    );
-}
-
-function audPageOnTimelineClick(event) {
-    const marker = audPageMarkerFromPointer(event);
-    if (marker) {
-        audPageOpenBlockCluster(marker.blocks);
-    }
-}
-
-function audPageOnTimelinePointerMove(event) {
-    const canvas = document.getElementById('timeline');
-    const marker = audPageMarkerFromPointer(event);
-    canvas.style.cursor = marker ? 'pointer' : 'default';
-    canvas.title = marker
-        ? `${marker.blocks.length} blocked ${marker.blocks.length === 1 ? 'image' : 'images'} — click to inspect`
-        : '';
-}
-
 async function audPageInitialize() {
     document.getElementById('week-start').value = audPageDateInputValue(audPageStartOfWeek());
     await audPageLoadState();
@@ -678,17 +828,12 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
     });
     document.getElementById('previous-sites').addEventListener('click', () => audPageShiftSites(-1));
     document.getElementById('next-sites').addEventListener('click', () => audPageShiftSites(1));
-    document.getElementById('timeline').addEventListener('click', audPageOnTimelineClick);
-    document.getElementById('timeline').addEventListener('mousemove', audPageOnTimelinePointerMove);
     document.getElementById('previous-thumbnail').addEventListener('click', () => audPageShiftSelectedBlock(-1));
     document.getElementById('next-thumbnail').addEventListener('click', () => audPageShiftSelectedBlock(1));
     document.getElementById('thumbnail-blur').addEventListener('input', event => {
         audPageApplyThumbnailBlur(event.target.value);
     });
-    document.getElementById('close-drawer').addEventListener('click', () => {
-        AUDPAGE_thumbnailRequestId++;
-        document.getElementById('thumbnail-drawer').hidden = true;
-    });
+    document.getElementById('close-drawer').addEventListener('click', audPageCloseThumbnailDrawer);
     document.getElementById('unlock-thumbnail').addEventListener('click', () => {
         audPageFetchThumbnail(document.getElementById('thumbnail-password').value);
     });
@@ -697,12 +842,13 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
             audPageFetchThumbnail(event.target.value);
         }
     });
-    window.addEventListener('resize', () => {
-        if (AUDPAGE_window) {
-            audPageRenderTimeline(AUDPAGE_window);
+    document.getElementById('timeline').parentElement.addEventListener('scroll', audPageDismissCellPopover);
+    document.addEventListener('click', event => {
+        if (!(event.target instanceof Element) || !event.target.closest('.timeline-hour-cell')) {
+            audPageDismissCellPopover();
         }
     });
-
+    window.addEventListener('resize', audPageDismissCellPopover);
     audPageInitialize().catch(error => {
         audPageSetStatus('mode-status', error.message || String(error), 'error');
     });
@@ -710,9 +856,17 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        audPageAggregateRows,
+        audPageBinIndex,
+        audPageBlockedHeatLevel,
         audPageClampBlur,
-        audPageClusterBlocks,
+        audPageCountLabel,
         audPageDefaultBlurForRating,
-        audPageRatingForBlock
+        audPageDisplayHeatLevel,
+        audPageHeatLevel,
+        audPageIntervalOverlapsBin,
+        audPageRatingForBlock,
+        audPageRelativeLogit,
+        audPageWorstRating
     };
 }
