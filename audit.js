@@ -2,8 +2,8 @@
  * Local accountability and audit history.
  *
  * Bulk score history is kept in compact binary IndexedDB chunks. Only the
- * existing top-level filtering site, timestamp, score, threshold, outcome and
- * private-window bit are retained. Blocked thumbnails are fixed 128x128 RGB332
+ * existing top-level filtering site, timestamp, score, threshold, S/Q/R/X
+ * rating, outcome and private-window bit are retained. Blocked thumbnails are fixed 128x128 RGB332
  * buffers encrypted with a per-install device key before they are written.
  */
 
@@ -257,6 +257,19 @@ function auditQuantizeUnit(value) {
     return Math.round(auditClampUnit(value) * 65535);
 }
 
+function auditNormalizeRating(value) {
+    const normalized = String(value || '').toLowerCase();
+    return ['safe', 'q', 'r', 'x'].includes(normalized) ? normalized : null;
+}
+
+function auditRatingToCode(value) {
+    return { safe: 1, q: 2, r: 3, x: 4 }[auditNormalizeRating(value)] || 0;
+}
+
+function auditRatingFromCode(value) {
+    return [null, 'safe', 'q', 'r', 'x'][value] || null;
+}
+
 function auditPackScoreRecords(records, startSequence) {
     const domains = [];
     const domainIndexes = new Map();
@@ -284,7 +297,7 @@ function auditPackScoreRecords(records, startSequence) {
             flags |= 2;
         }
         view.setUint8(offset + 10, flags);
-        view.setUint8(offset + 11, 0);
+        view.setUint8(offset + 11, auditRatingToCode(record.rating));
         startTime = Math.min(startTime, record.timestamp);
         endTime = Math.max(endTime, record.timestamp);
     }
@@ -312,7 +325,8 @@ function auditDecodeScoreChunk(chunk, callback) {
             score: view.getUint16(offset + 6, true) / 65535,
             threshold: view.getUint16(offset + 8, true) / 65535,
             result: (flags & 1) ? 'block' : 'pass',
-            private: (flags & 2) !== 0
+            private: (flags & 2) !== 0,
+            rating: auditRatingFromCode(view.getUint8(offset + 11))
         });
     }
 }
@@ -327,7 +341,7 @@ function auditScheduleFlush() {
     }, 2000);
 }
 
-function auditRecordScan(context, result, score, thumbnail) {
+function auditRecordScan(context, result, score, thumbnail, rating) {
     if (AUDIT_settings.mode === AUDIT_MODES.OFF
         || !context
         || typeof context.hostname !== 'string'
@@ -343,6 +357,7 @@ function auditRecordScan(context, result, score, thumbnail) {
         threshold: Number.isFinite(context.threshold) ? context.threshold : 0.5,
         result,
         private: context.isPrivate === true,
+        rating: auditNormalizeRating(rating),
         thumbnail: result === 'block' && thumbnail instanceof ArrayBuffer ? thumbnail : null
     });
     if (AUDIT_pendingScores.length > AUDIT_MAX_PENDING_SCORES) {
@@ -407,6 +422,7 @@ async function auditWriteScoreBatch(records) {
             hostname: records[i].hostname,
             score: records[i].score,
             private: records[i].private,
+            rating: records[i].rating,
             width: 128,
             height: 128,
             encoding: 'rgb332',
@@ -900,7 +916,8 @@ async function auditReadThumbnailsForWindow(startTime, endTime) {
                 timestamp: value.timestamp,
                 hostname: value.hostname,
                 score: value.score,
-                private: value.private === true
+                private: value.private === true,
+                rating: auditNormalizeRating(value.rating)
             });
             cursor.continue();
         }
@@ -920,7 +937,7 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
     }
 
     const thumbnails = await auditReadThumbnailsForWindow(safeStart, safeEnd);
-    const thumbnailIds = new Map(thumbnails.map(item => [item.sequence, item.id]));
+    const thumbnailsBySequence = new Map(thumbnails.map(item => [item.sequence, item]));
     const rows = new Map();
     const db = await auditOpenDatabase();
     const tx = db.transaction('scoreChunks', 'readonly');
@@ -965,12 +982,14 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
                     row.bins[bin].privateCount++;
                 }
                 if (scoreEvent.result === 'block') {
+                    const thumbnail = thumbnailsBySequence.get(scoreEvent.sequence);
                     row.blocked++;
                     row.blocks.push({
                         timestamp: scoreEvent.timestamp,
                         score: scoreEvent.score,
                         private: scoreEvent.private,
-                        thumbnailId: thumbnailIds.get(scoreEvent.sequence) || null
+                        rating: scoreEvent.rating || thumbnail?.rating || null,
+                        thumbnailId: thumbnail?.id || null
                     });
                 }
             });
@@ -1044,7 +1063,8 @@ async function auditGetThumbnail(id, password) {
     await auditAppendEvent('blocked-image-revealed', {
         hostname: record.hostname,
         private: record.private === true,
-        score: Math.round(record.score * 10000) / 10000
+        score: Math.round(record.score * 10000) / 10000,
+        rating: auditNormalizeRating(record.rating)
     });
     return {
         ok: true,
@@ -1055,7 +1075,8 @@ async function auditGetThumbnail(id, password) {
         hostname: record.hostname,
         timestamp: record.timestamp,
         score: record.score,
-        private: record.private === true
+        private: record.private === true,
+        rating: auditNormalizeRating(record.rating)
     };
 }
 

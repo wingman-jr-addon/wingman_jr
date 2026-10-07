@@ -347,6 +347,20 @@ function procGetPrimaryScore(sqrxrScore) {
     return sqrxrScore[0][0];
 }
 
+function procGetAuditRating(sqrxrScore) {
+    const ratings = sqrxrScore && sqrxrScore[1];
+    if (!ratings || ratings.length < 4) {
+        return null;
+    }
+    let bestIndex = 0;
+    for (let index = 1; index < 4; index++) {
+        if (ratings[index] > ratings[bestIndex]) {
+            bestIndex = index;
+        }
+    }
+    return ['safe', 'q', 'r', 'x'][bestIndex];
+}
+
 async function procCommonCreateSvg(img, sqrxrScore, dataURL, replacementContext = null)
 {
     let threshold = procGetPrimaryScore(sqrxrScore);
@@ -405,7 +419,8 @@ async function procPerformFiltering(entry) {
         requestId: entry.requestId,
         imageBytes: null,
         result: null,
-        auditThumbnail: null
+        auditThumbnail: null,
+        auditRating: null
     };
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
@@ -424,6 +439,7 @@ async function procPerformFiltering(entry) {
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
                 result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
+                result.auditRating = procGetAuditRating(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     if (typeof SMR_observeSafeImage === 'function') {
@@ -538,6 +554,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     WJR_DEBUG && console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await procPredict(img);
                     let adaptiveScore = procGetPrimaryScore(sqrxrScore);
+                    let auditRating = procGetAuditRating(sqrxrScore);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
@@ -553,7 +570,8 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             requestId: b64Filter.requestId+'_'+imageId,
                             adaptiveContext: b64Filter.adaptiveContext,
                             auditContext: b64Filter.auditContext,
-                            adaptiveScore: adaptiveScore
+                            adaptiveScore: adaptiveScore,
+                            auditRating: auditRating
                         });
                         WJR_DEBUG && console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
@@ -564,6 +582,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             adaptiveContext: b64Filter.adaptiveContext,
                             auditContext: b64Filter.auditContext,
                             adaptiveScore: adaptiveScore,
+                            auditRating: auditRating,
                             auditThumbnail: PROC_isAuditEnabled
                                 ? procCreateAuditThumbnail(img)
                                 : null
@@ -675,6 +694,7 @@ async function procCheckProcess() {
                 adaptiveContext: toProcess.adaptiveContext,
                 auditContext: toProcess.auditContext,
                 adaptiveScore: result.adaptiveScore,
+                auditRating: result.auditRating,
                 auditThumbnail: auditThumbnail
             });
         } catch(e) {
@@ -1011,6 +1031,7 @@ async function procOnPortMessage(m) {
                 requestId: gifScanResult.requestId,
                 result: gifScanResult.result,
                 adaptiveScore: gifScanResult.adaptiveScore,
+                auditRating: gifScanResult.auditRating,
                 auditThumbnail: gifScanResult.auditThumbnail
             };
             PROC_port.postMessage(gifResponse);

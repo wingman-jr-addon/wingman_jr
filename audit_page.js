@@ -7,7 +7,6 @@ let AUDPAGE_selectedBlockIndex = 0;
 let AUDPAGE_thumbnailRequestId = 0;
 let AUDPAGE_thumbnailBlur = 5;
 let AUDPAGE_sitePage = 0;
-const AUDPAGE_BLUR_STORAGE_KEY = 'audit_review_blur';
 const AUDPAGE_TIMELINE_RENDER_SCALE = 2;
 const AUDPAGE_SITES_PER_PAGE = 50;
 const AUDPAGE_BLOCK_CLUSTER_DISTANCE = 24;
@@ -57,13 +56,16 @@ function audPageApplyThumbnailBlur(value) {
     image.style.filter = `blur(${AUDPAGE_thumbnailBlur}px)`;
 }
 
-async function audPageLoadBlurPreference() {
-    const stored = await browser.storage.local.get(AUDPAGE_BLUR_STORAGE_KEY);
-    audPageApplyThumbnailBlur(stored[AUDPAGE_BLUR_STORAGE_KEY]);
+function audPageRatingForBlock(block) {
+    const storedRating = String(block?.rating || '').toLowerCase();
+    if (['safe', 'q', 'r', 'x'].includes(storedRating)) {
+        return storedRating;
+    }
+    return null;
 }
 
-async function audPageSaveBlurPreference() {
-    await browser.storage.local.set({ [AUDPAGE_BLUR_STORAGE_KEY]: AUDPAGE_thumbnailBlur });
+function audPageDefaultBlurForRating(rating) {
+    return { safe: 0, q: 4, r: 6, x: 10 }[rating] ?? 5;
 }
 
 function audPageSelectedMode() {
@@ -525,11 +527,14 @@ function audPageRenderSelectedBlock() {
         return;
     }
     const block = AUDPAGE_selectedBlock;
+    const rating = audPageRatingForBlock(block);
+    audPageApplyThumbnailBlur(audPageDefaultBlurForRating(rating));
     document.getElementById('thumbnail-domain').textContent = block.hostname;
     document.getElementById('thumbnail-position').textContent = `${AUDPAGE_selectedBlockIndex + 1} of ${AUDPAGE_selectedBlocks.length}`;
     document.getElementById('previous-thumbnail').disabled = AUDPAGE_selectedBlockIndex === 0;
     document.getElementById('next-thumbnail').disabled = AUDPAGE_selectedBlockIndex >= AUDPAGE_selectedBlocks.length - 1;
-    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · score ${(block.score * 100).toFixed(1)}%${block.private ? ' · private window' : ''}`;
+    const ratingLabel = rating === 'safe' ? 'Safe' : (rating ? rating.toUpperCase() : 'Unknown rating');
+    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · ${ratingLabel} · score ${(block.score * 100).toFixed(1)}%${block.private ? ' · private window' : ''}`;
     const image = document.getElementById('thumbnail');
     image.hidden = true;
     image.removeAttribute('src');
@@ -654,7 +659,6 @@ function audPageOnTimelinePointerMove(event) {
 
 async function audPageInitialize() {
     document.getElementById('week-start').value = audPageDateInputValue(audPageStartOfWeek());
-    await audPageLoadBlurPreference();
     await audPageLoadState();
     await audPageLoadTimeline();
 }
@@ -681,11 +685,6 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
     document.getElementById('thumbnail-blur').addEventListener('input', event => {
         audPageApplyThumbnailBlur(event.target.value);
     });
-    document.getElementById('thumbnail-blur').addEventListener('change', () => {
-        audPageSaveBlurPreference().catch(error => {
-            console.error('Unable to save audit preview blur', error);
-        });
-    });
     document.getElementById('close-drawer').addEventListener('click', () => {
         AUDPAGE_thumbnailRequestId++;
         document.getElementById('thumbnail-drawer').hidden = true;
@@ -710,5 +709,10 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { audPageClampBlur, audPageClusterBlocks };
+    module.exports = {
+        audPageClampBlur,
+        audPageClusterBlocks,
+        audPageDefaultBlurForRating,
+        audPageRatingForBlock
+    };
 }

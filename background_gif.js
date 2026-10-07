@@ -325,7 +325,9 @@ async function gifListener(details, requestPlan) {
     let totalBlockCount = 0;
     let totalErrorCount = 0;
     let auditBestScore = null;
+    let auditBestRating = null;
     let auditBlockedThumbnail = null;
+    let auditBlockedRating = null;
     let auditFinalized = false;
 
     function finalizeAudit(result) {
@@ -338,7 +340,8 @@ async function gifListener(details, requestPlan) {
                 requestPlan.auditContext,
                 result,
                 auditBestScore,
-                result === 'block' ? auditBlockedThumbnail : null
+                result === 'block' ? auditBlockedThumbnail : null,
+                result === 'block' ? auditBlockedRating : auditBestRating
             );
         }
     }
@@ -398,9 +401,13 @@ async function gifListener(details, requestPlan) {
                         if (Number.isFinite(gifScan.adaptiveScore)
                             && (!Number.isFinite(auditBestScore) || gifScan.adaptiveScore > auditBestScore)) {
                             auditBestScore = gifScan.adaptiveScore;
+                            auditBestRating = gifScan.auditRating;
                         }
                         if(gifScan.result == 'block') {
                             thisBlockCount++;
+                            if (!auditBlockedRating) {
+                                auditBlockedRating = gifScan.auditRating;
+                            }
                             if (!auditBlockedThumbnail && gifScan.auditThumbnail instanceof ArrayBuffer) {
                                 auditBlockedThumbnail = gifScan.auditThumbnail;
                             }

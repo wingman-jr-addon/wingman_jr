@@ -231,7 +231,8 @@ function bkOnProcessorMessage(m) {
                     m.auditContext,
                     m.result,
                     m.adaptiveScore,
-                    m.auditThumbnail
+                    m.auditThumbnail,
+                    m.auditRating
                 );
             }
         }

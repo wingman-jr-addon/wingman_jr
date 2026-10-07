@@ -44,7 +44,8 @@ const records = [
         score: 0.25,
         threshold: 0.5,
         result: 'pass',
-        private: false
+        private: false,
+        rating: 'safe'
     },
     {
         timestamp: 1_700_000_001_000,
@@ -52,7 +53,8 @@ const records = [
         score: 0.9,
         threshold: 0.7,
         result: 'block',
-        private: true
+        private: true,
+        rating: 'x'
     }
 ];
 const chunk = api.pack(records, 42);
@@ -66,9 +68,11 @@ api.decode(chunk, value => decoded.push(value));
 assert.strictEqual(decoded.length, 2);
 assert.strictEqual(decoded[0].hostname, 'example.com');
 assert.strictEqual(decoded[0].result, 'pass');
+assert.strictEqual(decoded[0].rating, 'safe');
 assert.strictEqual(decoded[1].hostname, 'private.example');
 assert.strictEqual(decoded[1].result, 'block');
 assert.strictEqual(decoded[1].private, true);
+assert.strictEqual(decoded[1].rating, 'x');
 assert.ok(Math.abs(decoded[1].score - 0.9) < 0.0001);
 assert.ok(api.relativeLogit(0.8, 0.5) > 0);
 assert.ok(api.relativeLogit(0.2, 0.5) < 0);

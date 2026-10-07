@@ -1,11 +1,39 @@
 const assert = require('assert');
-const { audPageClampBlur, audPageClusterBlocks } = require('../audit_page.js');
+const fs = require('fs');
+const vm = require('vm');
+const {
+    audPageClampBlur,
+    audPageClusterBlocks,
+    audPageDefaultBlurForRating,
+    audPageRatingForBlock
+} = require('../audit_page.js');
 
 assert.strictEqual(audPageClampBlur(undefined), 5);
 assert.strictEqual(audPageClampBlur(-1), 0);
 assert.strictEqual(audPageClampBlur(10.4), 10);
 assert.strictEqual(audPageClampBlur(4.74), 4.5);
 assert.strictEqual(audPageClampBlur(4.76), 5);
+assert.strictEqual(audPageDefaultBlurForRating('safe'), 0);
+assert.strictEqual(audPageDefaultBlurForRating('q'), 4);
+assert.strictEqual(audPageDefaultBlurForRating('r'), 6);
+assert.strictEqual(audPageDefaultBlurForRating('x'), 10);
+assert.strictEqual(audPageDefaultBlurForRating(null), 5);
+assert.strictEqual(audPageRatingForBlock({ rating: 'r', score: 0.1 }), 'r');
+assert.strictEqual(audPageRatingForBlock({ score: 0.2 }), null);
+assert.strictEqual(audPageRatingForBlock({ score: 0.9 }), null);
+
+const processorSource = fs.readFileSync('processor.js', 'utf8');
+const ratingStart = processorSource.indexOf('function procGetAuditRating');
+const ratingEnd = processorSource.indexOf('async function procCommonCreateSvg', ratingStart);
+const ratingContext = {};
+vm.createContext(ratingContext);
+vm.runInContext(processorSource.slice(ratingStart, ratingEnd) + `
+    this.getAuditRating = procGetAuditRating;
+`, ratingContext);
+assert.strictEqual(ratingContext.getAuditRating([[0.2], [0.7, 0.1, 0.1, 0.1]]), 'safe');
+assert.strictEqual(ratingContext.getAuditRating([[0.8], [0.1, 0.6, 0.2, 0.1]]), 'q');
+assert.strictEqual(ratingContext.getAuditRating([[0.8], [0.1, 0.2, 0.6, 0.1]]), 'r');
+assert.strictEqual(ratingContext.getAuditRating([[0.8], [0.1, 0.2, 0.1, 0.6]]), 'x');
 
 const start = 0;
 const end = 1000;
