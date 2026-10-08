@@ -49,6 +49,7 @@ vm.runInContext(statusSource + `
     this.statusMasterIconTestApi = {
         regenerate: statusRegenerateIcon,
         setMasterState: statusSetMasterFilteringState,
+        setAuditMode: statusSetAuditMode,
         startImage: statusStartImageCheck,
         completeImage: statusCompleteImageCheck
     };
@@ -74,5 +75,12 @@ assert.strictEqual(iconUpdateCount, 3);
 
 api.setMasterState('on', null);
 assert.strictEqual(iconUpdateCount, 4);
+
+api.setAuditMode('accountability');
+assert.strictEqual(iconUpdateCount, 5);
+assert.ok(drawingOperations.some(operation => operation[0] === 'fillText' && operation[1] === 'A'));
+
+api.setAuditMode('off');
+assert.strictEqual(iconUpdateCount, 6);
 
 console.log('status master icon tests passed');

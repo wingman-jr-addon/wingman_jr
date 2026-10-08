@@ -204,6 +204,16 @@
     #adaptive_memory_status[data-state="saved"] {
       color: #18794e;
     }
+    .audit-option-card {
+      padding: 12px;
+      border: 1px solid rgba(47, 128, 237, 0.22);
+      border-radius: 8px;
+      background: rgba(47, 128, 237, 0.045);
+    }
+    .audit-option-card .privacy-warning {
+      margin: 7px 0;
+      color: #7a4d08;
+    }
   </style>
 </head>
 
@@ -274,6 +284,13 @@
         <label class="radio-option inline" for="is_silent_mode_enabled_no"><input type="radio" name="is_silent_mode_enabled" id="is_silent_mode_enabled_no" value="is_silent_mode_enabled_no"><span>Disabled</span></label>
       </div>
       <a href="silent_collections.html" target="_blank">Manage silent image collections &gt;&gt;</a>
+    </section>
+
+    <section class="option-group audit-option-card">
+      <h4>Audit and accountability</h4>
+      <p class="option-description">Optionally keep a local, reduced history of filtering scores, mode changes, private browsing coverage, and tiny thumbnails of blocked images. The default is Off.</p>
+      <p class="privacy-warning"><b>Privacy:</b> Audit and Accountability modes intentionally store page-site domains and browsing-derived information on this device, including activity from private windows when Firefox allows Wingman Jr. to run there.</p>
+      <a href="audit.html" target="_blank">Manage audit history &gt;&gt;</a>
     </section>
 
     <section class="option-group url-lists" aria-labelledby="url_lists_heading">

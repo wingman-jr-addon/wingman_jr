@@ -271,6 +271,43 @@ PROC_logCanvas.height = PROC_LOG_IMG_SIZE;
 let PROC_logCtx = PROC_logCanvas.getContext('2d', { alpha: false});
 PROC_logCanvas.imageSmoothingEnabled = true;
 
+const PROC_AUDIT_THUMBNAIL_SIZE = 128;
+let PROC_auditCanvas = document.createElement('canvas');
+PROC_auditCanvas.width = PROC_AUDIT_THUMBNAIL_SIZE;
+PROC_auditCanvas.height = PROC_AUDIT_THUMBNAIL_SIZE;
+let PROC_auditCtx = PROC_auditCanvas.getContext('2d', { alpha: false });
+PROC_auditCtx.imageSmoothingEnabled = true;
+let PROC_isAuditEnabled = false;
+
+function procCreateAuditThumbnail(img) {
+    const sourceWidth = img.naturalWidth || img.videoWidth || img.width;
+    const sourceHeight = img.naturalHeight || img.videoHeight || img.height;
+    const scale = Math.min(
+        PROC_AUDIT_THUMBNAIL_SIZE / sourceWidth,
+        PROC_AUDIT_THUMBNAIL_SIZE / sourceHeight
+    );
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const x = Math.floor((PROC_AUDIT_THUMBNAIL_SIZE - width) / 2);
+    const y = Math.floor((PROC_AUDIT_THUMBNAIL_SIZE - height) / 2);
+    PROC_auditCtx.fillStyle = 'rgb(32, 36, 44)';
+    PROC_auditCtx.fillRect(0, 0, PROC_AUDIT_THUMBNAIL_SIZE, PROC_AUDIT_THUMBNAIL_SIZE);
+    PROC_auditCtx.drawImage(img, 0, 0, sourceWidth, sourceHeight, x, y, width, height);
+    const rgba = PROC_auditCtx.getImageData(
+        0,
+        0,
+        PROC_AUDIT_THUMBNAIL_SIZE,
+        PROC_AUDIT_THUMBNAIL_SIZE
+    ).data;
+    const packed = new Uint8Array(PROC_AUDIT_THUMBNAIL_SIZE * PROC_AUDIT_THUMBNAIL_SIZE);
+    for (let source = 0, target = 0; target < packed.length; source += 4, target++) {
+        packed[target] = (rgba[source] & 0xE0)
+            | ((rgba[source + 1] >> 3) & 0x1C)
+            | ((rgba[source + 2] >> 6) & 0x03);
+    }
+    return packed.buffer;
+}
+
 async function procCommonLogImg(img, message)
 {
     if(!WJR_DEBUG) {
@@ -308,6 +345,20 @@ let PROC_iconDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCA
 let PROC_isSilentModeEnabled = true;
 function procGetPrimaryScore(sqrxrScore) {
     return sqrxrScore[0][0];
+}
+
+function procGetAuditRating(sqrxrScore) {
+    const ratings = sqrxrScore && sqrxrScore[1];
+    if (!ratings || ratings.length < 4) {
+        return null;
+    }
+    let bestIndex = 0;
+    for (let index = 1; index < 4; index++) {
+        if (ratings[index] > ratings[bestIndex]) {
+            bestIndex = index;
+        }
+    }
+    return ['safe', 'q', 'r', 'x'][bestIndex];
 }
 
 async function procCommonCreateSvg(img, sqrxrScore, dataURL, replacementContext = null)
@@ -367,7 +418,9 @@ async function procPerformFiltering(entry) {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
-        result: null
+        result: null,
+        auditThumbnail: null,
+        auditRating: null
     };
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
@@ -386,6 +439,7 @@ async function procPerformFiltering(entry) {
                 let imgLoadTime = performance.now();
                 let sqrxrScore = await procPredict(img);
                 result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
+                result.auditRating = procGetAuditRating(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     if (typeof SMR_observeSafeImage === 'function') {
@@ -401,6 +455,9 @@ async function procPerformFiltering(entry) {
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
+                    if (PROC_isAuditEnabled) {
+                        result.auditThumbnail = procCreateAuditThumbnail(img);
+                    }
                     result.imageBytes = encodedTypedBuffer.buffer;
                 }
                 const endTime = performance.now();
@@ -497,6 +554,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                     WJR_DEBUG && console.debug('ML: base64 predict '+imageId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                     let sqrxrScore = await procPredict(img);
                     let adaptiveScore = procGetPrimaryScore(sqrxrScore);
+                    let auditRating = procGetAuditRating(sqrxrScore);
                     WJR_DEBUG && console.debug('ML: base64 score: '+procScoreToStr(sqrxrScore));
                     let replacement = null; //safe
                     if(procIsSafe(sqrxrScore, b64Filter.threshold)) {
@@ -511,7 +569,9 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId,
                             adaptiveContext: b64Filter.adaptiveContext,
-                            adaptiveScore: adaptiveScore
+                            auditContext: b64Filter.auditContext,
+                            adaptiveScore: adaptiveScore,
+                            auditRating: auditRating
                         });
                         WJR_DEBUG && console.log('ML: base64 filter Passed: '+procScoreToStr(sqrxrScore)+' '+b64Filter.requestId);
                     } else {
@@ -520,7 +580,12 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId,
                             adaptiveContext: b64Filter.adaptiveContext,
-                            adaptiveScore: adaptiveScore
+                            auditContext: b64Filter.auditContext,
+                            adaptiveScore: adaptiveScore,
+                            auditRating: auditRating,
+                            auditThumbnail: PROC_isAuditEnabled
+                                ? procCreateAuditThumbnail(img)
+                                : null
                         });
                         const reuseContext = typeof SMR_withSourceSuffix === 'function'
                             ? SMR_withSourceSuffix(b64Filter.reuseContext, imageId)
@@ -619,13 +684,18 @@ async function procCheckProcess() {
             PROC_inFlight = 0;
         }
         try {
+            const auditThumbnail = result.auditThumbnail;
+            delete result.auditThumbnail;
             PROC_port.postMessage(result);
             PROC_port.postMessage({
                 type:'stat',
                 result: result.result,
                 requestId: toProcess.requestId,
                 adaptiveContext: toProcess.adaptiveContext,
-                adaptiveScore: result.adaptiveScore
+                auditContext: toProcess.auditContext,
+                adaptiveScore: result.adaptiveScore,
+                auditRating: result.auditRating,
+                auditThumbnail: auditThumbnail
             });
         } catch(e) {
             console.error('ERROR: Processor failed to communicate to background: '+e);
@@ -907,6 +977,7 @@ async function procOnPortMessage(m) {
         case 'settings' : {
             WJR_DEBUG && console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
             PROC_isSilentModeEnabled = m.isSilentModeEnabled;
+            PROC_isAuditEnabled = m.auditEnabled === true;
         }
         break;
         case 'start': {
@@ -916,6 +987,7 @@ async function procOnPortMessage(m) {
                 mimeType: m.mimeType,
                 threshold: m.threshold,
                 adaptiveContext: m.adaptiveContext || null,
+                auditContext: m.auditContext || null,
                 reuseContext: m.reuseContext || null,
                 startTime: performance.now(),
                 buffers: []
@@ -957,7 +1029,10 @@ async function procOnPortMessage(m) {
             let gifResponse = {
                 type: 'gif_scan',
                 requestId: gifScanResult.requestId,
-                result: gifScanResult.result
+                result: gifScanResult.result,
+                adaptiveScore: gifScanResult.adaptiveScore,
+                auditRating: gifScanResult.auditRating,
+                auditThumbnail: gifScanResult.auditThumbnail
             };
             PROC_port.postMessage(gifResponse);
         }
@@ -967,6 +1042,7 @@ async function procOnPortMessage(m) {
                 requestId: m.requestId,
                 threshold: m.threshold,
                 adaptiveContext: m.adaptiveContext || null,
+                auditContext: m.auditContext || null,
                 reuseContext: m.reuseContext || null,
                 startTime: performance.now(),
                 fullStr: ''

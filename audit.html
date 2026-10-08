@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wingman Jr. Audit History</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --ink: #1f2a44;
+      --muted: #5d6f8c;
+      --blue: #2f80ed;
+      --surface: #fff;
+      --page: #f6f7fb;
+      --border: rgba(31, 42, 68, 0.13);
+      --warning-bg: #fff4dd;
+      --warning-ink: #704810;
+      --danger: #b42318;
+      --success: #18794e;
+      --timeline-empty: #edf0f4;
+      --timeline-heat-0: #a9c9e8;
+      --timeline-heat-1: #6aa9dc;
+      --timeline-heat-2: #efc858;
+      --timeline-heat-3: #e88942;
+      --timeline-heat-4: #c83d35;
+      --timeline-block-frame: #334a68;
+      --timeline-cell-size: 16px;
+      --timeline-day-width: 106px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 22px;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background: var(--page);
+      line-height: 1.45;
+    }
+    main { max-width: 1180px; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 1.8rem; }
+    h2 { margin: 0 0 10px; font-size: 1.12rem; }
+    p { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    .card {
+      margin: 14px 0;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .spaced { justify-content: space-between; }
+    .mode-options { display: flex; flex-wrap: wrap; gap: 8px; }
+    .mode-options label {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .mode-options label.selected {
+      border-color: var(--blue);
+      background: rgba(47, 128, 237, 0.09);
+    }
+    .warning {
+      margin-top: 12px;
+      padding: 10px 12px;
+      color: var(--warning-ink);
+      background: var(--warning-bg);
+      border-left: 4px solid #e3a321;
+      border-radius: 6px;
+    }
+    .status { margin-top: 10px; min-height: 1.4em; }
+    .status[data-state="error"] { color: var(--danger); }
+    .status[data-state="saved"] { color: var(--success); }
+    button, input {
+      font: inherit;
+    }
+    button {
+      padding: 7px 12px;
+      border: 1px solid rgba(31, 42, 68, 0.22);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+    button.danger { color: var(--danger); border-color: rgba(180, 35, 24, 0.35); }
+    input[type="password"], input[type="date"] {
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--ink);
+    }
+    #password-panel, #private-ack { margin-top: 12px; }
+    .coverage {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      background: rgba(24, 121, 78, 0.1);
+      color: var(--success);
+    }
+    .coverage[data-covered="false"] {
+      color: var(--danger);
+      background: rgba(180, 35, 24, 0.09);
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .summary {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(47, 128, 237, 0.035);
+    }
+    .summary strong { display: block; font-size: 1.25rem; }
+    .timeline-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    #timeline {
+      width: max-content;
+      min-width: 100%;
+      padding: 12px;
+    }
+    .timeline-heading-row,
+    .timeline-site-row,
+    .timeline-signal-row {
+      display: grid;
+      grid-template-columns: 150px repeat(7, var(--timeline-day-width));
+      gap: 8px;
+      align-items: center;
+    }
+    .timeline-heading-row { margin-bottom: 7px; }
+    .timeline-day-heading {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: center;
+    }
+    .timeline-site-row,
+    .timeline-signal-row {
+      padding: 6px 0;
+      border-top: 1px solid var(--border);
+    }
+    .timeline-site-row:nth-child(even) { background: rgba(47, 128, 237, 0.025); }
+    .timeline-overview-row {
+      padding-top: 8px;
+      padding-bottom: 8px;
+      border-top: 0;
+      background: rgba(47, 128, 237, 0.04);
+    }
+    .timeline-site-label { min-width: 0; padding-left: 2px; }
+    .timeline-site-label strong,
+    .timeline-site-label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline-site-label strong { font-size: 0.82rem; }
+    .timeline-site-label small { margin-top: 2px; color: var(--muted); font-size: 0.72rem; }
+    .timeline-day-grid {
+      display: grid;
+      grid-template-columns: repeat(6, var(--timeline-cell-size));
+      grid-template-rows: repeat(4, var(--timeline-cell-size));
+      gap: 2px;
+    }
+    .timeline-hour-cell {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: var(--timeline-cell-size);
+      height: var(--timeline-cell-size);
+      padding: 0;
+      border: 0;
+      border-radius: 2px;
+      background: var(--timeline-empty);
+      color: #1f2a44;
+      font-size: 0.55rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    button.timeline-hour-cell { cursor: pointer; }
+    button.timeline-hour-cell:hover,
+    button.timeline-hour-cell:focus-visible { box-shadow: 0 0 0 2px var(--blue); transform: scale(1.08); z-index: 1; }
+    .timeline-hour-cell.heat-level-0 { background: var(--timeline-heat-0); }
+    .timeline-hour-cell.heat-level-1 { background: var(--timeline-heat-1); }
+    .timeline-hour-cell.heat-level-2 { background: var(--timeline-heat-2); }
+    .timeline-hour-cell.heat-level-3 { background: var(--timeline-heat-3); }
+    .timeline-hour-cell.heat-level-4 { background: var(--timeline-heat-4); color: #fff; }
+    .timeline-hour-cell.has-blocks { outline: 2px solid var(--timeline-block-frame); outline-offset: -2px; }
+    .timeline-count-label { display: inline-flex; align-items: baseline; letter-spacing: -0.35px; line-height: 1; }
+    .timeline-count-plus { position: relative; top: -1px; margin-left: -0.5px; font-size: 0.62em; }
+    .timeline-cell-popover {
+      position: fixed;
+      z-index: 10;
+      width: max-content;
+      max-width: min(290px, calc(100vw - 20px));
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #1f2a44;
+      color: #fff;
+      box-shadow: 0 5px 16px rgba(31, 42, 68, 0.24);
+      font-size: 0.74rem;
+      font-weight: 400;
+      line-height: 1.3;
+      pointer-events: none;
+      white-space: normal;
+    }
+    .timeline-hour-cell.private-checks::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: #7257b4;
+    }
+    .timeline-signal-cell { font-weight: 600; }
+    .timeline-signal-cell.private-session { box-shadow: inset 0 3px #7257b4; }
+    .timeline-signal-cell.coverage-gap { box-shadow: inset 0 0 0 2px rgba(180, 35, 24, 0.7); }
+    .timeline-signal-cell.private-session.coverage-gap { box-shadow: inset 0 3px #7257b4, inset 0 0 0 2px rgba(180, 35, 24, 0.7); }
+    .timeline-signal-cell.has-audit-events::after {
+      content: "";
+      position: absolute;
+      inset: auto 3px 2px;
+      height: 3px;
+      border-radius: 1px;
+      background: #334a68;
+    }
+    .timeline-expander {
+      display: flex;
+      align-items: center;
+      margin: 6px 0 2px 158px;
+    }
+    .timeline-expander button {
+      padding: 4px 9px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .timeline-details[hidden] { display: none; }
+    .timeline-details .timeline-signal-row { margin-top: 4px; }
+    .timeline-block-legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend .timeline-block-legend::before {
+      content: "3";
+      display: grid;
+      place-items: center;
+      width: 14px;
+      height: 14px;
+      margin-right: 0;
+      border: 2px solid var(--timeline-block-frame);
+      border-radius: 2px;
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.55rem;
+      font-weight: 700;
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.83rem; color: var(--muted); }
+    .pager { margin-top: 10px; }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 5px;
+      vertical-align: -1px;
+      border-radius: 2px;
+      background: var(--legend-color);
+    }
+    .legend .timeline-private-legend::before {
+      background: var(--timeline-empty);
+      box-shadow: inset 0 3px #7257b4;
+    }
+    .legend .timeline-gap-legend::before {
+      background: var(--timeline-empty);
+      box-shadow: inset 0 0 0 2px rgba(180, 35, 24, 0.7);
+    }
+    .legend .timeline-event-legend::before {
+      background: linear-gradient(to top, #334a68 0 3px, var(--timeline-empty) 3px);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    .audit-log-wrap {
+      max-height: min(50vh, 440px);
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    .audit-log-wrap th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface);
+      box-shadow: 0 1px var(--border);
+    }
+    .drawer {
+      position: fixed;
+      inset: 0 0 0 auto;
+      width: min(380px, 95vw);
+      padding: 20px;
+      background: #fff;
+      border-left: 1px solid var(--border);
+      box-shadow: -12px 0 35px rgba(31, 42, 68, 0.14);
+      z-index: 3;
+      overflow: auto;
+    }
+    .drawer[hidden] { display: none; }
+    .thumbnail-shell {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      margin: 14px 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #eef1f6;
+      overflow: hidden;
+    }
+    #thumbnail { width: 256px; height: 256px; image-rendering: pixelated; object-fit: contain; filter: blur(5px); }
+    #thumbnail[hidden] { display: none; }
+    .blur-control {
+      margin: 10px 0 2px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .blur-control input { width: 100%; }
+    .thumbnail-nav {
+      justify-content: center;
+      margin: 10px 0 4px;
+    }
+    #thumbnail-position {
+      min-width: 92px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (max-width: 720px) {
+      body { padding: 12px; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #edf1fb;
+        --muted: #aab5cb;
+        --surface: #1d2432;
+        --page: #141923;
+        --border: rgba(255, 255, 255, 0.14);
+        --warning-bg: #3c301c;
+        --warning-ink: #f6d79b;
+        --timeline-empty: #202733;
+        --timeline-heat-0: #315e82;
+        --timeline-heat-1: #397fb3;
+        --timeline-heat-2: #8e762e;
+        --timeline-heat-3: #a6532d;
+        --timeline-heat-4: #a93431;
+        --timeline-block-frame: #aab5cb;
+      }
+      button { background: #252f41; }
+      .timeline-wrap, .drawer { background: #1d2432; }
+      .timeline-site-row:nth-child(even) { background: rgba(120, 174, 250, 0.035); }
+      .timeline-overview-row { background: rgba(120, 174, 250, 0.06); }
+      .timeline-hour-cell { color: var(--ink); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Audit history</h1>
+    <p class="muted">Review browsing activity, blocked images, and important changes.</p>
+
+    <section class="card" aria-labelledby="mode-heading">
+      <div class="row spaced">
+        <h2 id="mode-heading">Tracking mode</h2>
+        <span id="coverage" class="coverage" data-covered="false">Checking private browsing…</span>
+      </div>
+      <div class="mode-options">
+        <label><input type="radio" name="audit-mode" value="off"> Off</label>
+        <label><input type="radio" name="audit-mode" value="audit"> Audit</label>
+        <label><input type="radio" name="audit-mode" value="accountability"> Accountability</label>
+      </div>
+      <div class="warning">
+        Audit and Accountability save visited sites, times, filtering results, important changes, and small previews of blocked images on this device. Private browsing is included only when Firefox allows Wingman Jr. to run there.
+      </div>
+      <div id="private-help" class="warning" hidden>
+        <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr. and set <i>Run in Private Windows</i> to <i>Allow</i>, then check again.
+        <div class="row">
+          <button type="button" id="check-private">Check again</button>
+        </div>
+      </div>
+      <div id="password-panel" hidden>
+        <label for="mode-password"><b id="password-label">Password</b></label>
+        <div class="row">
+          <input id="mode-password" type="password" minlength="8" autocomplete="new-password">
+          <span id="password-help" class="muted">At least 8 characters.</span>
+        </div>
+      </div>
+      <label id="private-ack" hidden>
+        <input type="checkbox" id="allow-incomplete-private">
+        I understand that private browsing will not be included.
+      </label>
+      <div class="row" style="margin-top: 12px">
+        <button type="button" class="primary" id="apply-mode">Apply mode</button>
+        <button type="button" class="danger" id="reset-password" hidden>Forgot password — erase all saved history</button>
+      </div>
+      <div id="mode-status" class="status" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="timeline-heading">
+      <div class="row spaced">
+        <h2 id="timeline-heading">Timeline</h2>
+        <div class="row">
+          <button type="button" id="previous-week" aria-label="Previous week">‹</button>
+          <input type="date" id="week-start" aria-label="Week start">
+          <button type="button" id="next-week" aria-label="Next week">›</button>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="summary"><strong id="summary-checks">0</strong>checks</div>
+        <div class="summary"><strong id="summary-blocked">0</strong>blocked</div>
+        <div class="summary"><strong id="summary-private">0</strong>private checks</div>
+        <div class="summary"><strong id="summary-events">0</strong>recorded events</div>
+      </div>
+      <div class="legend">
+        <span style="--legend-color:#8bb9e8">Low concern</span>
+        <span style="--legend-color:#f4b43c">Worth a look</span>
+        <span style="--legend-color:#d33b2f">High concern</span>
+        <span class="timeline-private-legend">Private browsing</span>
+        <span class="timeline-gap-legend">Private browsing not included</span>
+        <span class="timeline-event-legend">Recorded event</span>
+        <span class="timeline-block-legend">Blocked images</span>
+      </div>
+      <p class="muted" style="margin-top:8px">Each square is one hour. Warmer colors suggest more concern, and a number shows blocked images. Click any colored square for details.</p>
+      <div class="timeline-wrap">
+        <div id="timeline" aria-label="Hourly audit activity by site"></div>
+      </div>
+      <div id="site-pager" class="row spaced pager" hidden>
+        <span id="site-page" class="muted">Sites 0–0 of 0</span>
+        <div class="row">
+          <button type="button" id="previous-sites">Previous sites</button>
+          <button type="button" id="next-sites">Next sites</button>
+        </div>
+      </div>
+      <div id="timeline-status" class="status" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="log-heading">
+      <div class="row spaced">
+        <h2 id="log-heading">Audit log</h2>
+        <span id="integrity-status" class="coverage" data-covered="true">Checking history…</span>
+      </div>
+      <div class="audit-log-wrap" role="region" aria-label="Audit events" tabindex="0">
+        <table>
+          <thead><tr><th>Time</th><th>Event</th><th>Details</th></tr></thead>
+          <tbody id="audit-log"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <aside id="thumbnail-drawer" class="drawer" hidden aria-labelledby="thumbnail-heading">
+    <div class="row spaced">
+      <h2 id="thumbnail-heading">Blocked images</h2>
+      <button type="button" id="close-drawer" aria-label="Close">×</button>
+    </div>
+    <p><b id="thumbnail-domain"></b></p>
+    <p id="thumbnail-cluster-summary" class="muted"></p>
+    <div class="row thumbnail-nav">
+      <button type="button" id="previous-thumbnail" aria-label="Previous blocked image">‹ Previous</button>
+      <b id="thumbnail-position">1 of 1</b>
+      <button type="button" id="next-thumbnail" aria-label="Next blocked image">Next ›</button>
+    </div>
+    <p id="thumbnail-meta" class="muted"></p>
+    <div class="thumbnail-shell">
+      <img id="thumbnail" alt="Retained thumbnail of blocked image" hidden>
+      <span id="thumbnail-locked">Thumbnail locked</span>
+    </div>
+    <div class="blur-control">
+      <div class="row spaced">
+        <label for="thumbnail-blur"><b>Preview blur</b></label>
+        <output id="thumbnail-blur-value" for="thumbnail-blur">5px</output>
+      </div>
+      <input id="thumbnail-blur" type="range" min="0" max="10" step="0.5" value="5" aria-describedby="thumbnail-blur-help">
+      <div id="thumbnail-blur-help" class="muted">Defaults by rating: Safe 0px · Q 4px · R 6px · X 10px. Manual adjustments apply only to the current image.</div>
+    </div>
+    <div id="thumbnail-password-row" hidden>
+      <label for="thumbnail-password">Accountability password</label>
+      <div class="row">
+        <input id="thumbnail-password" type="password" autocomplete="current-password">
+        <button type="button" class="primary" id="unlock-thumbnail">Unlock</button>
+      </div>
+    </div>
+    <div id="thumbnail-status" class="status" role="status" aria-live="polite"></div>
+  </aside>
+
+  <script src="audit_page.js"></script>
+</body>
+</html>
