@@ -87,6 +87,17 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(intervals)), [
     { start: 180, end: 200 }
 ]);
 
+const futureWindowIntervals = api.buildIntervals([
+    { timestamp: 180, type: 'private-session-started' }
+], 100, 300, new Set(['private-session-started']), new Set(['private-session-ended']), 220);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(futureWindowIntervals)), [
+    { start: 180, end: 220 }
+]);
+const entirelyFutureIntervals = api.buildIntervals([
+    { timestamp: 180, type: 'private-session-started' }
+], 300, 400, new Set(['private-session-started']), new Set(['private-session-ended']), 220);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(entirelyFutureIntervals)), []);
+
 (async () => {
     const first = {
         timestamp: 100,

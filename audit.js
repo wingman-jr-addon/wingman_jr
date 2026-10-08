@@ -876,8 +876,12 @@ async function auditVerifyEventChain(events, compareHead) {
     return { valid, checked: events.length, headChecked };
 }
 
-function auditBuildIntervals(events, startTime, endTime, startTypes, endTypes) {
+function auditBuildIntervals(events, startTime, endTime, startTypes, endTypes, openEndTime = endTime) {
     const intervals = [];
+    const boundedOpenEnd = Math.min(
+        endTime,
+        Number.isFinite(openEndTime) ? openEndTime : endTime
+    );
     let activeSince = null;
     for (const event of events) {
         if (startTypes.has(event.type)) {
@@ -894,8 +898,8 @@ function auditBuildIntervals(events, startTime, endTime, startTypes, endTypes) {
             activeSince = null;
         }
     }
-    if (activeSince !== null && activeSince <= endTime) {
-        intervals.push({ start: Math.max(startTime, activeSince), end: endTime });
+    if (activeSince !== null && activeSince <= boundedOpenEnd && boundedOpenEnd > startTime) {
+        intervals.push({ start: Math.max(startTime, activeSince), end: boundedOpenEnd });
     }
     return intervals;
 }
@@ -1002,19 +1006,22 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
     const allEvents = await auditReadEventsThrough(safeEnd);
     const integrity = await auditVerifyEventChain(allEvents, safeEnd >= Date.now());
     const events = allEvents.filter(event => event.timestamp >= safeStart && event.timestamp <= safeEnd);
+    const observedEnd = Math.min(safeEnd, Date.now());
     const privateSessions = auditBuildIntervals(
         allEvents,
         safeStart,
         safeEnd,
         new Set(['private-session-started', 'private-session-observed']),
-        new Set(['private-session-ended'])
+        new Set(['private-session-ended']),
+        observedEnd
     );
     const coverageGaps = auditBuildIntervals(
         allEvents,
         safeStart,
         safeEnd,
         new Set(['private-coverage-revoked', 'private-coverage-unavailable']),
-        new Set(['private-coverage-enabled'])
+        new Set(['private-coverage-enabled']),
+        observedEnd
     );
     const resultRows = Array.from(rows.values())
         .sort((left, right) => right.count - left.count || left.hostname.localeCompare(right.hostname))

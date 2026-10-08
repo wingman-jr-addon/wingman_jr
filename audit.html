@@ -275,6 +275,17 @@
       border-radius: 2px;
       background: var(--legend-color);
     }
+    .legend .timeline-private-legend::before {
+      background: var(--timeline-empty);
+      box-shadow: inset 0 3px #7257b4;
+    }
+    .legend .timeline-gap-legend::before {
+      background: var(--timeline-empty);
+      box-shadow: inset 0 0 0 2px rgba(180, 35, 24, 0.7);
+    }
+    .legend .timeline-event-legend::before {
+      background: linear-gradient(to top, #334a68 0 3px, var(--timeline-empty) 3px);
+    }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     th, td { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
@@ -403,7 +414,7 @@
 
     <section class="card" aria-labelledby="timeline-heading">
       <div class="row spaced">
-        <h2 id="timeline-heading">One-week timeline</h2>
+        <h2 id="timeline-heading">Timeline</h2>
         <div class="row">
           <button type="button" id="previous-week" aria-label="Previous week">‹</button>
           <input type="date" id="week-start" aria-label="Week start">
@@ -420,9 +431,9 @@
         <span style="--legend-color:#8bb9e8">Low concern</span>
         <span style="--legend-color:#f4b43c">Worth a look</span>
         <span style="--legend-color:#d33b2f">High concern</span>
-        <span style="--legend-color:#7257b4">Private browsing</span>
-        <span style="--legend-color:#b42318">Private browsing not included</span>
-        <span style="--legend-color:#334a68">Recorded event</span>
+        <span class="timeline-private-legend">Private browsing</span>
+        <span class="timeline-gap-legend">Private browsing not included</span>
+        <span class="timeline-event-legend">Recorded event</span>
         <span class="timeline-block-legend">Blocked images</span>
       </div>
       <p class="muted" style="margin-top:8px">Each square is one hour. Warmer colors suggest more concern, and a number shows blocked images. Click any colored square for details.</p>
