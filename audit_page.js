@@ -68,6 +68,20 @@ function audPageDefaultBlurForRating(rating) {
     return { safe: 0, q: 4, r: 6, x: 10 }[rating] ?? 5;
 }
 
+function audPageBlockDecisionLabel(block) {
+    const rating = audPageRatingForBlock(block);
+    const concern = { safe: 'Low concern', q: 'Q', r: 'R', x: 'X' }[rating];
+    const zone = { trusted: 'Trusted', neutral: 'Neutral', untrusted: 'Untrusted' }[block?.effectiveZone];
+    const parts = ['Blocked'];
+    if (concern) {
+        parts.push(concern);
+    }
+    if (rating === 'safe' && zone) {
+        parts.push(`${zone} setting`);
+    }
+    return parts.join(' · ');
+}
+
 function audPageSelectedMode() {
     return document.querySelector('input[name="audit-mode"]:checked')?.value || 'off';
 }
@@ -713,8 +727,8 @@ function audPageRenderSelectedBlock() {
     document.getElementById('thumbnail-position').textContent = `${AUDPAGE_selectedBlockIndex + 1} of ${AUDPAGE_selectedBlocks.length}`;
     document.getElementById('previous-thumbnail').disabled = AUDPAGE_selectedBlockIndex === 0;
     document.getElementById('next-thumbnail').disabled = AUDPAGE_selectedBlockIndex >= AUDPAGE_selectedBlocks.length - 1;
-    const ratingLabel = rating === 'safe' ? 'Safe' : (rating ? rating.toUpperCase() : 'Unknown rating');
-    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · ${ratingLabel}${block.private ? ' · private window' : ''}`;
+    const decisionLabel = audPageBlockDecisionLabel(block);
+    document.getElementById('thumbnail-meta').textContent = `${new Date(block.timestamp).toLocaleString()} · ${decisionLabel}${block.private ? ' · private window' : ''}`;
     const image = document.getElementById('thumbnail');
     image.hidden = true;
     image.removeAttribute('src');
@@ -860,6 +874,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         audPageAggregateRows,
         audPageBinIndex,
+        audPageBlockDecisionLabel,
         audPageBlockedHeatLevel,
         audPageClampBlur,
         audPageCountLabel,

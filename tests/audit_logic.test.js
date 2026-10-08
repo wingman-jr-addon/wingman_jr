@@ -54,6 +54,7 @@ const records = [
         threshold: 0.7,
         result: 'block',
         private: true,
+        effectiveZone: 'untrusted',
         rating: 'x'
     }
 ];
@@ -69,9 +70,11 @@ assert.strictEqual(decoded.length, 2);
 assert.strictEqual(decoded[0].hostname, 'example.com');
 assert.strictEqual(decoded[0].result, 'pass');
 assert.strictEqual(decoded[0].rating, 'safe');
+assert.strictEqual(decoded[0].effectiveZone, null, 'old records without zone bits remain readable');
 assert.strictEqual(decoded[1].hostname, 'private.example');
 assert.strictEqual(decoded[1].result, 'block');
 assert.strictEqual(decoded[1].private, true);
+assert.strictEqual(decoded[1].effectiveZone, 'untrusted');
 assert.strictEqual(decoded[1].rating, 'x');
 assert.ok(Math.abs(decoded[1].score - 0.9) < 0.0001);
 assert.ok(api.relativeLogit(0.8, 0.5) > 0);

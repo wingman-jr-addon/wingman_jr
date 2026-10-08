@@ -4,6 +4,7 @@ const vm = require('vm');
 const {
     audPageAggregateRows,
     audPageBinIndex,
+    audPageBlockDecisionLabel,
     audPageBlockedHeatLevel,
     audPageClampBlur,
     audPageCountLabel,
@@ -29,6 +30,13 @@ assert.strictEqual(audPageDefaultBlurForRating(null), 5);
 assert.strictEqual(audPageRatingForBlock({ rating: 'r', score: 0.1 }), 'r');
 assert.strictEqual(audPageRatingForBlock({ score: 0.2 }), null);
 assert.strictEqual(audPageRatingForBlock({ score: 0.9 }), null);
+assert.strictEqual(
+    audPageBlockDecisionLabel({ rating: 'safe', effectiveZone: 'untrusted' }),
+    'Blocked · Low concern · Untrusted setting'
+);
+assert.strictEqual(audPageBlockDecisionLabel({ rating: 'safe' }), 'Blocked · Low concern');
+assert.strictEqual(audPageBlockDecisionLabel({ rating: 'q', effectiveZone: 'untrusted' }), 'Blocked · Q');
+assert.strictEqual(audPageBlockDecisionLabel({}), 'Blocked');
 assert.strictEqual(audPageWorstRating([{ rating: 'q' }, { rating: 'x' }, { rating: 'r' }]), 'x');
 assert.strictEqual(audPageWorstRating([{ rating: 'safe' }, { score: 0.9 }]), 'safe');
 assert.strictEqual(audPageWorstRating([{ score: 0.9 }]), null);

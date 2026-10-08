@@ -3,7 +3,7 @@
  *
  * Bulk score history is kept in compact binary IndexedDB chunks. Only the
  * existing top-level filtering site, timestamp, score, threshold, S/Q/R/X
- * rating, outcome and private-window bit are retained. Blocked thumbnails are fixed 128x128 RGB332
+ * rating, outcome, filtering setting and private-window bit are retained. Blocked thumbnails are fixed 128x128 RGB332
  * buffers encrypted with a per-install device key before they are written.
  */
 
@@ -270,6 +270,14 @@ function auditRatingFromCode(value) {
     return [null, 'safe', 'q', 'r', 'x'][value] || null;
 }
 
+function auditZoneToCode(value) {
+    return { trusted: 1, neutral: 2, untrusted: 3 }[String(value || '').toLowerCase()] || 0;
+}
+
+function auditZoneFromCode(value) {
+    return [null, 'trusted', 'neutral', 'untrusted'][value] || null;
+}
+
 function auditPackScoreRecords(records, startSequence) {
     const domains = [];
     const domainIndexes = new Map();
@@ -296,6 +304,7 @@ function auditPackScoreRecords(records, startSequence) {
         if (record.private === true) {
             flags |= 2;
         }
+        flags |= auditZoneToCode(record.effectiveZone) << 2;
         view.setUint8(offset + 10, flags);
         view.setUint8(offset + 11, auditRatingToCode(record.rating));
         startTime = Math.min(startTime, record.timestamp);
@@ -326,6 +335,7 @@ function auditDecodeScoreChunk(chunk, callback) {
             threshold: view.getUint16(offset + 8, true) / 65535,
             result: (flags & 1) ? 'block' : 'pass',
             private: (flags & 2) !== 0,
+            effectiveZone: auditZoneFromCode((flags >> 2) & 3),
             rating: auditRatingFromCode(view.getUint8(offset + 11))
         });
     }
@@ -357,6 +367,7 @@ function auditRecordScan(context, result, score, thumbnail, rating) {
         threshold: Number.isFinite(context.threshold) ? context.threshold : 0.5,
         result,
         private: context.isPrivate === true,
+        effectiveZone: auditZoneFromCode(auditZoneToCode(context.effectiveZone)),
         rating: auditNormalizeRating(rating),
         thumbnail: result === 'block' && thumbnail instanceof ArrayBuffer ? thumbnail : null
     });
@@ -993,6 +1004,7 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
                         score: scoreEvent.score,
                         threshold: scoreEvent.threshold,
                         private: scoreEvent.private,
+                        effectiveZone: scoreEvent.effectiveZone,
                         rating: scoreEvent.rating || thumbnail?.rating || null,
                         thumbnailId: thumbnail?.id || null
                     });
