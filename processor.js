@@ -411,6 +411,96 @@ const procLoadImagePromise = url => new Promise( (resolve, reject) => {
     img.src = url
 });
 
+const PROC_ANIMATED_WEBP_SAMPLE_COUNT = 4;
+const PROC_ANIMATED_WEBP_SAMPLE_INTERVAL_MS = 500;
+
+function procReadAscii(bytes, offset, length) {
+    let result = '';
+    for(let i = 0; i < length; i++) {
+        result += String.fromCharCode(bytes[offset + i]);
+    }
+    return result;
+}
+
+function procReadUint32LE(bytes, offset) {
+    return (
+        bytes[offset]
+        | (bytes[offset + 1] << 8)
+        | (bytes[offset + 2] << 16)
+        | (bytes[offset + 3] << 24)
+    ) >>> 0;
+}
+
+function procConcatBufferViews(buffers) {
+    let views = buffers.map(buffer => {
+        return ArrayBuffer.isView(buffer)
+            ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            : new Uint8Array(buffer);
+    });
+    let byteLength = views.reduce((total, view) => total + view.byteLength, 0);
+    let bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    views.forEach(view => {
+        bytes.set(view, offset);
+        offset += view.byteLength;
+    });
+    return bytes;
+}
+
+function procIsAnimatedWebp(buffers) {
+    let bytes = procConcatBufferViews(buffers);
+    if(bytes.byteLength < 12
+        || procReadAscii(bytes, 0, 4) !== 'RIFF'
+        || procReadAscii(bytes, 8, 4) !== 'WEBP') {
+        return false;
+    }
+
+    let offset = 12;
+    while(offset + 8 <= bytes.byteLength) {
+        let chunkType = procReadAscii(bytes, offset, 4);
+        let chunkSize = procReadUint32LE(bytes, offset + 4);
+        let chunkDataOffset = offset + 8;
+        if(chunkType === 'ANIM' || chunkType === 'ANMF') {
+            return true;
+        }
+        if(chunkType === 'VP8X' && chunkSize > 0
+            && chunkDataOffset < bytes.byteLength
+            && (bytes[chunkDataOffset] & 0x02) !== 0) {
+            return true;
+        }
+
+        let nextOffset = chunkDataOffset + chunkSize + (chunkSize & 1);
+        if(nextOffset <= offset || nextOffset > bytes.byteLength) {
+            break;
+        }
+        offset = nextOffset;
+    }
+    return false;
+}
+
+function procWait(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
+    let sampleCount = isAnimatedWebp ? PROC_ANIMATED_WEBP_SAMPLE_COUNT : 1;
+    let worstScore = null;
+    for(let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+        if(sampleIndex > 0) {
+            await procWait(PROC_ANIMATED_WEBP_SAMPLE_INTERVAL_MS);
+        }
+        let score = await procPredict(img);
+        if(worstScore === null
+            || procGetPrimaryScore(score) > procGetPrimaryScore(worstScore)) {
+            worstScore = score;
+        }
+        if(!procIsSafe(score, threshold)) {
+            break;
+        }
+    }
+    return worstScore;
+}
+
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
     WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
@@ -437,7 +527,12 @@ async function procPerformFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                let sqrxrScore = await procPredict(img);
+                let isAnimatedWebp = entry.mimeType.toLowerCase().startsWith('image/webp')
+                    && procIsAnimatedWebp(entry.buffers);
+                if(isAnimatedWebp) {
+                    WJR_DEBUG && console.debug('ML: Sampling animated WebP '+entry.requestId);
+                }
+                let sqrxrScore = await procPredictImageSamples(img, entry.threshold, isAnimatedWebp);
                 result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
                 result.auditRating = procGetAuditRating(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
