@@ -32,7 +32,23 @@ vm.runInContext(source + `
         relativeLogit: auditRelativeLogit,
         buildIntervals: auditBuildIntervals,
         hashEvent: auditHashEvent,
-        verifyEventChain: auditVerifyEventChain
+        verifyEventChain: auditVerifyEventChain,
+        initialize: auditInitialize,
+        handleMessage: auditHandleMessage,
+        prepareInitializationTest(mockBrowser) {
+            globalThis.browser = mockBrowser;
+            auditOpenDatabase = async () => ({});
+            auditGetMetaValues = async () => ({ scoreCount: 0, thumbnailCount: 0, auditCount: 0 });
+            auditUpdateModeIndicators = () => {};
+            auditAppendEvent = async () => {};
+            auditStartHeartbeat = () => {};
+            auditCheckPrivateCoverage = async () => {
+                await mockBrowser.privateAccessReady;
+                AUDIT_settings.privateAccessAllowed = mockBrowser.privateAccessAllowed;
+            };
+            auditStartPrivateMonitoring = () => {};
+            auditRefreshPrivateWindows = async () => {};
+        }
     };
 `, context);
 
@@ -121,6 +137,40 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(entirelyFutureIntervals)), []);
     second.details.source = 'changed';
     const invalid = await api.verifyEventChain([first, second], false);
     assert.strictEqual(invalid.valid, false);
+
+    let releasePrivateAccessCheck;
+    const privateAccessReady = new Promise(resolve => {
+        releasePrivateAccessCheck = resolve;
+    });
+    api.prepareInitializationTest({
+        privateAccessReady,
+        privateAccessAllowed: true,
+        storage: {
+            local: {
+                get: async () => ({
+                    audit_settings: {
+                        mode: 'accountability',
+                        privateAccessAllowed: false
+                    }
+                })
+            }
+        }
+    });
+    const initializationPromise = api.initialize();
+    let initialStateSettled = false;
+    const initialStatePromise = api.handleMessage({ type: 'audit.getState' }).then(state => {
+        initialStateSettled = true;
+        return state;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.strictEqual(initialStateSettled, false,
+        'state requests wait for the startup private-access check to finish');
+    releasePrivateAccessCheck();
+    await initializationPromise;
+    const initialState = await initialStatePromise;
+    assert.strictEqual(initialState.mode, 'accountability');
+    assert.strictEqual(initialState.privateAccessAllowed, true);
     console.log('audit logic tests passed');
 })().catch(error => {
     console.error(error);
