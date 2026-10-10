@@ -865,27 +865,42 @@ function procGetBufferedRangesString(video) {
 
 const VIDEO_LOAD_TIMEOUT_MS = 5000;
 const procVideoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
-    let isResolved = false;
-    video.addEventListener('error', ()=>reject(video.error), {once: true});
-    video.addEventListener('seeked',  () => {
+    let isSettled = false;
+    let timeoutId;
+
+    const cleanup = () => {
+        if(timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+        }
+        video.removeEventListener('error', onError);
+        video.removeEventListener('seeked', onSeeked);
+    };
+    const settle = (callback, value) => {
+        if(isSettled) {
+            return;
+        }
+        isSettled = true;
+        cleanup();
+        callback(value);
+    };
+    const onError = () => settle(reject, video.error);
+    const onSeeked = () => {
         video.width = video.videoWidth;
         video.height = video.videoHeight;
-        isResolved = true;
-        resolve();
-    } , {once:true});
+        settle(resolve);
+    };
+
+    video.addEventListener('error', onError);
+    video.addEventListener('seeked', onSeeked);
     //Note that the URL is in memory, not remote
     //making a small timeout a reasonable choice
     //Without the below, there was at least one URL
     //that simply didn't fire the expected events,
     //so this acts as a safeguard
-    let timeoutId = setTimeout(() => {
-        clearTimeout(timeoutId);
-        if(isResolved) {
-            return;
-        }
+    timeoutId = setTimeout(() => {
         WJR_DEBUG && console.warn(`MLV: Timed out`);
-        reject(`MLV: Timed out in ${VIDEO_LOAD_TIMEOUT_MS} ms`);
-      }, VIDEO_LOAD_TIMEOUT_MS);
+        settle(reject, `MLV: Timed out in ${VIDEO_LOAD_TIMEOUT_MS} ms`);
+    }, VIDEO_LOAD_TIMEOUT_MS);
     video.src = url;
     video.currentTime = seekTime;
 });
@@ -1071,7 +1086,24 @@ async function procGetVideoScanStatus(
         WJR_DEBUG && console.error('MLV: SCAN Error scanning video group '+videoChainId+':'+e+' '+e.name+' '+e.code+' '+e.message);
         scanResults.error = e;
     } finally {
-        URL.revokeObjectURL(videoUrl);
+        if(inferenceVideo) {
+            try {
+                // Stop playback, then declare that the element no longer has a source.
+                inferenceVideo.pause();
+                inferenceVideo.removeAttribute('src');
+                // Removing src alone does not invoke the media load algorithm. load()
+                // makes the element process that change, abort outstanding media work,
+                // and reset toward its empty state so decoder/buffer resources can be
+                // released promptly. With no source remaining, it starts no new fetch.
+                inferenceVideo.load();
+            } catch(e) {
+                WJR_DEBUG && console.warn('MLV: Error releasing video element for '+videoChainId+': '+e);
+            }
+        }
+        if(videoUrl) {
+            // Revoke only after the media element no longer selects this blob URL.
+            URL.revokeObjectURL(videoUrl);
+        }
     }
     return scanResults;
 }

@@ -10,6 +10,52 @@ const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8
 const videoSource = fs.readFileSync(path.join(root, 'background_video.js'), 'utf8');
 const processorSource = fs.readFileSync(path.join(root, 'processor.js'), 'utf8');
 
+const videoLoadStart = processorSource.indexOf('const VIDEO_LOAD_TIMEOUT_MS');
+const videoLoadEnd = processorSource.indexOf('function procGetMp4Parsed', videoLoadStart);
+const pendingTimeouts = [];
+let clearedTimeoutCount = 0;
+const videoLoadContext = {
+    console,
+    WJR_DEBUG: false,
+    setTimeout(callback) {
+        pendingTimeouts.push(callback);
+        return pendingTimeouts.length;
+    },
+    clearTimeout() { clearedTimeoutCount++; }
+};
+vm.createContext(videoLoadContext);
+vm.runInContext(processorSource.slice(videoLoadStart, videoLoadEnd) + `
+    this.videoLoadedData = procVideoLoadedData;
+`, videoLoadContext);
+
+function createEventVideo() {
+    const listeners = new Map();
+    return {
+        error: null,
+        videoWidth: 640,
+        videoHeight: 360,
+        width: 0,
+        height: 0,
+        addEventListener(type, callback) {
+            if(!listeners.has(type)) {
+                listeners.set(type, new Set());
+            }
+            listeners.get(type).add(callback);
+        },
+        removeEventListener(type, callback) {
+            listeners.get(type)?.delete(callback);
+        },
+        dispatch(type) {
+            for(const callback of [...(listeners.get(type) || [])]) {
+                callback();
+            }
+        },
+        listenerCount(type) {
+            return listeners.get(type)?.size || 0;
+        }
+    };
+}
+
 assert.match(optionsHtml, /id="video_blocking_mode_quick"[^>]*value="quick"[^>]*checked/,
     'Quick Scan must be checked by default');
 assert.doesNotMatch(optionsHtml, /video_blocking_mode_turbo/,
@@ -107,6 +153,7 @@ const processorStart = processorSource.indexOf('const PROC_VIDEO_COMPOSITE_MAX_F
 const processorEnd = processorSource.indexOf('async function procOnPortMessage', processorStart);
 const drawCalls = [];
 let predictionCount = 0;
+const videoCleanupCalls = { pause: 0, removeSrc: 0, load: 0, revoke: 0 };
 const canvasContext = {
     fillStyle: '',
     imageSmoothingEnabled: false,
@@ -117,7 +164,7 @@ const processorContext = {
     console,
     WJR_DEBUG: false,
     URL: {
-        revokeObjectURL() {}
+        revokeObjectURL() { videoCleanupCalls.revoke++; }
     },
     document: {
         createElement(type) {
@@ -133,7 +180,14 @@ const processorContext = {
                 height: 0,
                 videoWidth: 640,
                 videoHeight: 360,
-                autoplay: false
+                autoplay: false,
+                pause() { videoCleanupCalls.pause++; },
+                removeAttribute(name) {
+                    if(name === 'src') {
+                        videoCleanupCalls.removeSrc++;
+                    }
+                },
+                load() { videoCleanupCalls.load++; }
             };
         }
     },
@@ -160,6 +214,30 @@ vm.runInContext(`const PROC_IMAGE_SIZE = 224;\n` +
 `, processorContext);
 
 (async () => {
+    const eventVideo = createEventVideo();
+    const loadedPromise = videoLoadContext.videoLoadedData(eventVideo, 'blob:test', 1.5);
+    assert.strictEqual(eventVideo.listenerCount('error'), 1);
+    assert.strictEqual(eventVideo.listenerCount('seeked'), 1);
+    eventVideo.dispatch('seeked');
+    await loadedPromise;
+    assert.strictEqual(eventVideo.listenerCount('error'), 0,
+        'successful video loads must remove their error listener');
+    assert.strictEqual(eventVideo.listenerCount('seeked'), 0,
+        'successful video loads must remove their seek listener');
+    assert.strictEqual(clearedTimeoutCount, 1,
+        'successful video loads must cancel their timeout');
+
+    const timedOutVideo = createEventVideo();
+    const timedOutPromise = videoLoadContext.videoLoadedData(timedOutVideo, 'blob:timeout', 2.5);
+    pendingTimeouts[1]();
+    await assert.rejects(timedOutPromise, /Timed out in 5000 ms/);
+    assert.strictEqual(timedOutVideo.listenerCount('error'), 0,
+        'timed-out video loads must remove their error listener');
+    assert.strictEqual(timedOutVideo.listenerCount('seeked'), 0,
+        'timed-out video loads must remove their seek listener');
+    assert.strictEqual(clearedTimeoutCount, 2,
+        'timed-out video loads must clear their timer during cleanup');
+
     await defaultListenerContext.defaultListener(
         { requestId: 'default-request', url: 'https://example.test/video.mp4', type: 'media' },
         'video/mp4', {}, 1024, 0.5
@@ -181,6 +259,9 @@ vm.runInContext(`const PROC_IMAGE_SIZE = 224;\n` +
     assert.strictEqual(quickResult.scanCount, 1, 'the combined image counts as one scan');
     assert.strictEqual(quickResult.sourceFrameCount, 4);
     assert.strictEqual(quickResult.frames.length, 4);
+    assert.deepStrictEqual(videoCleanupCalls,
+        { pause: 1, removeSrc: 1, load: 1, revoke: 1 },
+        'completed video scans must release the media element before revoking its URL');
 
     predictionCount = 0;
     drawCalls.length = 0;
@@ -194,6 +275,9 @@ vm.runInContext(`const PROC_IMAGE_SIZE = 224;\n` +
     assert.strictEqual(enabledResult.scanCount, 3);
     assert.strictEqual(enabledResult.sourceFrameCount, 9);
     assert.strictEqual(enabledResult.frames.length, 9);
+    assert.deepStrictEqual(videoCleanupCalls,
+        { pause: 2, removeSrc: 2, load: 2, revoke: 2 },
+        'every completed video scan must release its media resources exactly once');
 
     console.log('video composite scan tests passed');
 })().catch(error => {
