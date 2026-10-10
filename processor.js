@@ -414,6 +414,11 @@ const procLoadImagePromise = url => new Promise( (resolve, reject) => {
 const PROC_ANIMATED_WEBP_SAMPLE_COUNT = 4;
 const PROC_ANIMATED_WEBP_SAMPLE_INTERVAL_MS = 500;
 
+// Animated WebP is an image container, not a seekable video. The browser
+// exposes it through <img> without currentTime or buffered ranges, so it cannot
+// use the MP4/WebM video scanner. We instead identify animation in the completed
+// WebP body and sample the image as its rendered frame advances.
+
 function procReadAscii(bytes, offset, length) {
     let result = '';
     for(let i = 0; i < length; i++) {
@@ -455,6 +460,8 @@ function procIsAnimatedWebp(buffers) {
         return false;
     }
 
+    // MIME alone cannot distinguish static from animated WebP. Walk the RIFF
+    // chunks looking for either an animation chunk or the VP8X animation flag.
     let offset = 12;
     while(offset + 8 <= bytes.byteLength) {
         let chunkType = procReadAscii(bytes, offset, 4);
@@ -483,6 +490,8 @@ function procWait(milliseconds) {
 }
 
 async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
+    // Static images keep the original one-prediction behavior. Animated WebP
+    // gets a short time-based sample because <img> offers no frame-seek API.
     let sampleCount = isAnimatedWebp ? PROC_ANIMATED_WEBP_SAMPLE_COUNT : 1;
     let worstScore = null;
     for(let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
@@ -495,6 +504,8 @@ async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
             worstScore = score;
         }
         if(!procIsSafe(score, threshold)) {
+            // One unsafe animation sample is enough; avoid delaying or running
+            // the model on the remaining samples once the outcome is known.
             break;
         }
     }
@@ -527,6 +538,9 @@ async function procPerformFiltering(entry) {
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
+                // Perform the byte inspection here, after all response chunks
+                // have been assembled. At header-routing time we only knew that
+                // this was some kind of image/webp.
                 let isAnimatedWebp = entry.mimeType.toLowerCase().startsWith('image/webp')
                     && procIsAnimatedWebp(entry.buffers);
                 if(isAnimatedWebp) {

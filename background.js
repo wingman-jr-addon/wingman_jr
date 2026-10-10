@@ -852,6 +852,9 @@ async function bkImageListener(details, shouldBlockSilently = false, existingPla
         }
     }
 
+    // Resource routing happens before the body is available. GIF has its own
+    // stream parser, but static and animated WebP both use image/webp, so WebP
+    // stays on the normal image path and is distinguished later from its bytes.
     let isGif = mimeType.startsWith('image/gif');
     if(isGif) {
         return await gifListener(details, requestPlan);
