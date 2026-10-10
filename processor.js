@@ -202,6 +202,37 @@ function drawImage(c, imgElement) {
     c.ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
 }
 
+function procCreateCompositeCanvas() {
+    let canvas = document.createElement('canvas');
+    canvas.width = PROC_IMAGE_SIZE;
+    canvas.height = PROC_IMAGE_SIZE;
+    let ctx = canvas.getContext('2d', { alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = 'rgb(128, 128, 128)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas;
+}
+
+function procDrawCompositeTile(canvas, media, tileIndex) {
+    const columns = 2;
+    const tileSize = PROC_IMAGE_SIZE / columns;
+    const tileX = (tileIndex % columns) * tileSize;
+    const tileY = Math.floor(tileIndex / columns) * tileSize;
+    const sourceWidth = media.videoWidth || media.naturalWidth || media.width;
+    const sourceHeight = media.videoHeight || media.naturalHeight || media.height;
+    if(!sourceWidth || !sourceHeight) {
+        throw new Error('Cannot compose media without dimensions');
+    }
+    const scale = Math.min(tileSize / sourceWidth, tileSize / sourceHeight);
+    const targetWidth = sourceWidth * scale;
+    const targetHeight = sourceHeight * scale;
+    const targetX = tileX + (tileSize - targetWidth) / 2;
+    const targetY = tileY + (tileSize - targetHeight) / 2;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(media, 0, 0, sourceWidth, sourceHeight,
+        targetX, targetY, targetWidth, targetHeight);
+}
+
 async function procPredict(imgElement) {
     let c = procGetCtx();
     try {
@@ -411,10 +442,8 @@ const procLoadImagePromise = url => new Promise( (resolve, reject) => {
     img.src = url
 });
 
-async function procPerformFiltering(entry) {
-    let dataEndTime = performance.now();
-    WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
-    let result = {
+function procCreateFilteringResult(entry) {
+    return {
         type: 'scan',
         requestId: entry.requestId,
         imageBytes: null,
@@ -422,10 +451,85 @@ async function procPerformFiltering(entry) {
         auditThumbnail: null,
         auditRating: null
     };
+}
+
+function procGetEntryByteCount(entry) {
     let byteCount = 0;
     for(let i=0; i<entry.buffers.length; i++) {
         byteCount += entry.buffers[i].byteLength;
     }
+    return byteCount;
+}
+
+async function procClassifyLoadedImage(entry, blob, img, result, dataEndTime) {
+    const byteCount = procGetEntryByteCount(entry);
+    WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
+    let imgLoadTime = performance.now();
+    let sqrxrScore = await procPredict(img);
+    result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
+    result.auditRating = procGetAuditRating(sqrxrScore);
+    if(procIsSafe(sqrxrScore, entry.threshold)) {
+        WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+        if (typeof SMR_observeSafeImage === 'function') {
+            SMR_observeSafeImage(img, sqrxrScore, entry.threshold, entry.reuseContext);
+        }
+        result.result = 'pass';
+        result.imageBytes = await blob.arrayBuffer();
+        result.sqrxrScore = sqrxrScore;
+    } else {
+        WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
+        let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob, entry.reuseContext);
+        procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
+        let encoder = new TextEncoder();
+        let encodedTypedBuffer = encoder.encode(svgText);
+        result.result = 'block';
+        if (PROC_isAuditEnabled) {
+            result.auditThumbnail = procCreateAuditThumbnail(img);
+        }
+        result.imageBytes = encodedTypedBuffer.buffer;
+    }
+    const endTime = performance.now();
+    const totalTime = endTime - entry.startTime;
+    const totalSinceDataEndTime = endTime - dataEndTime;
+    const totalSinceImageLoadTime = endTime - imgLoadTime;
+    PROC_processingTimeTotal += totalTime;
+    PROC_processingSinceDataEndTimeTotal += totalSinceDataEndTime;
+    PROC_processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
+    PROC_processingCountTotal++;
+    WJR_DEBUG && console.debug('PERF: Processed in '+totalTime
+        +' (' +totalSinceDataEndTime+' data end, '
+        +totalSinceImageLoadTime+' img load) with an avg of '
+        +Math.round(PROC_processingTimeTotal/PROC_processingCountTotal)
+        +' ('+Math.round(PROC_processingSinceDataEndTimeTotal/PROC_processingCountTotal)
+        +' data end, ' + Math.round(PROC_processingSinceImageLoadTimeTotal/PROC_processingCountTotal)
+        +' img load) at a count of '+PROC_processingCountTotal);
+    WJR_DEBUG && console.debug('WEBREQ: Finishing '+entry.requestId);
+    return result;
+}
+
+async function procClassifyTboostCandidate(candidate) {
+    const result = procCreateFilteringResult(candidate.entry);
+    try {
+        return await procClassifyLoadedImage(
+            candidate.entry,
+            candidate.blob,
+            candidate.img,
+            result,
+            performance.now()
+        );
+    } catch(e) {
+        console.error('TBOOST: Individual rescan error for '+candidate.entry.url+': '+e);
+        result.result = 'error';
+        result.imageBytes = await candidate.blob.arrayBuffer();
+        return result;
+    }
+}
+
+async function procPerformFiltering(entry) {
+    let dataEndTime = performance.now();
+    WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
+    let result = procCreateFilteringResult(entry);
+    let byteCount = procGetEntryByteCount(entry);
     let blob = new Blob(entry.buffers, {type: entry.mimeType});
     let url = null;
     try
@@ -435,47 +539,7 @@ async function procPerformFiltering(entry) {
             let img = await procLoadImagePromise(url);
             WJR_DEBUG && console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
-                WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
-                let imgLoadTime = performance.now();
-                let sqrxrScore = await procPredict(img);
-                result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
-                result.auditRating = procGetAuditRating(sqrxrScore);
-                if(procIsSafe(sqrxrScore, entry.threshold)) {
-                    WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    if (typeof SMR_observeSafeImage === 'function') {
-                        SMR_observeSafeImage(img, sqrxrScore, entry.threshold, entry.reuseContext);
-                    }
-                    result.result = 'pass';
-                    result.imageBytes = await blob.arrayBuffer();
-                    result.sqrxrScore = sqrxrScore;
-                } else {
-                    WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob, entry.reuseContext);
-                    procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
-                    let encoder = new TextEncoder();
-                    let encodedTypedBuffer = encoder.encode(svgText);
-                    result.result = 'block';
-                    if (PROC_isAuditEnabled) {
-                        result.auditThumbnail = procCreateAuditThumbnail(img);
-                    }
-                    result.imageBytes = encodedTypedBuffer.buffer;
-                }
-                const endTime = performance.now();
-                const totalTime = endTime - entry.startTime;
-                const totalSinceDataEndTime = endTime - dataEndTime;
-                const totalSinceImageLoadTime = endTime - imgLoadTime;
-                PROC_processingTimeTotal += totalTime;
-                PROC_processingSinceDataEndTimeTotal += totalSinceDataEndTime;
-                PROC_processingSinceImageLoadTimeTotal += totalSinceImageLoadTime;
-                PROC_processingCountTotal++;
-                WJR_DEBUG && console.debug('PERF: Processed in '+totalTime
-                    +' (' +totalSinceDataEndTime+' data end, '
-                    +totalSinceImageLoadTime+' img load) with an avg of '
-                    +Math.round(PROC_processingTimeTotal/PROC_processingCountTotal)
-                    +' ('+Math.round(PROC_processingSinceDataEndTimeTotal/PROC_processingCountTotal)
-                    +' data end, ' + Math.round(PROC_processingSinceImageLoadTimeTotal/PROC_processingCountTotal)
-                    +' img load) at a count of '+PROC_processingCountTotal);
-                WJR_DEBUG && console.debug('WEBREQ: Finishing '+entry.requestId);
+                await procClassifyLoadedImage(entry, blob, img, result, dataEndTime);
             } else {
                 result.result = 'tiny';
                 result.imageBytes = await blob.arrayBuffer();
@@ -654,6 +718,163 @@ let PROC_processingQueue = [];
 let PROC_inFlight = 0;
 let PROC_scanStartCount = 0;
 let PROC_throttleRejectionCount = 0;
+const PROC_TBOOST_BATCH_SIZE = 4;
+const PROC_TBOOST_SUSTAINED_BACKLOG_MS = 5000;
+let PROC_isTboostEnabled = true;
+let PROC_tboostBacklogSince = null;
+let PROC_tboostStats = {
+    compositeScans: 0,
+    sourceImages: 0,
+    rescannedImages: 0,
+    netModelCallsSaved: 0
+};
+
+function procIsTboostBacklogReady(now = performance.now()) {
+    if(!PROC_isTboostEnabled || PROC_processingQueue.length < PROC_TBOOST_BATCH_SIZE) {
+        if(PROC_tboostBacklogSince !== null) {
+            WJR_DEBUG && console.info('TBOOST: Sustained-backlog clock reset at queue length '+PROC_processingQueue.length);
+        }
+        PROC_tboostBacklogSince = null;
+        return false;
+    }
+    if(PROC_tboostBacklogSince === null) {
+        PROC_tboostBacklogSince = now;
+        WJR_DEBUG && console.info('TBOOST: Backlog reached '+PROC_processingQueue.length+'; arming after '
+            +PROC_TBOOST_SUSTAINED_BACKLOG_MS+'ms');
+        return false;
+    }
+    return now - PROC_tboostBacklogSince >= PROC_TBOOST_SUSTAINED_BACKLOG_MS;
+}
+
+function procCanTboostEntries(entries) {
+    return entries.length === PROC_TBOOST_BATCH_SIZE
+        && entries.every(entry => entry
+            && typeof entry.requestId === 'string'
+            && !entry.requestId.startsWith('crash'));
+}
+
+async function procLoadTboostCandidate(entry) {
+    const byteCount = procGetEntryByteCount(entry);
+    const blob = new Blob(entry.buffers, {type: entry.mimeType});
+    if(byteCount < PROC_MIN_IMAGE_BYTES) {
+        return { entry, blob, img: null, url: null, eligible: false };
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+        const img = await procLoadImagePromise(url);
+        return {
+            entry,
+            blob,
+            img,
+            url,
+            eligible: img.width >= PROC_MIN_IMAGE_SIZE && img.height >= PROC_MIN_IMAGE_SIZE
+        };
+    } catch(error) {
+        return { entry, blob, img: null, url, eligible: false, error };
+    }
+}
+
+function procReleaseTboostCandidates(candidates) {
+    for(const candidate of candidates) {
+        if(candidate.url !== null) {
+            URL.revokeObjectURL(candidate.url);
+        }
+    }
+}
+
+async function procPerformTboostBatch(entries) {
+    const batchStart = performance.now();
+    const candidates = [];
+    try {
+        candidates.push(...await Promise.all(entries.map(procLoadTboostCandidate)));
+        if(candidates.some(candidate => !candidate.eligible)) {
+            console.info('TBOOST: Four-up skipped because at least one image was tiny or unreadable; using individual scans');
+            procReleaseTboostCandidates(candidates);
+            candidates.length = 0;
+            const fallbackResults = [];
+            for(const entry of entries) {
+                fallbackResults.push(await procPerformFiltering(entry));
+            }
+            return fallbackResults;
+        }
+
+        const composite = procCreateCompositeCanvas();
+        candidates.forEach((candidate, index) => procDrawCompositeTile(composite, candidate.img, index));
+        const compositeScore = await procPredict(composite);
+        const compositePrimaryScore = procGetPrimaryScore(compositeScore);
+        const triggerThreshold = ROC_untrustedRoc.threshold;
+        const needsIndividualRescan = !procIsSafe(compositeScore, triggerThreshold);
+        PROC_tboostStats.compositeScans++;
+        PROC_tboostStats.sourceImages += entries.length;
+
+        if(needsIndividualRescan) {
+            PROC_tboostStats.rescannedImages += entries.length;
+            PROC_tboostStats.netModelCallsSaved--;
+            const results = [];
+            for(const candidate of candidates) {
+                results.push(await procClassifyTboostCandidate(candidate));
+            }
+            console.info('TBOOST: RESCAN four-up score='+compositePrimaryScore.toFixed(5)
+                +' threshold='+triggerThreshold.toFixed(5)
+                +' images='+entries.length
+                +' batchMs='+Math.round(performance.now()-batchStart)
+                +' groups='+PROC_tboostStats.compositeScans
+                +' rescannedImages='+PROC_tboostStats.rescannedImages
+                +' netModelCallsSaved='+PROC_tboostStats.netModelCallsSaved);
+            return results;
+        }
+
+        PROC_tboostStats.netModelCallsSaved += entries.length - 1;
+        const passResults = [];
+        for(const candidate of candidates) {
+            const result = procCreateFilteringResult(candidate.entry);
+            result.result = 'pass';
+            result.imageBytes = await candidate.blob.arrayBuffer();
+            passResults.push(result);
+        }
+        console.info('TBOOST: PASS four-up score='+compositePrimaryScore.toFixed(5)
+            +' threshold='+triggerThreshold.toFixed(5)
+            +' images='+entries.length
+            +' batchMs='+Math.round(performance.now()-batchStart)
+            +' groups='+PROC_tboostStats.compositeScans
+            +' rescannedImages='+PROC_tboostStats.rescannedImages
+            +' netModelCallsSaved='+PROC_tboostStats.netModelCallsSaved);
+        return passResults;
+    } catch(error) {
+        console.error('TBOOST: Four-up failure; falling back to individual scans: '+error);
+        const fallbackResults = [];
+        for(const entry of entries) {
+            fallbackResults.push(await procPerformFiltering(entry));
+        }
+        return fallbackResults;
+    } finally {
+        procReleaseTboostCandidates(candidates);
+    }
+}
+
+function procPostFilteringResult(entry, result) {
+    try {
+        if(!result) {
+            throw new Error('No filtering result was produced for '+entry.requestId);
+        }
+        const auditThumbnail = result.auditThumbnail;
+        delete result.auditThumbnail;
+        PROC_port.postMessage(result);
+        PROC_port.postMessage({
+            type:'stat',
+            result: result.result,
+            requestId: entry.requestId,
+            adaptiveContext: entry.adaptiveContext,
+            auditContext: entry.auditContext,
+            adaptiveScore: result.adaptiveScore,
+            auditRating: result.auditRating,
+            auditThumbnail: auditThumbnail
+        });
+    } catch(e) {
+        console.error('ERROR: Processor failed to communicate to background: '+e);
+    }
+}
+
 async function procCheckProcess() {
     WJR_DEBUG && console.info('QUEUE: In Flight: '+PROC_inFlight+' In Queue: '+PROC_processingQueue.length);
     if(PROC_processingQueue.length == 0) {
@@ -665,16 +886,34 @@ async function procCheckProcess() {
         return;
     }
     //It is critical that PROC_inFlight always goes up AND DOWN, hence all the try/catch action.
-    let toProcess = PROC_processingQueue.shift();
-    if(toProcess !== undefined) {
+    const tboostBacklogReady = procIsTboostBacklogReady();
+    const backlogSize = PROC_processingQueue.length;
+    const useTboost = tboostBacklogReady
+        && procCanTboostEntries(PROC_processingQueue.slice(0, PROC_TBOOST_BATCH_SIZE));
+    if(tboostBacklogReady && !useTboost) {
+        console.info('TBOOST: BYPASS internal control request at the head of the backlog');
+    }
+    const toProcess = useTboost
+        ? PROC_processingQueue.splice(0, PROC_TBOOST_BATCH_SIZE)
+        : [PROC_processingQueue.shift()];
+    procIsTboostBacklogReady();
+    if(toProcess[0] !== undefined) {
         PROC_inFlight++;
-        PROC_scanStartCount++;
+        PROC_scanStartCount += toProcess.length;
         PROC_throttleRejectionCount = 0;
-        let result;
+        let results = [];
         try {
-            WJR_DEBUG && console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request '+toProcess.requestId);
-            result = await procPerformFiltering(toProcess);
-            
+            WJR_DEBUG && console.debug('QUEUE: Processing (PROC_inFlight='+PROC_inFlight+') request(s) '
+                +toProcess.map(entry => entry.requestId).join(','));
+            if(useTboost) {
+                const oldestWaitMs = performance.now() - Math.min(...toProcess.map(entry => entry.queuedAt ?? entry.startTime));
+                console.info('TBOOST: ACTIVE queue='+backlogSize
+                    +' oldestWaitMs='+Math.round(oldestWaitMs)
+                    +' model='+PROC_activeModelSelection);
+                results = await procPerformTboostBatch(toProcess);
+            } else {
+                results = [await procPerformFiltering(toProcess[0])];
+            }
         } catch(ex) {
             console.error('ML: Error scanning image '+ex);
         }
@@ -683,22 +922,8 @@ async function procCheckProcess() {
             console.error(`QUEUE: Invalid negative PROC_inFlight ${PROC_inFlight}! Setting to 0.`);
             PROC_inFlight = 0;
         }
-        try {
-            const auditThumbnail = result.auditThumbnail;
-            delete result.auditThumbnail;
-            PROC_port.postMessage(result);
-            PROC_port.postMessage({
-                type:'stat',
-                result: result.result,
-                requestId: toProcess.requestId,
-                adaptiveContext: toProcess.adaptiveContext,
-                auditContext: toProcess.auditContext,
-                adaptiveScore: result.adaptiveScore,
-                auditRating: result.auditRating,
-                auditThumbnail: auditThumbnail
-            });
-        } catch(e) {
-            console.error('ERROR: Processor failed to communicate to background: '+e);
+        for(let index = 0; index < toProcess.length; index++) {
+            procPostFilteringResult(toProcess[index], results[index]);
         }
     } else {
         WJR_DEBUG && console.log('QUEUE: Rare time where processing queue drained? Length: '+PROC_processingQueue.length);
@@ -978,6 +1203,10 @@ async function procOnPortMessage(m) {
             WJR_DEBUG && console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
             PROC_isSilentModeEnabled = m.isSilentModeEnabled;
             PROC_isAuditEnabled = m.auditEnabled === true;
+            PROC_isTboostEnabled = m.tboostEnabled !== false;
+            if(!PROC_isTboostEnabled) {
+                PROC_tboostBacklogSince = null;
+            }
         }
         break;
         case 'start': {
@@ -1010,6 +1239,7 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'onstop': {
+            PROC_openRequests[m.requestId].queuedAt = performance.now();
             PROC_processingQueue.push(PROC_openRequests[m.requestId]);
             delete PROC_openRequests[m.requestId];
             await procCheckProcess();

@@ -17,6 +17,12 @@ async function optSaveOptions() {
     });
     browser.runtime.sendMessage({ type: 'setSilentModeEnabled', value: isSilentModeEnabled });
 
+    let isTboostEnabled = document.getElementById('tboost_enabled').checked;
+    await browser.storage.local.set({
+        tboost_enabled: isTboostEnabled
+    });
+    browser.runtime.sendMessage({ type: 'setTboostEnabled', value: isTboostEnabled });
+
     let defaultZone = document.querySelector('input[name="default_zone"]:checked').value;
     await browser.storage.local.set({
         default_zone: defaultZone
@@ -256,6 +262,13 @@ function optRestoreOptions() {
         document.getElementById('default_zone_' + coercedResult).checked = true;
     }
 
+    function setCurrentTboostChoice(rawResult) {
+        const enabled = rawResult.tboost_enabled !== false;
+        console.log('OPTION: Setting sustained backlog acceleration to ' + enabled);
+        document.getElementById('tboost_enabled').checked = enabled;
+        browser.runtime.sendMessage({ type: 'setTboostEnabled', value: enabled });
+    }
+
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
         let result = rawResult.backend_selection;
         console.log('OPTION: Setting backend to ' + result);
@@ -282,6 +295,9 @@ function optRestoreOptions() {
 
     let gettingSilentModeEnabled = browser.storage.local.get('is_silent_mode_enabled');
     gettingSilentModeEnabled.then(setCurrentSilentModeEnabledChoice, onError);
+
+    let gettingTboostEnabled = browser.storage.local.get('tboost_enabled');
+    gettingTboostEnabled.then(setCurrentTboostChoice, onError);
 
     let gettingDefaultZone = browser.storage.local.get('default_zone');
     gettingDefaultZone.then(setDefaultZoneSwitchChoice, onError);
@@ -439,6 +455,7 @@ for (var i = 0, max = radiosSilentModeEnabled.length; i < max; i++) {
         optSaveOptions();
     }
 }
+document.getElementById('tboost_enabled').addEventListener('change', optSaveOptions);
 
 var radiosDefaultZone = document.forms[0].elements["default_zone"];
 for (var i = 0, max = radiosDefaultZone.length; i < max; i++) {

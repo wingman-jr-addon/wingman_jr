@@ -342,6 +342,12 @@
       </div>
     </section>
 
+    <section class="option-group" aria-labelledby="tboost_heading">
+      <h4 id="tboost_heading">Sustained backlog acceleration</h4>
+      <p class="option-description">When at least four image scans stay queued for five seconds, combine four into a single pre-scan at the untrusted-zone threshold. If the pre-scan triggers, each image is rescanned at its own zone threshold.</p>
+      <label class="radio-option" for="tboost_enabled"><input type="checkbox" id="tboost_enabled" checked><span><b>Enable TBOOST</b> - reduce model calls during sustained image backlogs (may miss content that an individual scan would catch)</span></label>
+    </section>
+
     <section class="option-group">
       <h4>Which Tensorflow.js processing backend should be used? (Advanced option)</h4>
       <div class="radio-group">

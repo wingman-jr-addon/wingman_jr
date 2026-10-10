@@ -128,11 +128,13 @@ function bkBroadcastMessageToProcessors(m) {
 }
 
 let BK_isSilentModeEnabled = false;
+let BK_isTboostEnabled = true;
 
 function bkBroadcastProcessorSettings() {
     bkBroadcastMessageToProcessors({
         type: 'settings',
         isSilentModeEnabled: BK_isSilentModeEnabled,
+        tboostEnabled: BK_isTboostEnabled,
         auditEnabled: typeof AUDIT_settings !== 'undefined'
             && AUDIT_settings.mode !== 'off'
     });
@@ -710,7 +712,18 @@ function bkApproxEq(expected, actual) {
     return Math.abs(actual - expected) < 0.02;
 }
 
+function bkIsValidSqrxScore(score) {
+    return score
+        && score[0] && score[0].length >= 1
+        && score[1] && score[1].length >= 4
+        && Number.isFinite(score[0][0])
+        && Array.from(score[1]).slice(0, 4).every(Number.isFinite);
+}
+
 function bkCompareSqrxScores(x, a) {
+    if(!bkIsValidSqrxScore(x) || !bkIsValidSqrxScore(a)) {
+        return false;
+    }
     return bkApproxEq(x[0][0],a[0][0])
         && bkApproxEq(x[1][0],a[1][0])
         && bkApproxEq(x[1][1],a[1][1])
@@ -719,6 +732,15 @@ function bkCompareSqrxScores(x, a) {
 }
 
 function bkHandleCrashDetectionResult(m) {
+    if(!bkIsValidSqrxScore(m.sqrxrScore)) {
+        console.error(`CRASH: Processor returned an invalid health-check score ${JSON.stringify(m.sqrxrScore)}`);
+        CRASH_BAD_STATE_ENCOUNTERED_COUNT++;
+        if (CRASH_BAD_STATE_ENCOUNTERED_COUNT >= CRASH_BAD_STATE_RESTART_THRESHOLD) {
+            console.error(`CRASH: Invalid health-check threshold exceeded, reloading plugin!!!`);
+            browser.runtime.reload();
+        }
+        return;
+    }
     if (!CRASH_DETECTION_EXPECTED_RESULT) {
         if(CRASH_DETECTION_WARMUPS_LEFT > 0) {
             CRASH_DETECTION_WARMUPS_LEFT -= 1;
@@ -1823,6 +1845,10 @@ function bkUpdateFromSettings() {
         BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
         bkBroadcastProcessorSettings();
     });
+    browser.storage.local.get('tboost_enabled').then(tboostResult => {
+        BK_isTboostEnabled = tboostResult.tboost_enabled !== false;
+        bkBroadcastProcessorSettings();
+    });
     bkLoadBackendSettings().catch(error => {
         console.error('LIFECYCLE: Unable to apply processor settings', error);
     });
@@ -1941,6 +1967,9 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setSilentModeEnabled') {
+        bkUpdateFromSettings();
+    }
+    else if (request.type == 'setTboostEnabled') {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setBackendSelection') {
