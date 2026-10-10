@@ -127,7 +127,7 @@ function audPageUpdateModeForm() {
 }
 
 async function audPageLoadState() {
-    AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.getState' });
+    AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.checkPrivateCoverage' });
     audPageRenderModeControls();
 }
 

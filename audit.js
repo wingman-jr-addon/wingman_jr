@@ -46,7 +46,7 @@ let AUDIT_heartbeatTimer = null;
 let AUDIT_unlockedUntil = 0;
 let AUDIT_writeQueue = Promise.resolve();
 let AUDIT_privateWindowIds = new Set();
-let AUDIT_initialized = false;
+let AUDIT_initializationPromise = null;
 
 function auditRequest(request) {
     return new Promise((resolve, reject) => {
@@ -1184,48 +1184,54 @@ function auditOnStorageChanged(changes, areaName) {
 function auditHandleMessage(request) {
     switch (request?.type) {
         case 'audit.getState':
-            return auditGetState();
+            return auditInitialize().then(() => auditGetState());
         case 'audit.setMode':
-            return auditSetMode(
+            return auditInitialize().then(() => auditSetMode(
                 request.mode,
                 request.password,
                 request.allowIncompletePrivateCoverage === true
-            );
+            ));
         case 'audit.resetPassword':
-            return auditResetPassword();
+            return auditInitialize().then(() => auditResetPassword());
         case 'audit.query':
-            return auditQueryWindow(request.startTime, request.endTime, request.binCount);
+            return auditInitialize().then(() =>
+                auditQueryWindow(request.startTime, request.endTime, request.binCount));
         case 'audit.getThumbnail':
-            return auditGetThumbnail(request.id, request.password);
+            return auditInitialize().then(() => auditGetThumbnail(request.id, request.password));
         case 'audit.checkPrivateCoverage':
-            return auditCheckPrivateCoverage('manual').then(() => auditGetState());
+            return auditInitialize()
+                .then(() => auditCheckPrivateCoverage('manual'))
+                .then(() => auditGetState());
         case 'audit.logEvent':
-            return auditAppendEvent(request.eventType, request.details || {});
+            return auditInitialize().then(() =>
+                auditAppendEvent(request.eventType, request.details || {}));
         default:
             return undefined;
     }
 }
 
-async function auditInitialize() {
-    if (AUDIT_initialized) {
-        return;
+function auditInitialize() {
+    if (AUDIT_initializationPromise) {
+        return AUDIT_initializationPromise;
     }
-    AUDIT_initialized = true;
-    const stored = await browser.storage.local.get([AUDIT_STORAGE_KEY, AUDIT_HEARTBEAT_KEY]);
-    AUDIT_settings = auditNormalizeSettings(stored[AUDIT_STORAGE_KEY]);
-    await auditOpenDatabase();
-    auditUpdateModeIndicators();
-    if (AUDIT_settings.mode !== AUDIT_MODES.OFF) {
-        const previousHeartbeat = Number(stored[AUDIT_HEARTBEAT_KEY]);
-        const runtimeDetails = Number.isFinite(previousHeartbeat) && previousHeartbeat > 0
-            ? { gapSeconds: Math.max(0, Math.round((Date.now() - previousHeartbeat) / 1000)) }
-            : { priorHeartbeat: false };
-        await auditAppendEvent('tracking-runtime-started', runtimeDetails);
-        auditStartHeartbeat();
-        await auditCheckPrivateCoverage('startup');
-        auditStartPrivateMonitoring();
-        await auditRefreshPrivateWindows(true);
-    }
+    AUDIT_initializationPromise = (async () => {
+        const stored = await browser.storage.local.get([AUDIT_STORAGE_KEY, AUDIT_HEARTBEAT_KEY]);
+        AUDIT_settings = auditNormalizeSettings(stored[AUDIT_STORAGE_KEY]);
+        await auditOpenDatabase();
+        auditUpdateModeIndicators();
+        if (AUDIT_settings.mode !== AUDIT_MODES.OFF) {
+            const previousHeartbeat = Number(stored[AUDIT_HEARTBEAT_KEY]);
+            const runtimeDetails = Number.isFinite(previousHeartbeat) && previousHeartbeat > 0
+                ? { gapSeconds: Math.max(0, Math.round((Date.now() - previousHeartbeat) / 1000)) }
+                : { priorHeartbeat: false };
+            await auditAppendEvent('tracking-runtime-started', runtimeDetails);
+            auditStartHeartbeat();
+            await auditCheckPrivateCoverage('startup');
+            auditStartPrivateMonitoring();
+            await auditRefreshPrivateWindows(true);
+        }
+    })();
+    return AUDIT_initializationPromise;
 }
 
 if (typeof browser !== 'undefined' && browser.runtime && browser.storage) {

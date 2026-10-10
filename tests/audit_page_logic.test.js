@@ -17,6 +17,15 @@ const {
     audPageWorstRating
 } = require('../audit_page.js');
 
+const auditPageSource = fs.readFileSync('audit_page.js', 'utf8');
+const loadStateStart = auditPageSource.indexOf('async function audPageLoadState');
+const loadStateEnd = auditPageSource.indexOf('async function audPageApplyMode', loadStateStart);
+const loadStateSource = auditPageSource.slice(loadStateStart, loadStateEnd);
+assert.match(loadStateSource, /type:\s*'audit\.checkPrivateCoverage'/,
+    'opening the audit page performs a live private-browsing coverage check');
+assert.doesNotMatch(loadStateSource, /type:\s*'audit\.getState'/,
+    'opening the audit page must not rely on cached private-browsing coverage');
+
 assert.strictEqual(audPageClampBlur(undefined), 5);
 assert.strictEqual(audPageClampBlur(-1), 0);
 assert.strictEqual(audPageClampBlur(10.4), 10);
