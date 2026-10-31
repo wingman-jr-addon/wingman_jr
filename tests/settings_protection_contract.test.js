@@ -61,6 +61,12 @@ assert.doesNotMatch(optionsPage, /I understand that private browsing is not curr
     'the obsolete incomplete-private-browsing acknowledgement is gone');
 assert.doesNotMatch(audit, /allowIncompletePrivateCoverage/,
     'audit activation always requires complete private-window coverage');
+assert.doesNotMatch(audit + options + optionsPage, /AUDIT_UNLOCK_MS|five minutes/i,
+    'settings unlock no longer expires on a timer');
+assert.match(options, /async function optInitializeSecurityState\(\)[\s\S]*type:\s*'audit\.lockSettings'/,
+    'every settings-page load starts from a locked state');
+assert.match(options, /addEventListener\('pagehide'[\s\S]*type:\s*'audit\.lockSettings'/,
+    'leaving the settings page makes a best-effort lock request');
 assert.match(auditPage, /Run in Private Windows/,
     'the audit viewer preserves private-window coverage instructions');
 assert.match(optionsPage, /Run in Private Windows/,

@@ -53,7 +53,7 @@ vm.runInContext(source + `
             globalThis.browser = mockBrowser;
             AUDIT_initializationPromise = Promise.resolve();
             AUDIT_settings = auditNormalizeSettings({ mode: 'off' });
-            AUDIT_settingsUnlockedUntil = 0;
+            AUDIT_settingsUnlocked = false;
             AUDIT_writeQueue = Promise.resolve();
             auditGetMetaValues = async () => ({ scoreCount: 0, thumbnailCount: 0, auditCount: 0 });
             auditAppendEvent = async () => {};

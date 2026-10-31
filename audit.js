@@ -20,7 +20,6 @@ const AUDIT_MAX_EVENTS = 10000;
 const AUDIT_EVENT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 const AUDIT_PRIVATE_POLL_MS = 5000;
 const AUDIT_HEARTBEAT_MS = 15000;
-const AUDIT_UNLOCK_MS = 5 * 60 * 1000;
 const AUDIT_PASSWORD_ITERATIONS = 210000;
 
 const AUDIT_MODES = Object.freeze({
@@ -43,7 +42,7 @@ let AUDIT_scoreDrainPromise = null;
 let AUDIT_flushTimer = null;
 let AUDIT_privatePollTimer = null;
 let AUDIT_heartbeatTimer = null;
-let AUDIT_settingsUnlockedUntil = 0;
+let AUDIT_settingsUnlocked = false;
 let AUDIT_writeQueue = Promise.resolve();
 let AUDIT_privateWindowIds = new Set();
 let AUDIT_initializationPromise = null;
@@ -634,7 +633,7 @@ async function auditClearHistoryAndAddTombstone(type) {
 }
 
 function auditSettingsAreUnlocked() {
-    return !AUDIT_settings.settingsLockEnabled || Date.now() < AUDIT_settingsUnlockedUntil;
+    return !AUDIT_settings.settingsLockEnabled || AUDIT_settingsUnlocked;
 }
 
 function auditLockedError() {
@@ -710,7 +709,7 @@ async function auditEnableSettingsLock(password, confirmPassword) {
     }
     await auditSetPassword(password);
     AUDIT_settings.settingsLockEnabled = true;
-    AUDIT_settingsUnlockedUntil = 0;
+    AUDIT_settingsUnlocked = false;
     await auditSaveSettings();
     await auditAppendEvent('settings-lock-enabled');
     return auditGetState();
@@ -724,13 +723,13 @@ async function auditUnlockSettings(password) {
     if (!(await auditVerifyPassword(password))) {
         throw new Error('The settings password is incorrect.');
     }
-    AUDIT_settingsUnlockedUntil = Date.now() + AUDIT_UNLOCK_MS;
+    AUDIT_settingsUnlocked = true;
     return auditGetState();
 }
 
 async function auditLockSettings() {
     await auditInitialize();
-    AUDIT_settingsUnlockedUntil = 0;
+    AUDIT_settingsUnlocked = false;
     return auditGetState();
 }
 
@@ -739,7 +738,7 @@ async function auditDisableSettingsLock() {
     AUDIT_settings.settingsLockEnabled = false;
     AUDIT_settings.passwordSalt = null;
     AUDIT_settings.passwordVerifier = null;
-    AUDIT_settingsUnlockedUntil = 0;
+    AUDIT_settingsUnlocked = false;
     await auditSaveSettings();
     await auditAppendEvent('settings-lock-disabled');
     return auditGetState();
@@ -756,7 +755,7 @@ async function auditResetPassword() {
         AUDIT_settings.passwordVerifier = null;
         AUDIT_settings.deviceKey = null;
         AUDIT_settings.privateAccessAllowed = await auditReadPrivateAccess();
-        AUDIT_settingsUnlockedUntil = 0;
+        AUDIT_settingsUnlocked = false;
         await auditSaveSettings();
         auditUpdateModeIndicators();
         await browser.storage.local.remove(AUDIT_HEARTBEAT_KEY);

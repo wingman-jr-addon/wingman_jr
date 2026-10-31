@@ -80,7 +80,7 @@ function optRenderSecurityState() {
     document.getElementById('settings_content').hidden = protectedAndLocked;
     document.getElementById('settings_lock_summary').textContent = protectedAndLocked
         ? 'Settings are locked. Enter the password to view or change them.'
-        : 'Settings are unlocked for five minutes. You can view and change them below.';
+        : 'Settings are unlocked until you leave or reload this page.';
     document.getElementById('audit_enabled').checked = OPT_securityState.trackingEnabled === true;
     document.getElementById('audit_disable_warning').hidden = true;
     document.getElementById('confirm_audit_clear').checked = false;
@@ -103,6 +103,11 @@ function optRenderSecurityState() {
 async function optLoadSecurityState() {
     OPT_securityState = await browser.runtime.sendMessage({ type: 'audit.checkPrivateCoverage' });
     optRenderSecurityState();
+}
+
+async function optInitializeSecurityState() {
+    await browser.runtime.sendMessage({ type: 'audit.lockSettings' });
+    await optLoadSecurityState();
 }
 
 async function optEnableSettingsLock() {
@@ -428,9 +433,6 @@ async function optClearAdaptiveMemory() {
 
 function optRestoreOptions() {
     console.log('OPTION: Restoring saved options');
-    optLoadSecurityState().catch(error => {
-        optSetSecurityStatus('settings_lock_status', error.message || String(error), 'error');
-    });
 
     function setCurrentShowOnOffSwitchChoice(rawResult) {
         let result = rawResult.is_on_off_shown;
@@ -631,7 +633,15 @@ async function optSaveUrlRules() {
     }
 }
 
-document.addEventListener("DOMContentLoaded", optRestoreOptions);
+document.addEventListener('DOMContentLoaded', () => {
+    optInitializeSecurityState().catch(error => {
+        optSetSecurityStatus('settings_lock_status', error.message || String(error), 'error');
+    });
+    optRestoreOptions();
+});
+window.addEventListener('pagehide', () => {
+    browser.runtime.sendMessage({ type: 'audit.lockSettings' }).catch(() => {});
+});
 document.getElementById('start_settings_lock_setup').addEventListener('click', optStartSettingsLockSetup);
 document.getElementById('continue_settings_lock_setup').addEventListener('click', optContinueSettingsLockSetup);
 document.getElementById('back_settings_lock_setup').addEventListener('click', optBackSettingsLockSetup);
