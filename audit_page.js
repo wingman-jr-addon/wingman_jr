@@ -82,107 +82,24 @@ function audPageBlockDecisionLabel(block) {
     return parts.join(' · ');
 }
 
-function audPageSelectedMode() {
-    return document.querySelector('input[name="audit-mode"]:checked')?.value || 'off';
-}
-
 function audPageRenderModeControls() {
     if (!AUDPAGE_state) {
         return;
     }
-    const modeInput = document.querySelector(`input[name="audit-mode"][value="${AUDPAGE_state.mode}"]`);
-    if (modeInput) {
-        modeInput.checked = true;
-    }
+    document.getElementById('audit-state-label').textContent = AUDPAGE_state.trackingEnabled
+        ? 'Audit history is on'
+        : 'Audit history is off';
     const coverage = document.getElementById('coverage');
     coverage.dataset.covered = String(AUDPAGE_state.privateAccessAllowed);
     coverage.textContent = AUDPAGE_state.privateAccessAllowed
         ? 'Private browsing included'
         : 'Private browsing not included';
-    document.getElementById('private-help').hidden = AUDPAGE_state.privateAccessAllowed;
-    document.getElementById('reset-password').hidden = AUDPAGE_state.mode !== 'accountability';
-    audPageUpdateModeForm();
-}
-
-function audPageUpdateModeForm() {
-    if (!AUDPAGE_state) {
-        return;
-    }
-    const selected = audPageSelectedMode();
-    document.querySelectorAll('.mode-options label').forEach(label => {
-        label.classList.toggle('selected', label.querySelector('input')?.checked === true);
-    });
-    const needsPassword = selected === 'accountability'
-        ? AUDPAGE_state.mode !== 'accountability'
-        : AUDPAGE_state.mode === 'accountability';
-    document.getElementById('password-panel').hidden = !needsPassword;
-    document.getElementById('password-label').textContent = selected === 'accountability'
-        ? 'Create accountability password'
-        : 'Current accountability password';
-    document.getElementById('password-help').textContent = selected === 'accountability'
-        ? 'At least 8 characters. You will need it to view blocked images or lower this mode.'
-        : 'Required to lower or turn off Accountability.';
-    const incomplete = selected === 'accountability' && !AUDPAGE_state.privateAccessAllowed;
-    document.getElementById('private-ack').hidden = !incomplete;
+    document.getElementById('audit-private-help').hidden = AUDPAGE_state.privateAccessAllowed;
 }
 
 async function audPageLoadState() {
     AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.checkPrivateCoverage' });
     audPageRenderModeControls();
-}
-
-async function audPageApplyMode() {
-    const selected = audPageSelectedMode();
-    const password = document.getElementById('mode-password').value;
-    const allowIncomplete = document.getElementById('allow-incomplete-private').checked;
-    audPageSetStatus('mode-status', 'Applying…');
-    try {
-        AUDPAGE_state = await browser.runtime.sendMessage({
-            type: 'audit.setMode',
-            mode: selected,
-            password,
-            allowIncompletePrivateCoverage: allowIncomplete
-        });
-        document.getElementById('mode-password').value = '';
-        audPageRenderModeControls();
-        audPageSetStatus('mode-status', `Mode set to ${selected}.`, 'saved');
-        await audPageLoadTimeline();
-    } catch (error) {
-        audPageSetStatus('mode-status', error.message || String(error), 'error');
-    }
-}
-
-async function audPageCheckPrivate() {
-    audPageSetStatus('mode-status', 'Checking private browsing access…');
-    try {
-        AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.checkPrivateCoverage' });
-        audPageRenderModeControls();
-        audPageSetStatus(
-            'mode-status',
-            AUDPAGE_state.privateAccessAllowed
-                ? 'Private browsing is included.'
-                : 'Private browsing is still not included.',
-            AUDPAGE_state.privateAccessAllowed ? 'saved' : 'error'
-        );
-        await audPageLoadTimeline();
-    } catch (error) {
-        audPageSetStatus('mode-status', error.message || String(error), 'error');
-    }
-}
-
-async function audPageResetPassword() {
-    if (!confirm('Erase all saved history and blocked images, turn tracking off, and record that the history was reset?')) {
-        return;
-    }
-    audPageSetStatus('mode-status', 'Erasing saved history…');
-    try {
-        AUDPAGE_state = await browser.runtime.sendMessage({ type: 'audit.resetPassword' });
-        audPageRenderModeControls();
-        audPageSetStatus('mode-status', 'Saved history erased. The reset was recorded.', 'saved');
-        await audPageLoadTimeline();
-    } catch (error) {
-        audPageSetStatus('mode-status', error.message || String(error), 'error');
-    }
 }
 
 function audPageHeatLevel(heat) {
@@ -400,6 +317,7 @@ function audPageEventLabel(type) {
         'tracking-runtime-started': 'Wingman Jr. started',
         'score-buffer-overflow': 'Some older activity was removed',
         'accountability-reset': 'History reset',
+        'settings-protection-reset': 'History and settings protection reset',
         'private-coverage-enabled': 'Private browsing included',
         'private-coverage-unavailable': 'Private browsing not included',
         'private-coverage-revoked': 'Private browsing access removed',
@@ -735,17 +653,12 @@ function audPageRenderSelectedBlock() {
     const locked = document.getElementById('thumbnail-locked');
     locked.hidden = false;
     locked.textContent = block.thumbnailId ? 'Thumbnail locked' : 'Thumbnail expired or unavailable';
-    document.getElementById('thumbnail-password').value = '';
     audPageSetStatus('thumbnail-status', '');
     if (!block.thumbnailId) {
-        document.getElementById('thumbnail-password-row').hidden = true;
         audPageSetStatus('thumbnail-status', 'This block remains in history, but its image has expired.', 'error');
         return;
     }
-    document.getElementById('thumbnail-password-row').hidden = AUDPAGE_state.mode !== 'accountability';
-    if (AUDPAGE_state.mode !== 'accountability' || AUDPAGE_state.unlocked) {
-        audPageFetchThumbnail('');
-    }
+    audPageFetchThumbnail();
 }
 
 function audPageOpenBlockCluster(blocks) {
@@ -783,7 +696,7 @@ function audPageRgb332DataUrl(buffer, width, height) {
     return canvas.toDataURL('image/png');
 }
 
-async function audPageFetchThumbnail(password) {
+async function audPageFetchThumbnail() {
     if (!AUDPAGE_selectedBlock || !AUDPAGE_selectedBlock.thumbnailId) {
         return;
     }
@@ -793,16 +706,10 @@ async function audPageFetchThumbnail(password) {
     try {
         const result = await browser.runtime.sendMessage({
             type: 'audit.getThumbnail',
-            id: requestedThumbnailId,
-            password
+            id: requestedThumbnailId
         });
         if (requestId !== AUDPAGE_thumbnailRequestId
             || AUDPAGE_selectedBlock?.thumbnailId !== requestedThumbnailId) {
-            return;
-        }
-        if (result.locked) {
-            document.getElementById('thumbnail-password-row').hidden = false;
-            audPageSetStatus('thumbnail-status', password ? 'Incorrect password.' : 'Enter the accountability password.', password ? 'error' : '');
             return;
         }
         if (!result.ok) {
@@ -814,8 +721,6 @@ async function audPageFetchThumbnail(password) {
         image.src = audPageRgb332DataUrl(result.data, result.width, result.height);
         image.hidden = false;
         document.getElementById('thumbnail-locked').hidden = true;
-        document.getElementById('thumbnail-password-row').hidden = true;
-        AUDPAGE_state.unlocked = true;
         audPageSetStatus('thumbnail-status', result.private ? 'Captured in a private window.' : '');
         audPageLoadTimeline();
     } catch (error) {
@@ -830,12 +735,6 @@ async function audPageInitialize() {
 }
 
 if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
-    document.querySelectorAll('input[name="audit-mode"]').forEach(input => {
-        input.addEventListener('change', audPageUpdateModeForm);
-    });
-    document.getElementById('apply-mode').addEventListener('click', audPageApplyMode);
-    document.getElementById('check-private').addEventListener('click', audPageCheckPrivate);
-    document.getElementById('reset-password').addEventListener('click', audPageResetPassword);
     document.getElementById('previous-week').addEventListener('click', () => audPageShiftWeek(-7));
     document.getElementById('next-week').addEventListener('click', () => audPageShiftWeek(7));
     document.getElementById('week-start').addEventListener('change', () => {
@@ -850,14 +749,6 @@ if (typeof document !== 'undefined' && typeof browser !== 'undefined') {
         audPageApplyThumbnailBlur(event.target.value);
     });
     document.getElementById('close-drawer').addEventListener('click', audPageCloseThumbnailDrawer);
-    document.getElementById('unlock-thumbnail').addEventListener('click', () => {
-        audPageFetchThumbnail(document.getElementById('thumbnail-password').value);
-    });
-    document.getElementById('thumbnail-password').addEventListener('keydown', event => {
-        if (event.key === 'Enter') {
-            audPageFetchThumbnail(event.target.value);
-        }
-    });
     document.getElementById('timeline').parentElement.addEventListener('scroll', audPageDismissCellPopover);
     document.addEventListener('click', event => {
         if (!(event.target instanceof Element) || !event.target.closest('.timeline-hour-cell')) {

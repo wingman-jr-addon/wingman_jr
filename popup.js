@@ -1,6 +1,7 @@
 let POP_activeTab = null;
 let POP_isMasterFilteringEnabled = true;
 let POP_isOnOffSwitchShown = false;
+let POP_settingsLocked = false;
 let POP_masterFilteringState = {
     mode: 'on',
     pauseUntil: null,
@@ -91,6 +92,8 @@ function popUpdateFilteringUi() {
     const masterDetail = document.getElementById('masterFilteringDetail');
 
     powerInput.checked = POP_isMasterFilteringEnabled;
+    powerInput.disabled = POP_settingsLocked;
+    document.getElementById('settingsLockedNotice').hidden = !POP_settingsLocked;
     powerControl.dataset.mode = POP_masterFilteringState.mode;
     let powerTooltip = 'Turn filtering off';
     let pauseProgressDegrees = 0;
@@ -112,6 +115,7 @@ function popUpdateFilteringUi() {
     powerInput.setAttribute('aria-label', powerTooltip);
     powerControl.style.setProperty('--pause-progress', `${pauseProgressDegrees}deg`);
     for (const button of document.querySelectorAll('[data-pause-minutes]')) {
+        button.disabled = POP_settingsLocked;
         const durationMs = Number(button.dataset.pauseMinutes) * 60 * 1000;
         button.setAttribute(
             'aria-pressed',
@@ -126,15 +130,16 @@ function popUpdateFilteringUi() {
         : 'Unavailable on this page';
     document.querySelector('.switch-controls').classList.toggle(
         'filtering-hidden',
-        !POP_isOnOffSwitchShown
+        !POP_isOnOffSwitchShown || POP_settingsLocked
     );
+    document.getElementById('siteModeFieldset').hidden = POP_settingsLocked;
     offInput.hidden = !POP_isOnOffSwitchShown;
     offLabel.hidden = !POP_isOnOffSwitchShown;
     for (const input of modeInputs) {
         input.checked = POP_siteState.supported && (POP_siteState.enabled
             ? input.value === POP_siteState.mode
             : input.value === 'off');
-        input.disabled = !canConfigureSite;
+        input.disabled = !canConfigureSite || POP_settingsLocked;
     }
 
     const adaptiveState = document.getElementById('adaptiveCurrentZone');
@@ -147,7 +152,7 @@ function popUpdateFilteringUi() {
         ? adaptiveZone
         : 'off';
     resetButton.hidden = !POP_siteState.isOverride;
-    resetButton.disabled = !canConfigureSite;
+    resetButton.disabled = !canConfigureSite || POP_settingsLocked;
 
     const source = document.getElementById('siteModeSource');
     if (!POP_siteState.supported) {
@@ -201,6 +206,13 @@ async function popSendSiteChange(message) {
 }
 
 window.onload = async function() {
+    try {
+        const protection = await browser.runtime.sendMessage({ type: 'audit.getState' });
+        POP_settingsLocked = protection.settingsLockEnabled === true
+            && protection.settingsUnlocked !== true;
+    } catch (error) {
+        console.log('Error getting settings protection state: '+error);
+    }
     document.getElementById('isOnOff').addEventListener('change', async event => {
         const previousState = { ...POP_masterFilteringState };
         popSetMasterFilteringState({ mode: event.target.checked ? 'on' : 'off' });

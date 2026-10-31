@@ -48,6 +48,15 @@ vm.runInContext(source + `
             };
             auditStartPrivateMonitoring = () => {};
             auditRefreshPrivateWindows = async () => {};
+        },
+        prepareProtectionTest(mockBrowser) {
+            globalThis.browser = mockBrowser;
+            AUDIT_initializationPromise = Promise.resolve();
+            AUDIT_settings = auditNormalizeSettings({ mode: 'off' });
+            AUDIT_settingsUnlockedUntil = 0;
+            AUDIT_writeQueue = Promise.resolve();
+            auditGetMetaValues = async () => ({ scoreCount: 0, thumbnailCount: 0, auditCount: 0 });
+            auditAppendEvent = async () => {};
         }
     };
 `, context);
@@ -152,7 +161,8 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(entirelyFutureIntervals)), []);
                         mode: 'accountability',
                         privateAccessAllowed: false
                     }
-                })
+                }),
+                set: async () => {}
             }
         }
     });
@@ -169,8 +179,63 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(entirelyFutureIntervals)), []);
     releasePrivateAccessCheck();
     await initializationPromise;
     const initialState = await initialStatePromise;
-    assert.strictEqual(initialState.mode, 'accountability');
+    assert.strictEqual(initialState.mode, 'audit');
+    assert.strictEqual(initialState.settingsLockEnabled, true,
+        'legacy accountability mode migrates to the settings lock');
+    assert.strictEqual(initialState.settingsUnlocked, false);
     assert.strictEqual(initialState.privateAccessAllowed, true);
+
+    const savedProtectionStates = [];
+    api.prepareProtectionTest({
+        storage: {
+            local: {
+                set: async value => savedProtectionStates.push(value),
+                remove: async () => {}
+            }
+        }
+    });
+    await assert.rejects(
+        api.handleMessage({
+            type: 'audit.enableSettingsLock',
+            password: 'short',
+            confirmPassword: 'short'
+        }),
+        /at least 8 characters/
+    );
+    await assert.rejects(
+        api.handleMessage({
+            type: 'audit.enableSettingsLock',
+            password: 'correct horse battery staple',
+            confirmPassword: 'correct horse battery stapler'
+        }),
+        /do not match/
+    );
+    let protectionState = await api.handleMessage({
+        type: 'audit.enableSettingsLock',
+        password: 'correct horse battery staple',
+        confirmPassword: 'correct horse battery staple'
+    });
+    assert.strictEqual(protectionState.settingsLockEnabled, true);
+    assert.strictEqual(protectionState.settingsUnlocked, false,
+        'enabling protection immediately locks the settings');
+    protectionState = await api.handleMessage({ type: 'audit.lockSettings' });
+    assert.strictEqual(protectionState.settingsUnlocked, false);
+    await assert.rejects(
+        api.handleMessage({ type: 'audit.unlockSettings', password: 'wrong password' }),
+        /incorrect/
+    );
+    await assert.rejects(
+        api.handleMessage({ type: 'audit.disableSettingsLock' }),
+        /Settings are locked/
+    );
+    protectionState = await api.handleMessage({
+        type: 'audit.unlockSettings',
+        password: 'correct horse battery staple'
+    });
+    assert.strictEqual(protectionState.settingsUnlocked, true);
+    protectionState = await api.handleMessage({ type: 'audit.disableSettingsLock' });
+    assert.strictEqual(protectionState.settingsLockEnabled, false);
+    assert.ok(savedProtectionStates.length >= 2, 'protection changes are persisted');
     console.log('audit logic tests passed');
 })().catch(error => {
     console.error(error);

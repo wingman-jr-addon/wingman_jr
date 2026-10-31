@@ -377,37 +377,15 @@
 
     <section class="card" aria-labelledby="mode-heading">
       <div class="row spaced">
-        <h2 id="mode-heading">Tracking mode</h2>
+        <h2 id="mode-heading">Audit status</h2>
         <span id="coverage" class="coverage" data-covered="false">Checking private browsing…</span>
       </div>
-      <div class="mode-options">
-        <label><input type="radio" name="audit-mode" value="off"> Off</label>
-        <label><input type="radio" name="audit-mode" value="audit"> Audit</label>
-        <label><input type="radio" name="audit-mode" value="accountability"> Accountability</label>
-      </div>
+      <p><b id="audit-state-label">Checking audit status…</b></p>
       <div class="warning">
-        Audit and Accountability save visited sites, times, filtering results, important changes, and small previews of blocked images on this device. Private browsing is included only when Firefox allows Wingman Jr. to run there.
+        Audit history saves visited sites, times, filtering results, important changes, and small previews of blocked images on this device. Private browsing is included only when Firefox allows Wingman Jr. to run there.
       </div>
-      <div id="private-help" class="warning" hidden>
-        <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr. and set <i>Run in Private Windows</i> to <i>Allow</i>, then check again.
-        <div class="row">
-          <button type="button" id="check-private">Check again</button>
-        </div>
-      </div>
-      <div id="password-panel" hidden>
-        <label for="mode-password"><b id="password-label">Password</b></label>
-        <div class="row">
-          <input id="mode-password" type="password" minlength="8" autocomplete="new-password">
-          <span id="password-help" class="muted">At least 8 characters.</span>
-        </div>
-      </div>
-      <label id="private-ack" hidden>
-        <input type="checkbox" id="allow-incomplete-private">
-        I understand that private browsing will not be included.
-      </label>
-      <div class="row" style="margin-top: 12px">
-        <button type="button" class="primary" id="apply-mode">Apply mode</button>
-        <button type="button" class="danger" id="reset-password" hidden>Forgot password — erase all saved history</button>
+      <div id="audit-private-help" class="warning" hidden>
+        <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr. and set <i>Run in Private Windows</i> to <i>Allow</i>. Then return to Wingman Jr. settings and check again so gaps in coverage are clearly recorded.
       </div>
       <div id="mode-status" class="status" role="status" aria-live="polite"></div>
     </section>
@@ -488,13 +466,6 @@
       </div>
       <input id="thumbnail-blur" type="range" min="0" max="10" step="0.5" value="5" aria-describedby="thumbnail-blur-help">
       <div id="thumbnail-blur-help" class="muted">Defaults by rating: Safe 0px · Q 4px · R 6px · X 10px. Manual adjustments apply only to the current image.</div>
-    </div>
-    <div id="thumbnail-password-row" hidden>
-      <label for="thumbnail-password">Accountability password</label>
-      <div class="row">
-        <input id="thumbnail-password" type="password" autocomplete="current-password">
-        <button type="button" class="primary" id="unlock-thumbnail">Unlock</button>
-      </div>
     </div>
     <div id="thumbnail-status" class="status" role="status" aria-live="polite"></div>
   </aside>

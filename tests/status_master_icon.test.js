@@ -76,7 +76,7 @@ assert.strictEqual(iconUpdateCount, 3);
 api.setMasterState('on', null);
 assert.strictEqual(iconUpdateCount, 4);
 
-api.setAuditMode('accountability');
+api.setAuditMode('audit');
 assert.strictEqual(iconUpdateCount, 5);
 assert.ok(drawingOperations.some(operation => operation[0] === 'fillText' && operation[1] === 'A'));
 

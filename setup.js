@@ -32,13 +32,14 @@ async function finishSetup(applyChoices) {
         if (applyChoices) {
             const useSilentMode = document.querySelector('input[name="blocked-image"]:checked').value === 'quiet';
             const showOnOffControls = document.querySelector('input[name="on-off-controls"]:checked').value === 'shown';
-            await browser.storage.local.set({
-                [SETUP_COMPLETED_KEY]: true,
-                is_silent_mode_enabled: useSilentMode,
-                is_on_off_shown: showOnOffControls
+            await browser.runtime.sendMessage({
+                type: 'settings.update',
+                changes: {
+                    is_silent_mode_enabled: useSilentMode,
+                    is_on_off_shown: showOnOffControls
+                }
             });
-            await browser.runtime.sendMessage({ type: 'setSilentModeEnabled', value: useSilentMode });
-            await browser.runtime.sendMessage({ type: 'setOnOffSwitchShown', value: showOnOffControls });
+            await browser.storage.local.set({ [SETUP_COMPLETED_KEY]: true });
         } else {
             await browser.storage.local.set({ [SETUP_COMPLETED_KEY]: true });
         }

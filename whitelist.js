@@ -215,6 +215,9 @@ function whtIsSameDomainRule(value, domain) {
 }
 
 async function whtAddDomainRule(listName, domain) {
+    if (typeof auditRequireSettingsUnlocked === 'function') {
+        await auditRequireSettingsUnlocked();
+    }
     if (listName !== 'whitelist' && listName !== 'blacklist') {
         throw new Error('Unknown URL rule list: ' + listName);
     }
