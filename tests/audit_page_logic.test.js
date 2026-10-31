@@ -15,9 +15,9 @@ const {
     audPageRatingForBlock,
     audPageRelativeLogit,
     audPageWorstRating
-} = require('../audit_page.js');
+} = require('../ui/audit_page.js');
 
-const auditPageSource = fs.readFileSync('audit_page.js', 'utf8');
+const auditPageSource = fs.readFileSync('ui/audit_page.js', 'utf8');
 const loadStateStart = auditPageSource.indexOf('async function audPageLoadState');
 const loadStateEnd = auditPageSource.indexOf('function audPageHeatLevel', loadStateStart);
 const loadStateSource = auditPageSource.slice(loadStateStart, loadStateEnd);

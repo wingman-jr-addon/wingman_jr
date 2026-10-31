@@ -12,7 +12,7 @@ const context = {
 };
 vm.createContext(context);
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'ui', 'popup.js'), 'utf8');
 vm.runInContext(source + `
     this.smartPauseTestApi = {
         formatRemaining: popFormatPauseRemaining,

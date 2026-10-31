@@ -122,7 +122,7 @@ function normalizeName(name) {
 function getBuiltInCollection() {
     const images = (typeof SM_DATA === 'undefined' ? [] : SM_DATA).map((entry, index) => ({
         id: `builtin-${index}`,
-        dataUrl: entry.file,
+        dataUrl: browser.runtime.getURL(entry.file),
         width: entry.w,
         height: entry.h,
         bytes: 0,
@@ -183,7 +183,6 @@ function renderCollections() {
         <div class="row">
           <button class="secondary" data-action="open" data-id="builtin">View details</button>
           <button class="secondary" data-action="activate" data-id="builtin">Use built-in strategy</button>
-          <a href="silent_credits.html" target="_blank" class="muted">View credits</a>
         </div>
     `;
     collectionListEl.appendChild(builtInCard);

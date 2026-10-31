@@ -3,13 +3,13 @@ const fs = require('fs');
 
 const audit = fs.readFileSync('audit.js', 'utf8');
 const background = fs.readFileSync('background.js', 'utf8');
-const options = fs.readFileSync('options.js', 'utf8');
+const options = fs.readFileSync('ui/options.js', 'utf8');
 const processor = fs.readFileSync('processor.js', 'utf8');
-const setup = fs.readFileSync('setup.js', 'utf8');
-const silentCollections = fs.readFileSync('silent_collections.js', 'utf8');
+const setup = fs.readFileSync('ui/setup.js', 'utf8');
+const silentCollections = fs.readFileSync('ui/silent_collections.js', 'utf8');
 const whitelist = fs.readFileSync('whitelist.js', 'utf8');
-const auditPage = fs.readFileSync('audit.html', 'utf8');
-const optionsPage = fs.readFileSync('options.html', 'utf8');
+const auditPage = fs.readFileSync('ui/audit.html', 'utf8');
+const optionsPage = fs.readFileSync('ui/options.html', 'utf8');
 
 assert.match(audit, /settingsLockEnabled:\s*input\.settingsLockEnabled === true \|\| migratedAccountability/,
     'legacy Accountability users migrate to Audit plus settings protection');

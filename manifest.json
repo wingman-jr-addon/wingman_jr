@@ -53,7 +53,7 @@
     },
 
     "options_ui": {
-      "page": "options.html"
+      "page": "ui/options.html"
     },
 
     "browser_action": {
@@ -61,7 +61,7 @@
       "default_icon" : {
         "32" : "icons/wingman_icon_32.png"
       },
-      "default_popup" :  "popup.html"
+      "default_popup" :  "ui/popup.html"
     },
 
     "content_scripts": [

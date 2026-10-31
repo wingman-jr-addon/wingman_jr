@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const optionsHtml = fs.readFileSync(path.join(root, 'options.html'), 'utf8');
-const optionsSource = fs.readFileSync(path.join(root, 'options.js'), 'utf8');
+const optionsHtml = fs.readFileSync(path.join(root, 'ui', 'options.html'), 'utf8');
+const optionsSource = fs.readFileSync(path.join(root, 'ui', 'options.js'), 'utf8');
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const tabStartupSource = fs.readFileSync(path.join(root, 'processor_tabstartup.js'), 'utf8');
 

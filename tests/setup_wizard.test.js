@@ -63,7 +63,7 @@ vm.runInContext(source.slice(start, openSetupEnd) + `
     await developmentContext.openSetup(true);
     assert.deepStrictEqual(
         openedUrls,
-        ['extension://setup.html'],
+        ['extension://ui/setup.html'],
         'temporary development installs force the wizard open'
     );
 
