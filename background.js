@@ -21,7 +21,7 @@ function bkShouldOpenSetup(settings) {
 async function bkOpenSetupForNewUser(forceOpen = false) {
     const settings = await browser.storage.local.get(BK_SETUP_SETTING_KEYS);
     if (forceOpen || bkShouldOpenSetup(settings)) {
-        await browser.tabs.create({ url: browser.runtime.getURL('setup.html') });
+        await browser.tabs.create({ url: browser.runtime.getURL('ui/setup.html') });
     }
 }
 

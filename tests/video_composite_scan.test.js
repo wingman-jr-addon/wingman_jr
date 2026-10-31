@@ -4,8 +4,8 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.join(__dirname, '..');
-const optionsHtml = fs.readFileSync(path.join(root, 'options.html'), 'utf8');
-const optionsSource = fs.readFileSync(path.join(root, 'options.js'), 'utf8');
+const optionsHtml = fs.readFileSync(path.join(root, 'ui', 'options.html'), 'utf8');
+const optionsSource = fs.readFileSync(path.join(root, 'ui', 'options.js'), 'utf8');
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const videoSource = fs.readFileSync(path.join(root, 'background_video.js'), 'utf8');
 const processorSource = fs.readFileSync(path.join(root, 'processor.js'), 'utf8');
