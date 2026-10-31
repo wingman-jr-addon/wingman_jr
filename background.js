@@ -134,7 +134,10 @@ function bkBroadcastProcessorSettings() {
         type: 'settings',
         isSilentModeEnabled: BK_isSilentModeEnabled,
         auditEnabled: typeof AUDIT_settings !== 'undefined'
-            && AUDIT_settings.mode !== 'off'
+            && AUDIT_settings.mode !== 'off',
+        settingsLocked: typeof AUDIT_settings !== 'undefined'
+            && AUDIT_settings.settingsLockEnabled === true
+            && !auditSettingsAreUnlocked()
     });
 }
 
@@ -1072,8 +1075,10 @@ if (browser.menus) {
 
     function bkUpdateUrlRuleContextMenus(info) {
         const scopes = whtGetDomainScopes(info.srcUrl);
-        const isVisible = scopes !== null;
-        const hasParentDomain = !!scopes?.parentDomain;
+        const settingsUnlocked = typeof auditSettingsAreUnlocked !== 'function'
+            || auditSettingsAreUnlocked();
+        const isVisible = scopes !== null && settingsUnlocked;
+        const hasParentDomain = isVisible && !!scopes?.parentDomain;
         const updates = [
             browser.menus.update(BK_URL_RULE_MENU_IDS.whitelistParent, { visible: isVisible }),
             browser.menus.update(BK_URL_RULE_MENU_IDS.blacklistParent, { visible: isVisible }),
@@ -1868,6 +1873,37 @@ function bkSetAllLogging(onOrOff) {
     bkBroadcastMessageToProcessors({ "type": "set_all_logging", "value" : onOrOff});
 }
 
+const BK_PROTECTED_SETTING_VALIDATORS = Object.freeze({
+    is_on_off_shown: value => typeof value === 'boolean',
+    video_blocking_mode: value => ['enabled', 'quick', 'disabled'].includes(value),
+    is_silent_mode_enabled: value => typeof value === 'boolean',
+    default_zone: value => ['automatic', 'trusted', 'neutral', 'untrusted'].includes(value),
+    model_selection: value => ['n017', 'sqrxr_112'].includes(value),
+    backend_selection: value => ['webgl', 'inprocwebgl', 'wasm', 'webgl_wasm', 'wasm_webgl'].includes(value),
+    url_filter_rules: value => value && typeof value === 'object' && !Array.isArray(value),
+    silent_custom_collections: value => Array.isArray(value),
+    silent_custom_active_collection_id: value => typeof value === 'string'
+});
+
+async function bkUpdateProtectedSettings(changes) {
+    await auditRequireSettingsUnlocked();
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+        throw new Error('Invalid settings update.');
+    }
+    const entries = Object.entries(changes);
+    if (entries.length === 0 || entries.some(([key, value]) =>
+        !BK_PROTECTED_SETTING_VALIDATORS[key]
+        || !BK_PROTECTED_SETTING_VALIDATORS[key](value))) {
+        throw new Error('Invalid or unsupported settings update.');
+    }
+    await browser.storage.local.set(Object.fromEntries(entries));
+    bkUpdateFromSettings();
+    if (Object.prototype.hasOwnProperty.call(changes, 'default_zone')) {
+        await browser.storage.local.get('default_zone').then(bkSetDefaultZone);
+    }
+    return { ok: true };
+}
+
 function bkHandleMessage(request, sender, sendResponse) {
     if (request.type == 'getOnOff') {
         if (BK_masterPauseUntil !== null && BK_masterPauseUntil <= Date.now()) {
@@ -1876,22 +1912,26 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse(bkGetMasterFilteringState());
     }
     else if (request.type == 'setOnOff') {
-        if (typeof auditAppendEvent === 'function') {
-            auditAppendEvent('master-filtering-changed', {
-                to: request.onOff == 'on' ? 'on' : 'off'
-            }).catch(() => {});
-        }
-        return request.onOff == 'on'
-            ? bkResumeMasterFiltering()
-            : bkSetMasterFilteringOff();
+        return auditRequireSettingsUnlocked().then(() => {
+            if (typeof auditAppendEvent === 'function') {
+                auditAppendEvent('master-filtering-changed', {
+                    to: request.onOff == 'on' ? 'on' : 'off'
+                }).catch(() => {});
+            }
+            return request.onOff == 'on'
+                ? bkResumeMasterFiltering()
+                : bkSetMasterFilteringOff();
+        });
     }
     else if (request.type == 'setMasterPause') {
-        if (typeof auditAppendEvent === 'function') {
-            auditAppendEvent('master-filtering-paused', {
-                minutes: Number(request.durationMinutes) || 0
-            }).catch(() => {});
-        }
-        return bkStartMasterPause(request.durationMinutes);
+        return auditRequireSettingsUnlocked().then(() => {
+            if (typeof auditAppendEvent === 'function') {
+                auditAppendEvent('master-filtering-paused', {
+                    minutes: Number(request.durationMinutes) || 0
+                }).catch(() => {});
+            }
+            return bkStartMasterPause(request.durationMinutes);
+        });
     }
     else if (request.type == 'getSiteFilteringState') {
         const siteState = bkGetSiteFilteringState(request.url, request.incognito);
@@ -1899,7 +1939,8 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse(siteState);
     }
     else if (request.type == 'setSiteFilteringMode') {
-        return siteSetModeForUrl(request.url, request.mode)
+        return auditRequireSettingsUnlocked()
+            .then(() => siteSetModeForUrl(request.url, request.mode))
             .then(() => {
                 const siteState = bkGetSiteFilteringState(request.url, request.incognito);
                 bkRefreshActiveBrowserActionZone(request.url, request.incognito);
@@ -1907,7 +1948,8 @@ function bkHandleMessage(request, sender, sendResponse) {
             });
     }
     else if (request.type == 'resetSiteFiltering') {
-        return siteResetForUrl(request.url)
+        return auditRequireSettingsUnlocked()
+            .then(() => siteResetForUrl(request.url))
             .then(() => {
                 const siteState = bkGetSiteFilteringState(request.url, request.incognito);
                 bkRefreshActiveBrowserActionZone(request.url, request.incognito);
@@ -1918,14 +1960,16 @@ function bkHandleMessage(request, sender, sendResponse) {
         sendResponse(bkGetAdaptiveMemoryState());
     }
     else if (request.type == 'setAdaptiveZonePersistence') {
-        return bkSetAdaptivePersistenceEnabled(request.enabled)
+        return auditRequireSettingsUnlocked()
+            .then(() => bkSetAdaptivePersistenceEnabled(request.enabled))
             .then(state => {
                 bkRefreshActiveBrowserActionZone();
                 return state;
             });
     }
     else if (request.type == 'clearAdaptiveZoneMemory') {
-        return bkClearAdaptiveMemory()
+        return auditRequireSettingsUnlocked()
+            .then(() => bkClearAdaptiveMemory())
             .then(state => {
                 bkRefreshActiveBrowserActionZone();
                 return state;
@@ -1933,6 +1977,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'getOnOffSwitchShown') {
         sendResponse({ isOnOffSwitchShown: BK_isOnOffSwitchShown });
+    }
+    else if (request.type == 'settings.update') {
+        return bkUpdateProtectedSettings(request.changes);
     }
     else if (request.type == 'setOnOffSwitchShown') {
         bkUpdateFromSettings();

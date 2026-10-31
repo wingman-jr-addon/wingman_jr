@@ -278,6 +278,7 @@ PROC_auditCanvas.height = PROC_AUDIT_THUMBNAIL_SIZE;
 let PROC_auditCtx = PROC_auditCanvas.getContext('2d', { alpha: false });
 PROC_auditCtx.imageSmoothingEnabled = true;
 let PROC_isAuditEnabled = false;
+let PROC_settingsLocked = false;
 
 function procCreateAuditThumbnail(img) {
     const sourceWidth = img.naturalWidth || img.videoWidth || img.width;
@@ -318,6 +319,9 @@ async function procCommonLogImg(img, message)
 
 async function procCommonWarnImg(img, message)
 {
+    if (PROC_settingsLocked) {
+        return;
+    }
     return await procCommonLogImgGeneric(img, message, console.warn);
 }
 
@@ -1119,6 +1123,7 @@ async function procOnPortMessage(m) {
             WJR_DEBUG && console.log(`CONFIG: Settings update for ${PROC_processorId}: ${JSON.stringify(m)}`);
             PROC_isSilentModeEnabled = m.isSilentModeEnabled;
             PROC_isAuditEnabled = m.auditEnabled === true;
+            PROC_settingsLocked = m.settingsLocked === true;
         }
         break;
         case 'start': {

@@ -1,5 +1,5 @@
 /*
- * Local accountability and audit history.
+ * Local audit history and settings protection.
  *
  * Bulk score history is kept in compact binary IndexedDB chunks. Only the
  * existing top-level filtering site, timestamp, score, threshold, S/Q/R/X
@@ -20,19 +20,18 @@ const AUDIT_MAX_EVENTS = 10000;
 const AUDIT_EVENT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 const AUDIT_PRIVATE_POLL_MS = 5000;
 const AUDIT_HEARTBEAT_MS = 15000;
-const AUDIT_UNLOCK_MS = 5 * 60 * 1000;
 const AUDIT_PASSWORD_ITERATIONS = 210000;
 
 const AUDIT_MODES = Object.freeze({
     OFF: 'off',
-    AUDIT: 'audit',
-    ACCOUNTABILITY: 'accountability'
+    AUDIT: 'audit'
 });
 
 let AUDIT_settings = {
     mode: AUDIT_MODES.OFF,
     privateAccessAllowed: null,
     deviceKey: null,
+    settingsLockEnabled: false,
     passwordSalt: null,
     passwordVerifier: null
 };
@@ -43,7 +42,7 @@ let AUDIT_scoreDrainPromise = null;
 let AUDIT_flushTimer = null;
 let AUDIT_privatePollTimer = null;
 let AUDIT_heartbeatTimer = null;
-let AUDIT_unlockedUntil = 0;
+let AUDIT_settingsUnlocked = false;
 let AUDIT_writeQueue = Promise.resolve();
 let AUDIT_privateWindowIds = new Set();
 let AUDIT_initializationPromise = null;
@@ -99,17 +98,24 @@ function auditOpenDatabase() {
 }
 
 function auditNormalizeMode(mode) {
+    // Accountability used to be a third tracking mode. It now migrates to
+    // ordinary audit history plus an independent settings lock.
+    if (mode === 'accountability') {
+        return AUDIT_MODES.AUDIT;
+    }
     return Object.values(AUDIT_MODES).includes(mode) ? mode : AUDIT_MODES.OFF;
 }
 
 function auditNormalizeSettings(value) {
     const input = value && typeof value === 'object' ? value : {};
+    const migratedAccountability = input.mode === 'accountability';
     return {
         mode: auditNormalizeMode(input.mode),
         privateAccessAllowed: typeof input.privateAccessAllowed === 'boolean'
             ? input.privateAccessAllowed
             : null,
         deviceKey: typeof input.deviceKey === 'string' ? input.deviceKey : null,
+        settingsLockEnabled: input.settingsLockEnabled === true || migratedAccountability,
         passwordSalt: typeof input.passwordSalt === 'string' ? input.passwordSalt : null,
         passwordVerifier: typeof input.passwordVerifier === 'string' ? input.passwordVerifier : null
     };
@@ -550,7 +556,7 @@ async function auditHashEvent(previousHash, event) {
 function auditAppendEvent(type, details = {}, timestamp = Date.now()) {
     if (AUDIT_settings.mode === AUDIT_MODES.OFF
         && type !== 'tracking-turned-off'
-        && type !== 'accountability-reset') {
+        && type !== 'settings-protection-reset') {
         return Promise.resolve();
     }
     return auditEnqueueWrite(() => auditAppendEventNow(type, details, timestamp));
@@ -626,23 +632,37 @@ async function auditClearHistoryAndAddTombstone(type) {
     await auditAppendEventNow(type, {});
 }
 
-async function auditSetMode(requestedMode, password, allowIncompletePrivateCoverage = false) {
-    const nextMode = auditNormalizeMode(requestedMode);
+function auditSettingsAreUnlocked() {
+    return !AUDIT_settings.settingsLockEnabled || AUDIT_settingsUnlocked;
+}
+
+function auditLockedError() {
+    const error = new Error('Settings are locked. Unlock them from the Wingman Jr. settings page.');
+    error.code = 'settings-locked';
+    return error;
+}
+
+async function auditRequireSettingsUnlocked() {
+    await auditInitialize();
+    if (!auditSettingsAreUnlocked()) {
+        throw auditLockedError();
+    }
+    return true;
+}
+
+async function auditSetTracking(enabled) {
+    await auditRequireSettingsUnlocked();
+    const nextMode = enabled ? AUDIT_MODES.AUDIT : AUDIT_MODES.OFF;
     const previousMode = AUDIT_settings.mode;
     if (nextMode === previousMode) {
         return auditGetState();
     }
     await auditFlushPending();
     return auditEnqueueWrite(async () => {
-        if (previousMode === AUDIT_MODES.ACCOUNTABILITY
-            && !(await auditVerifyPassword(password))) {
-            throw new Error('The accountability password is incorrect.');
-        }
         const privateAllowed = await auditReadPrivateAccess();
-        if (nextMode === AUDIT_MODES.ACCOUNTABILITY
-            && !privateAllowed
-            && !allowIncompletePrivateCoverage) {
-            const error = new Error('Enable Wingman Jr. in private windows, or explicitly continue with incomplete coverage.');
+        if (nextMode === AUDIT_MODES.AUDIT
+            && !privateAllowed) {
+            const error = new Error('Enable Wingman Jr. in private windows before turning audit on.');
             error.code = 'private-coverage-required';
             throw error;
         }
@@ -652,10 +672,7 @@ async function auditSetMode(requestedMode, password, allowIncompletePrivateCover
             auditStopHeartbeat();
             await auditClearHistoryAndAddTombstone('tracking-turned-off');
             AUDIT_settings.mode = AUDIT_MODES.OFF;
-            AUDIT_settings.passwordSalt = null;
-            AUDIT_settings.passwordVerifier = null;
             AUDIT_settings.deviceKey = null;
-            AUDIT_unlockedUntil = 0;
             await auditSaveSettings();
             auditUpdateModeIndicators();
             await browser.storage.local.remove(AUDIT_HEARTBEAT_KEY);
@@ -663,16 +680,6 @@ async function auditSetMode(requestedMode, password, allowIncompletePrivateCover
         }
 
         auditEnsureDeviceKey();
-        if (nextMode === AUDIT_MODES.ACCOUNTABILITY) {
-            if (previousMode !== AUDIT_MODES.ACCOUNTABILITY) {
-                await auditSetPassword(password);
-            }
-            AUDIT_unlockedUntil = Date.now() + AUDIT_UNLOCK_MS;
-        } else {
-            AUDIT_settings.passwordSalt = null;
-            AUDIT_settings.passwordVerifier = null;
-            AUDIT_unlockedUntil = 0;
-        }
         AUDIT_settings.mode = nextMode;
         AUDIT_settings.privateAccessAllowed = privateAllowed;
         await auditSaveSettings();
@@ -692,33 +699,72 @@ async function auditSetMode(requestedMode, password, allowIncompletePrivateCover
     });
 }
 
+async function auditEnableSettingsLock(password, confirmPassword) {
+    await auditInitialize();
+    if (AUDIT_settings.settingsLockEnabled) {
+        throw new Error('Settings protection is already enabled.');
+    }
+    if (password !== confirmPassword) {
+        throw new Error('The two passwords do not match.');
+    }
+    await auditSetPassword(password);
+    AUDIT_settings.settingsLockEnabled = true;
+    AUDIT_settingsUnlocked = false;
+    await auditSaveSettings();
+    auditUpdateSettingsLockIndicators();
+    await auditAppendEvent('settings-lock-enabled');
+    return auditGetState();
+}
+
+async function auditUnlockSettings(password) {
+    await auditInitialize();
+    if (!AUDIT_settings.settingsLockEnabled) {
+        return auditGetState();
+    }
+    if (!(await auditVerifyPassword(password))) {
+        throw new Error('The settings password is incorrect.');
+    }
+    AUDIT_settingsUnlocked = true;
+    auditUpdateSettingsLockIndicators();
+    return auditGetState();
+}
+
+async function auditLockSettings() {
+    await auditInitialize();
+    AUDIT_settingsUnlocked = false;
+    auditUpdateSettingsLockIndicators();
+    return auditGetState();
+}
+
+async function auditDisableSettingsLock() {
+    await auditRequireSettingsUnlocked();
+    AUDIT_settings.settingsLockEnabled = false;
+    AUDIT_settings.passwordSalt = null;
+    AUDIT_settings.passwordVerifier = null;
+    AUDIT_settingsUnlocked = false;
+    await auditSaveSettings();
+    auditUpdateSettingsLockIndicators();
+    await auditAppendEvent('settings-lock-disabled');
+    return auditGetState();
+}
+
 async function auditResetPassword() {
     return auditEnqueueWrite(async () => {
         auditStopPrivateMonitoring();
         auditStopHeartbeat();
-        await auditClearHistoryAndAddTombstone('accountability-reset');
+        await auditClearHistoryAndAddTombstone('settings-protection-reset');
         AUDIT_settings.mode = AUDIT_MODES.OFF;
+        AUDIT_settings.settingsLockEnabled = false;
         AUDIT_settings.passwordSalt = null;
         AUDIT_settings.passwordVerifier = null;
         AUDIT_settings.deviceKey = null;
         AUDIT_settings.privateAccessAllowed = await auditReadPrivateAccess();
-        AUDIT_unlockedUntil = 0;
+        AUDIT_settingsUnlocked = false;
         await auditSaveSettings();
         auditUpdateModeIndicators();
         await browser.storage.local.remove(AUDIT_HEARTBEAT_KEY);
         return auditGetState();
     });
-}
-
-async function auditUnlock(password) {
-    if (AUDIT_settings.mode !== AUDIT_MODES.ACCOUNTABILITY) {
-        return true;
-    }
-    if (!(await auditVerifyPassword(password))) {
-        return false;
-    }
-    AUDIT_unlockedUntil = Date.now() + AUDIT_UNLOCK_MS;
-    return true;
 }
 
 async function auditReadPrivateAccess() {
@@ -1065,13 +1111,7 @@ async function auditQueryWindow(startTime, endTime, binCount = 168) {
     };
 }
 
-async function auditGetThumbnail(id, password) {
-    if (AUDIT_settings.mode === AUDIT_MODES.ACCOUNTABILITY
-        && Date.now() >= AUDIT_unlockedUntil) {
-        if (!(await auditUnlock(password))) {
-            return { ok: false, locked: true };
-        }
-    }
+async function auditGetThumbnail(id) {
     const db = await auditOpenDatabase();
     const tx = db.transaction('thumbnails', 'readonly');
     const record = await auditRequest(tx.objectStore('thumbnails').get(Number(id)));
@@ -1104,8 +1144,10 @@ async function auditGetState() {
     const meta = await auditGetMetaValues(['scoreCount', 'thumbnailCount', 'auditCount']);
     return {
         mode: AUDIT_settings.mode,
+        trackingEnabled: AUDIT_settings.mode === AUDIT_MODES.AUDIT,
         privateAccessAllowed: AUDIT_settings.privateAccessAllowed === true,
-        unlocked: AUDIT_settings.mode !== AUDIT_MODES.ACCOUNTABILITY || Date.now() < AUDIT_unlockedUntil,
+        settingsLockEnabled: AUDIT_settings.settingsLockEnabled,
+        settingsUnlocked: auditSettingsAreUnlocked(),
         scoreCount: Number(meta.scoreCount) || 0,
         thumbnailCount: Number(meta.thumbnailCount) || 0,
         auditEventCount: Number(meta.auditCount) || 0,
@@ -1121,6 +1163,12 @@ function auditUpdateModeIndicators() {
     if (typeof statusSetAuditMode === 'function') {
         statusSetAuditMode(AUDIT_settings.mode);
     }
+    if (typeof bkBroadcastProcessorSettings === 'function') {
+        bkBroadcastProcessorSettings();
+    }
+}
+
+function auditUpdateSettingsLockIndicators() {
     if (typeof bkBroadcastProcessorSettings === 'function') {
         bkBroadcastProcessorSettings();
     }
@@ -1151,6 +1199,8 @@ function auditOnStorageChanged(changes, areaName) {
         'is_silent_mode_enabled',
         'site_filtering_settings',
         'url_filter_rules',
+        'silent_custom_collections',
+        'silent_custom_active_collection_id',
         'remember_adaptive_zones'
     ]);
     for (const [key, change] of Object.entries(changes)) {
@@ -1185,12 +1235,18 @@ function auditHandleMessage(request) {
     switch (request?.type) {
         case 'audit.getState':
             return auditInitialize().then(() => auditGetState());
-        case 'audit.setMode':
-            return auditInitialize().then(() => auditSetMode(
-                request.mode,
-                request.password,
-                request.allowIncompletePrivateCoverage === true
+        case 'audit.setTracking':
+            return auditInitialize().then(() => auditSetTracking(
+                request.enabled === true
             ));
+        case 'audit.enableSettingsLock':
+            return auditEnableSettingsLock(request.password, request.confirmPassword);
+        case 'audit.unlockSettings':
+            return auditUnlockSettings(request.password);
+        case 'audit.lockSettings':
+            return auditLockSettings();
+        case 'audit.disableSettingsLock':
+            return auditDisableSettingsLock();
         case 'audit.resetPassword':
             return auditInitialize().then(() => auditResetPassword());
         case 'audit.query':
@@ -1216,7 +1272,11 @@ function auditInitialize() {
     }
     AUDIT_initializationPromise = (async () => {
         const stored = await browser.storage.local.get([AUDIT_STORAGE_KEY, AUDIT_HEARTBEAT_KEY]);
-        AUDIT_settings = auditNormalizeSettings(stored[AUDIT_STORAGE_KEY]);
+        const storedAuditSettings = stored[AUDIT_STORAGE_KEY];
+        AUDIT_settings = auditNormalizeSettings(storedAuditSettings);
+        if (storedAuditSettings?.mode === 'accountability') {
+            await auditSaveSettings();
+        }
         await auditOpenDatabase();
         auditUpdateModeIndicators();
         if (AUDIT_settings.mode !== AUDIT_MODES.OFF) {

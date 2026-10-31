@@ -350,11 +350,21 @@
                 text-decoration: none;
             }
             .footer-links a:hover { text-decoration: underline; }
+            #settingsLockedNotice {
+                padding: 7px 9px;
+                border-radius: 7px;
+                background: rgba(122, 77, 8, 0.12);
+                color: #7a4d08;
+                font-size: 11px;
+            }
         </style>
         <script src="popup.js"></script>
     </head>
     <body>
         <form id="popupForm">
+            <div id="settingsLockedNotice" hidden>
+                Settings are locked. <a href="options.html" target="_blank">Unlock in settings</a>
+            </div>
             <div class="site-heading">
                 <span class="site-heading-text">
                     <span class="eyebrow">Current site</span>

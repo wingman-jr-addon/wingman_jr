@@ -178,7 +178,7 @@ function statusRegenerateIcon(force = false) {
         }
     }
 
-    // Audit/accountability marker. The upper-right corner is kept separate
+    // Audit marker. The upper-right corner is kept separate
     // from the existing video and master-filtering indicators.
     if (STATUS_auditMode !== 'off') {
         ctx.fillStyle = '#1F2A44';
@@ -220,9 +220,7 @@ function statusSetMasterFilteringState(mode, pauseUntil) {
 }
 
 function statusSetAuditMode(mode) {
-    STATUS_auditMode = mode === 'audit' || mode === 'accountability'
-        ? mode
-        : 'off';
+    STATUS_auditMode = mode === 'audit' ? mode : 'off';
     statusUpdateVisuals();
 }
 
@@ -330,9 +328,7 @@ function statusUpdateVisuals() {
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
-    const auditTitle = STATUS_auditMode === 'accountability'
-        ? 'Accountability tracking is active\r\n'
-        : (STATUS_auditMode === 'audit' ? 'Audit tracking is active\r\n' : '');
+    const auditTitle = STATUS_auditMode === 'audit' ? 'Audit tracking is active\r\n' : '';
     browser.browserAction.setTitle({ title: statusGetMasterFilteringTitle()
         + auditTitle
         + 'Blocked '+STATUS_imageCounts['block']+'/'+STATUS_imageCheckCount+' images\r\n'

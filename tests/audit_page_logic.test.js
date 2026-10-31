@@ -19,7 +19,7 @@ const {
 
 const auditPageSource = fs.readFileSync('audit_page.js', 'utf8');
 const loadStateStart = auditPageSource.indexOf('async function audPageLoadState');
-const loadStateEnd = auditPageSource.indexOf('async function audPageApplyMode', loadStateStart);
+const loadStateEnd = auditPageSource.indexOf('function audPageHeatLevel', loadStateStart);
 const loadStateSource = auditPageSource.slice(loadStateStart, loadStateEnd);
 assert.match(loadStateSource, /type:\s*'audit\.checkPrivateCoverage'/,
     'opening the audit page performs a live private-browsing coverage check');

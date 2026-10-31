@@ -158,9 +158,12 @@ async function loadState() {
 
 async function saveState() {
     try {
-        await browser.storage.local.set({
-            [STORAGE_KEYS.collections]: collections,
-            [STORAGE_KEYS.activeCollection]: activeCollectionId
+        await browser.runtime.sendMessage({
+            type: 'settings.update',
+            changes: {
+                [STORAGE_KEYS.collections]: collections,
+                [STORAGE_KEYS.activeCollection]: activeCollectionId
+            }
         });
         setStatus('Collections updated.');
     } catch (error) {
@@ -876,7 +879,22 @@ searchQueryEl.addEventListener('keydown', event => {
     }
 });
 
-loadState();
-renderLicenseLinks();
-populateProviders();
-renderSearchResults();
+async function initializeSilentCollections() {
+    await loadState();
+    renderLicenseLinks();
+    populateProviders();
+    renderSearchResults();
+    try {
+        const protection = await browser.runtime.sendMessage({ type: 'audit.getState' });
+        if (protection.settingsLockEnabled && !protection.settingsUnlocked) {
+            document.querySelectorAll('button, input, select').forEach(control => {
+                control.disabled = true;
+            });
+            setStatus('Settings are locked. Unlock them from the main Wingman Jr. settings page before changing silent collections.', true);
+        }
+    } catch (error) {
+        console.warn('Unable to read settings protection state', error);
+    }
+}
+
+initializeSilentCollections();

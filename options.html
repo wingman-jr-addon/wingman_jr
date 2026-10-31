@@ -21,6 +21,9 @@
       line-height: 1.5;
       overflow-x: hidden;
     }
+    body.settings-locked {
+      background: #ffffff;
+    }
     form {
       max-width: 720px;
       width: 100%;
@@ -214,11 +217,160 @@
       margin: 7px 0;
       color: #7a4d08;
     }
+    .security-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .security-row input[type="password"] {
+      min-width: 210px;
+      padding: 5px 7px;
+    }
+    .security-status {
+      margin-top: 6px;
+      color: #4f5b75;
+    }
+    .security-status[data-state="error"] { color: #b42318; }
+    .security-status[data-state="saved"] { color: #18794e; }
+    .protection-step {
+      margin-top: 10px;
+      padding: 11px;
+      border: 1px solid rgba(31, 42, 68, 0.12);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.58);
+    }
+    .protection-step h5 {
+      margin: 0 0 6px;
+      font-size: 0.98rem;
+    }
+    .protection-step ul {
+      margin: 7px 0;
+      padding-left: 21px;
+    }
+    .protection-warning {
+      margin: 8px 0;
+      padding: 8px 9px;
+      border-radius: 6px;
+      background: rgba(180, 35, 24, 0.08);
+      color: #8f251c;
+    }
+    .password-fields {
+      display: grid;
+      gap: 8px;
+      max-width: 410px;
+    }
+    .password-fields label {
+      display: grid;
+      gap: 3px;
+      font-weight: 600;
+    }
+    .password-fields input[type="password"] {
+      padding: 6px 8px;
+    }
+    #password_match_status {
+      min-height: 1.35em;
+      font-size: 0.9rem;
+    }
+    #password_match_status[data-state="error"] { color: #b42318; }
+    #password_match_status[data-state="saved"] { color: #18794e; }
+    #audit_private_help {
+      margin: 9px 0;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: rgba(122, 77, 8, 0.10);
+      color: #7a4d08;
+    }
   </style>
 </head>
 
 <body>
   <form>
+    <section class="option-group audit-option-card" id="protection_controls">
+      <h4>Settings protection</h4>
+      <p class="option-description">Use one password to guard filtering controls, site exceptions, URL lists, and the rest of Wingman Jr.'s settings.</p>
+
+      <div id="lock_unprotected_view">
+        <p class="security-status">Settings are currently open and can be changed without a password.</p>
+        <div class="security-row">
+          <button type="button" id="start_settings_lock_setup">Set up password protection</button>
+        </div>
+      </div>
+
+      <div id="lock_setup_wizard" class="protection-step" hidden>
+        <div id="lock_setup_intro">
+          <h5>Protect these settings?</h5>
+          <p>After protection is enabled, the settings page stays hidden until the password is entered. It locks again when you leave or reload this page.</p>
+          <ul>
+            <li>Filtering on/off and Smart Pause</li>
+            <li>Site zones and URL whitelist or blacklist rules</li>
+            <li>Audit, filtering model, and other add-on settings</li>
+          </ul>
+          <p class="protection-warning"><b>Keep the password somewhere safe.</b> A forgotten-password reset removes protection, turns audit off, and erases saved audit history.</p>
+          <div class="security-row">
+            <button type="button" id="continue_settings_lock_setup">Continue</button>
+            <button type="button" id="cancel_settings_lock_setup">Cancel</button>
+          </div>
+        </div>
+        <div id="lock_setup_password" hidden>
+          <h5>Create the settings password</h5>
+          <p>Enter the same password twice. It must be at least eight characters.</p>
+          <div class="password-fields">
+            <label for="new_settings_password">Password
+              <input id="new_settings_password" type="password" minlength="8" autocomplete="new-password">
+            </label>
+            <label for="confirm_settings_password">Confirm password
+              <input id="confirm_settings_password" type="password" minlength="8" autocomplete="new-password">
+            </label>
+            <span id="password_match_status" role="status" aria-live="polite"></span>
+          </div>
+          <div class="security-row">
+            <button type="button" id="enable_settings_lock" disabled>Protect settings</button>
+            <button type="button" id="back_settings_lock_setup">Back</button>
+            <button type="button" id="cancel_settings_lock_password">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="lock_protected_view" hidden>
+        <p id="settings_lock_summary" class="security-status">Settings are locked.</p>
+        <div id="lock_unlock_row" class="security-row">
+          <input id="current_settings_password" type="password" autocomplete="current-password" placeholder="Settings password">
+          <button type="button" id="unlock_settings">Unlock settings</button>
+          <button type="button" id="lock_settings_now" hidden>Lock now</button>
+          <button type="button" id="start_disable_settings_lock" hidden>Remove protection</button>
+          <button type="button" id="start_reset_settings_password">Forgot password</button>
+        </div>
+      </div>
+
+      <div id="lock_remove_wizard" class="protection-step" hidden>
+        <h5>Remove password protection?</h5>
+        <p>This makes all settings immediately editable without a password. It does <b>not</b> turn audit off, erase audit history, or change your current filtering choices.</p>
+        <div class="security-row">
+          <button type="button" id="disable_settings_lock">Remove protection</button>
+          <button type="button" id="cancel_disable_settings_lock">Keep protection</button>
+        </div>
+      </div>
+
+      <div id="lock_reset_wizard" class="protection-step" hidden>
+        <h5>Reset a forgotten password?</h5>
+        <p class="protection-warning">This removes password protection, turns audit off, and permanently erases saved audit history and blocked-image previews. Your current filtering settings remain in place.</p>
+        <label class="radio-option" for="confirm_password_reset">
+          <input type="checkbox" id="confirm_password_reset">
+          <span>I understand what will be erased.</span>
+        </label>
+        <div class="security-row">
+          <button type="button" id="reset_settings_password" disabled>Reset protection and erase history</button>
+          <button type="button" id="cancel_reset_settings_password">Cancel</button>
+        </div>
+      </div>
+
+      <div id="settings_lock_status" class="security-status" role="status" aria-live="polite"></div>
+    </section>
+
+    <div id="settings_content" hidden>
+
     <section class="option-group">
       <h4>Show on/off controls on the main menu?</h4>
       <p class="option-description">Show controls for pausing filtering everywhere, including Smart Pause timers, or persistently turning it off for the current site. The Off site card is hidden with these controls; the other zone cards remain available. This also controls the Reveal Blocked Image menu visibility.</p>
@@ -287,10 +439,31 @@
     </section>
 
     <section class="option-group audit-option-card">
-      <h4>Audit and accountability</h4>
-      <p class="option-description">Optionally keep a local, reduced history of filtering scores, mode changes, private browsing coverage, and tiny thumbnails of blocked images. The default is Off.</p>
-      <p class="privacy-warning"><b>Privacy:</b> Audit and Accountability modes intentionally store page-site domains and browsing-derived information on this device, including activity from private windows when Firefox allows Wingman Jr. to run there.</p>
-      <a href="audit.html" target="_blank">Manage audit history &gt;&gt;</a>
+      <h4>Audit history</h4>
+      <p class="option-description">Optionally keep a local, reduced history of filtering scores, important changes, private browsing coverage, and tiny thumbnails of blocked images.</p>
+      <p class="privacy-warning"><b>Privacy:</b> Audit history intentionally stores page-site domains and browsing-derived information on this device, including activity from private windows when Firefox allows Wingman Jr. to run there.</p>
+      <label class="radio-option" for="audit_enabled">
+        <input type="checkbox" id="audit_enabled">
+        <span>Keep audit history on this device</span>
+      </label>
+      <div id="audit_disable_warning" class="protection-warning" hidden>
+        <b>Turning audit off permanently erases the saved audit history and blocked-image previews.</b>
+        <label class="radio-option" for="confirm_audit_clear">
+          <input type="checkbox" id="confirm_audit_clear">
+          <span>I understand that the saved history will be erased.</span>
+        </label>
+      </div>
+      <div id="audit_private_help" hidden>
+        <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr., set <i>Run in Private Windows</i> to <i>Allow</i>, then return here and check again.
+        <div class="security-row">
+          <button type="button" id="check_audit_private_access">Check again</button>
+        </div>
+      </div>
+      <div class="security-row">
+        <button type="button" id="apply_audit_setting">Apply audit setting</button>
+        <a href="audit.html" target="_blank">View audit history &gt;&gt;</a>
+      </div>
+      <div id="audit_setting_status" class="security-status" role="status" aria-live="polite"></div>
     </section>
 
     <section class="option-group url-lists" aria-labelledby="url_lists_heading">
@@ -356,6 +529,7 @@
     <div>
       <a id="feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSe5QJvFmXXH8-kWPgz3Td1xLGuje_-2K-oZt4pLKCuOiyIhIg/viewform?usp=sf_link">Feedback?</a><br />
       <a id="github" href="https://github.com/wingman-jr-addon/wingman_jr/issues">Are you a developer? File issues/requests on GitHub</a>
+    </div>
     </div>
   </form>
   <script src="options.js"></script>
