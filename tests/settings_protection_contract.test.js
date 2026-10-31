@@ -4,6 +4,7 @@ const fs = require('fs');
 const audit = fs.readFileSync('audit.js', 'utf8');
 const background = fs.readFileSync('background.js', 'utf8');
 const options = fs.readFileSync('options.js', 'utf8');
+const processor = fs.readFileSync('processor.js', 'utf8');
 const setup = fs.readFileSync('setup.js', 'utf8');
 const silentCollections = fs.readFileSync('silent_collections.js', 'utf8');
 const whitelist = fs.readFileSync('whitelist.js', 'utf8');
@@ -67,6 +68,10 @@ assert.match(options, /async function optInitializeSecurityState\(\)[\s\S]*type:
     'every settings-page load starts from a locked state');
 assert.match(options, /addEventListener\('pagehide'[\s\S]*type:\s*'audit\.lockSettings'/,
     'leaving the settings page makes a best-effort lock request');
+assert.match(background, /settingsLocked:[\s\S]*settingsLockEnabled[\s\S]*auditSettingsAreUnlocked/,
+    'processors receive the effective settings-lock state');
+assert.match(processor, /async function procCommonWarnImg[\s\S]*if \(PROC_settingsLocked\)[\s\S]*return;/,
+    'blocked-image console previews are suppressed while settings are locked');
 assert.match(auditPage, /Run in Private Windows/,
     'the audit viewer preserves private-window coverage instructions');
 assert.match(optionsPage, /Run in Private Windows/,

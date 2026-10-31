@@ -134,7 +134,10 @@ function bkBroadcastProcessorSettings() {
         type: 'settings',
         isSilentModeEnabled: BK_isSilentModeEnabled,
         auditEnabled: typeof AUDIT_settings !== 'undefined'
-            && AUDIT_settings.mode !== 'off'
+            && AUDIT_settings.mode !== 'off',
+        settingsLocked: typeof AUDIT_settings !== 'undefined'
+            && AUDIT_settings.settingsLockEnabled === true
+            && !auditSettingsAreUnlocked()
     });
 }
 

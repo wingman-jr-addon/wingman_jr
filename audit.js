@@ -711,6 +711,7 @@ async function auditEnableSettingsLock(password, confirmPassword) {
     AUDIT_settings.settingsLockEnabled = true;
     AUDIT_settingsUnlocked = false;
     await auditSaveSettings();
+    auditUpdateSettingsLockIndicators();
     await auditAppendEvent('settings-lock-enabled');
     return auditGetState();
 }
@@ -724,12 +725,14 @@ async function auditUnlockSettings(password) {
         throw new Error('The settings password is incorrect.');
     }
     AUDIT_settingsUnlocked = true;
+    auditUpdateSettingsLockIndicators();
     return auditGetState();
 }
 
 async function auditLockSettings() {
     await auditInitialize();
     AUDIT_settingsUnlocked = false;
+    auditUpdateSettingsLockIndicators();
     return auditGetState();
 }
 
@@ -740,6 +743,7 @@ async function auditDisableSettingsLock() {
     AUDIT_settings.passwordVerifier = null;
     AUDIT_settingsUnlocked = false;
     await auditSaveSettings();
+    auditUpdateSettingsLockIndicators();
     await auditAppendEvent('settings-lock-disabled');
     return auditGetState();
 }
@@ -1159,6 +1163,12 @@ function auditUpdateModeIndicators() {
     if (typeof statusSetAuditMode === 'function') {
         statusSetAuditMode(AUDIT_settings.mode);
     }
+    if (typeof bkBroadcastProcessorSettings === 'function') {
+        bkBroadcastProcessorSettings();
+    }
+}
+
+function auditUpdateSettingsLockIndicators() {
     if (typeof bkBroadcastProcessorSettings === 'function') {
         bkBroadcastProcessorSettings();
     }
