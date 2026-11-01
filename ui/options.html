@@ -5,6 +5,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wingman Jr. Settings</title>
+  <link rel="icon" type="image/png" href="../icons/wingman_icon_32.png">
   <style>
     :root {
       color-scheme: light dark;
@@ -532,8 +534,8 @@
             <span>I understand that the saved history will be erased.</span>
           </label>
         </div>
-        <div id="audit_private_help" hidden>
-          <b>Private browsing is not included.</b> In Firefox Add-ons, open Wingman Jr., set <i>Run in Private Windows</i> to <i>Allow</i>, then return here and check again.
+        <div id="audit_private_help" class="protection-warning" hidden>
+          <b>Private browsing is not included.</b> Someone can open a Private Window to browse without that activity appearing in Audit. To close this gap, open Wingman Jr. in Firefox Add-ons and set <i>Run in Private Windows</i> to <i>Allow</i>.
           <div class="security-row">
             <button type="button" id="check_audit_private_access">Check again</button>
           </div>

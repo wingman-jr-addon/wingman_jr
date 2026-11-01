@@ -257,10 +257,6 @@ async function optApplyAuditSetting() {
         optSetSecurityStatus('audit_setting_status', 'Confirm that the saved audit history will be erased.', 'error');
         return;
     }
-    if (enabled && !OPT_securityState.privateAccessAllowed) {
-        optSetSecurityStatus('audit_setting_status', 'Enable private-window access and check again before turning audit on.', 'error');
-        return;
-    }
     try {
         OPT_securityState = await browser.runtime.sendMessage({
             type: 'audit.setTracking',
