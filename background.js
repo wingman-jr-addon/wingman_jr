@@ -227,7 +227,7 @@ function bkOnProcessorMessage(m) {
             if (m.requestId.startsWith('crash-detection-')) {
                 break;
             }
-            statusCompleteImageCheck(m.requestId, m.result);
+            statusCompleteImageCheck(m.requestId, m.result, m.tabId);
             bkRecordAdaptiveScore(m.adaptiveContext, m.adaptiveScore);
             if (typeof auditRecordScan === 'function') {
                 auditRecordScan(
@@ -581,7 +581,7 @@ function bkSetStatusForZone(zone) {
 }
 
 let BK_browserActionRefreshGeneration = 0;
-async function bkRefreshActiveBrowserActionZone(pageUrl = null, isIncognito = false) {
+async function bkRefreshActiveBrowserActionZone(pageUrl = null, isIncognito = false, tabId = null) {
     const refreshGeneration = ++BK_browserActionRefreshGeneration;
     let resolvedUrl = pageUrl;
     if (typeof resolvedUrl !== 'string') {
@@ -591,6 +591,7 @@ async function bkRefreshActiveBrowserActionZone(pageUrl = null, isIncognito = fa
             isIncognito = Array.isArray(tabs) && tabs.length
                 ? tabs[0].incognito === true
                 : false;
+            tabId = Array.isArray(tabs) && tabs.length ? tabs[0].id : null;
         } catch (error) {
             resolvedUrl = null;
         }
@@ -598,6 +599,7 @@ async function bkRefreshActiveBrowserActionZone(pageUrl = null, isIncognito = fa
     if (refreshGeneration !== BK_browserActionRefreshGeneration) {
         return;
     }
+    statusRefreshTabBadge(tabId);
     const state = bkGetSiteFilteringState(resolvedUrl, isIncognito);
     if (!state.supported) {
         bkSetStatusForZone('adaptive');
@@ -884,7 +886,7 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
             ? SMR_makeRequestContext(details)
             : null
     });
-    statusStartImageCheck(details.requestId);
+    statusStartImageCheck(details.requestId, details.tabId);
 
     filter.ondata = event => {
         if (dataStartTime == null) {
@@ -1008,6 +1010,7 @@ async function bkBase64ContentListener(details) {
     processor.postMessage({
         type: 'b64_start',
         requestId: details.requestId,
+        tabId: details.tabId,
         threshold: requestPlan.threshold,
         adaptiveContext: requestPlan.adaptiveContext,
         auditContext: requestPlan.auditContext,
@@ -1831,6 +1834,9 @@ function bkUpdateFromSettings() {
         BK_isSilentModeEnabled = silentModeEnabledResult.is_silent_mode_enabled || false;
         bkBroadcastProcessorSettings();
     });
+    browser.storage.local.get('badge_count_scope').then(result => {
+        statusSetBadgeCountScope(result.badge_count_scope);
+    });
     bkLoadBackendSettings().catch(error => {
         console.error('LIFECYCLE: Unable to apply processor settings', error);
     });
@@ -1875,6 +1881,7 @@ function bkSetAllLogging(onOrOff) {
 
 const BK_PROTECTED_SETTING_VALIDATORS = Object.freeze({
     is_on_off_shown: value => typeof value === 'boolean',
+    badge_count_scope: value => ['global', 'tab'].includes(value),
     video_blocking_mode: value => ['enabled', 'quick', 'disabled'].includes(value),
     is_silent_mode_enabled: value => typeof value === 'boolean',
     default_zone: value => ['automatic', 'trusted', 'neutral', 'untrusted'].includes(value),
@@ -2020,9 +2027,10 @@ browser.runtime.onMessage.addListener(bkHandleMessage);
 browser.tabs.onActivated.addListener(() => bkRefreshActiveBrowserActionZone());
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (tab.active && (changeInfo.url || changeInfo.status === 'loading')) {
-        bkRefreshActiveBrowserActionZone(tab.url, tab.incognito === true);
+        bkRefreshActiveBrowserActionZone(tab.url, tab.incognito === true, tabId);
     }
 });
+browser.tabs.onRemoved.addListener(tabId => statusForgetTab(tabId));
 if (browser.windows?.onFocusChanged) {
     browser.windows.onFocusChanged.addListener(() => bkRefreshActiveBrowserActionZone());
 }

@@ -681,6 +681,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             type:'stat',
                             result:'pass',
                             requestId: b64Filter.requestId+'_'+imageId,
+                            tabId: b64Filter.tabId,
                             adaptiveContext: b64Filter.adaptiveContext,
                             auditContext: b64Filter.auditContext,
                             adaptiveScore: adaptiveScore,
@@ -692,6 +693,7 @@ async function procCompleteB64Filtering(b64Filter, outputPort) {
                             type:'stat',
                             result:'block',
                             requestId: b64Filter.requestId+'_'+imageId,
+                            tabId: b64Filter.tabId,
                             adaptiveContext: b64Filter.adaptiveContext,
                             auditContext: b64Filter.auditContext,
                             adaptiveScore: adaptiveScore,
@@ -1186,6 +1188,7 @@ async function procOnPortMessage(m) {
         case 'b64_start': {
             PROC_openB64Requests[m.requestId] = {
                 requestId: m.requestId,
+                tabId: m.tabId,
                 threshold: m.threshold,
                 adaptiveContext: m.adaptiveContext || null,
                 auditContext: m.auditContext || null,

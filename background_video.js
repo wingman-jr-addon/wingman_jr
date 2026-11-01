@@ -265,7 +265,7 @@ async function vidDefaultListener(details, mimeType, parsedUrl, expectedContentL
     let flushScanStartSize = 0;
     let scanAndTransitionPromise;
 
-    statusStartVideoCheck(details.requestId);
+    statusStartVideoCheck(details.requestId, details.tabId);
 
     let pump = async function(newData, isComplete) {
         if(isFilterFinalized) {
@@ -555,7 +555,7 @@ async function vidDashMp4Listener(details, mimeType, parsedUrl, range, threshold
                 return;
             }
         }
-        statusStartVideoCheck(details.requestId);
+        statusStartVideoCheck(details.requestId, details.tabId);
     }
 
     filter.ondata = event => {
