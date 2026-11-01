@@ -2,6 +2,7 @@ async function optSaveOptions() {
     let isOnOffShown = document.querySelector('input[name="on_off_shown"]:checked').value == "on_off_shown_yes";
     let videoBlockingMode = document.querySelector('input[name="video_blocking_mode"]:checked').value;
     let isSilentModeEnabled = document.querySelector('input[name="is_silent_mode_enabled"]:checked').value == "is_silent_mode_enabled_yes";
+    let badgeCountScope = document.querySelector('input[name="badge_count_scope"]:checked').value;
     let defaultZone = document.querySelector('input[name="default_zone"]:checked').value;
     let modelSelection = document.querySelector('input[name="model_selection"]:checked').value;
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
@@ -12,6 +13,7 @@ async function optSaveOptions() {
                 is_on_off_shown: isOnOffShown,
                 video_blocking_mode: videoBlockingMode,
                 is_silent_mode_enabled: isSilentModeEnabled,
+                badge_count_scope: badgeCountScope,
                 default_zone: defaultZone,
                 model_selection: modelSelection,
                 backend_selection: backendSelection
@@ -472,6 +474,11 @@ function optRestoreOptions() {
         browser.runtime.sendMessage({ type: 'setSilentModeEnabled', value: result });
     }
 
+    function setCurrentBadgeCountScope(rawResult) {
+        const scope = rawResult.badge_count_scope === 'tab' ? 'tab' : 'global';
+        document.getElementById('badge_count_scope_' + scope).checked = true;
+    }
+
     function setDefaultZoneSwitchChoice(rawResult) {
         let result = rawResult.default_zone;
         let coercedResult = result || 'automatic';
@@ -505,6 +512,9 @@ function optRestoreOptions() {
 
     let gettingSilentModeEnabled = browser.storage.local.get('is_silent_mode_enabled');
     gettingSilentModeEnabled.then(setCurrentSilentModeEnabledChoice, onError);
+
+    let gettingBadgeCountScope = browser.storage.local.get('badge_count_scope');
+    gettingBadgeCountScope.then(setCurrentBadgeCountScope, onError);
 
     let gettingDefaultZone = browser.storage.local.get('default_zone');
     gettingDefaultZone.then(setDefaultZoneSwitchChoice, onError);
@@ -704,6 +714,13 @@ for (var i = 0, max = radiosVideoBlockingMode.length; i < max; i++) {
 var radiosSilentModeEnabled = document.forms[0].elements["is_silent_mode_enabled"];
 for (var i = 0, max = radiosSilentModeEnabled.length; i < max; i++) {
     radiosSilentModeEnabled[i].onclick = function () {
+        optSaveOptions();
+    }
+}
+
+var radiosBadgeCountScope = document.forms[0].elements["badge_count_scope"];
+for (var i = 0, max = radiosBadgeCountScope.length; i < max; i++) {
+    radiosBadgeCountScope[i].onclick = function () {
         optSaveOptions();
     }
 }

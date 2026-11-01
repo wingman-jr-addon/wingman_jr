@@ -350,7 +350,7 @@ async function gifListener(details, requestPlan) {
     let parsedGif = null;
     let scanAndTransitionPromise;
 
-    statusStartVideoCheck(details.requestId);
+    statusStartVideoCheck(details.requestId, details.tabId);
 
     let pump = async function(newData, isComplete, threshold) {
         let parseRange = '<unknown>';

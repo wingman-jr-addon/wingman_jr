@@ -31,6 +31,9 @@ let STATUS_openVideoFilters = { };
 let STATUS_videoProgressCounter = 0;
 let STATUS_videoLastBlockProgressCounter = -999;
 
+let STATUS_badgeCountScope = 'global';
+const STATUS_tabBlockCounts = new Map();
+
 let STATUS_masterFilteringMode = 'on';
 let STATUS_masterPauseUntil = null;
 let STATUS_auditMode = 'off';
@@ -273,8 +276,8 @@ function statusGetOpenVideoCount() {
     return Object.keys(STATUS_openVideoFilters).length;
 }
 
-function statusStartVideoCheck(requestId) {
-    STATUS_openVideoFilters[requestId] = requestId;
+function statusStartVideoCheck(requestId, tabId = null) {
+    STATUS_openVideoFilters[requestId] = Number.isInteger(tabId) && tabId >= 0 ? tabId : null;
     statusUpdateVisuals();
 }
 
@@ -285,13 +288,15 @@ function statusIndicateVideoProgress(requestId) {
 
 function statusCompleteVideoCheck(requestId, status) {
     try {
+        const tabId = STATUS_openVideoFilters[requestId];
         if(status == 'block') {
             STATUS_videoLastBlockProgressCounter = STATUS_videoProgressCounter;
+            statusIncrementTabBlockCount(tabId);
         }
         STATUS_videoCounts[status]++;
         STATUS_videoCheckCount++;
         delete STATUS_openVideoFilters[requestId];
-        statusUpdateVisuals();
+        statusUpdateVisuals(tabId);
     } catch(e) {
     }
 }
@@ -300,31 +305,85 @@ function statusGetOpenImageCount() {
     return Object.keys(STATUS_openImageFilters).length;
 }
 
-function statusStartImageCheck(requestId) {
-    STATUS_openImageFilters[requestId] = requestId;
+function statusStartImageCheck(requestId, tabId = null) {
+    STATUS_openImageFilters[requestId] = Number.isInteger(tabId) && tabId >= 0 ? tabId : null;
     let currentLength = statusGetOpenImageCount();
     if(currentLength > STATUS_openImageHighWaterCount) {
         STATUS_openImageHighWaterCount = currentLength;
     }
 }
 
-function statusCompleteImageCheck(requestId, status) {
+function statusCompleteImageCheck(requestId, status, tabId = null) {
+    const trackedTabId = STATUS_openImageFilters[requestId];
+    const resolvedTabId = Number.isInteger(tabId) && tabId >= 0 ? tabId : trackedTabId;
     delete STATUS_openImageFilters[requestId];
+    if(status == 'block') {
+        statusIncrementTabBlockCount(resolvedTabId);
+    }
     STATUS_imageCounts[status]++;
     STATUS_imageCheckCount++;
     let currentLength = statusGetOpenImageCount();
     if(currentLength == 0) {
         STATUS_openImageHighWaterCount = 0;
     }
-    statusUpdateVisuals();
+    statusUpdateVisuals(resolvedTabId);
 }
 
-function statusUpdateVisuals() {
+function statusFormatBadgeCount(count) {
+    return count < 1000 ? String(count) : '999+';
+}
+
+function statusIncrementTabBlockCount(tabId) {
+    if(!Number.isInteger(tabId) || tabId < 0) {
+        return;
+    }
+    STATUS_tabBlockCounts.set(tabId, (STATUS_tabBlockCounts.get(tabId) || 0) + 1);
+}
+
+function statusRefreshTabBadge(tabId) {
+    if(STATUS_badgeCountScope !== 'tab' || !Number.isInteger(tabId) || tabId < 0) {
+        return;
+    }
+    const count = STATUS_tabBlockCounts.get(tabId) || 0;
+    browser.browserAction.setBadgeText({
+        text: count > 0 ? statusFormatBadgeCount(count) : null,
+        tabId: tabId
+    });
+}
+
+function statusForgetTab(tabId) {
+    STATUS_tabBlockCounts.delete(tabId);
+}
+
+function statusSetBadgeCountScope(scope) {
+    const normalizedScope = scope === 'tab' ? 'tab' : 'global';
+    if(STATUS_badgeCountScope === normalizedScope) {
+        statusUpdateVisuals();
+        return;
+    }
+    STATUS_badgeCountScope = normalizedScope;
+    if(normalizedScope === 'tab') {
+        browser.browserAction.setBadgeText({ text: '' });
+        for(const tabId of STATUS_tabBlockCounts.keys()) {
+            statusRefreshTabBadge(tabId);
+        }
+    } else {
+        for(const tabId of STATUS_tabBlockCounts.keys()) {
+            browser.browserAction.setBadgeText({ text: null, tabId: tabId });
+        }
+        statusUpdateVisuals();
+    }
+}
+
+function statusUpdateVisuals(tabId = null) {
     let totalBlockCount = STATUS_imageCounts['block'] + STATUS_videoCounts['block'];
-    if(totalBlockCount > 0) {
+    if(STATUS_badgeCountScope === 'tab') {
+        statusRefreshTabBadge(tabId);
+    } else {
         //MDN notes we can only fit "about 4" characters here
-        let txt = (totalBlockCount < 1000) ? totalBlockCount+'' : '999+';
-        browser.browserAction.setBadgeText({ "text": txt });
+        browser.browserAction.setBadgeText({
+            text: totalBlockCount > 0 ? statusFormatBadgeCount(totalBlockCount) : ''
+        });
     }
     
     let openRequestIds = Object.keys(STATUS_openImageFilters);
