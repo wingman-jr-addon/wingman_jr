@@ -57,6 +57,22 @@ vm.runInContext(source + `
             AUDIT_writeQueue = Promise.resolve();
             auditGetMetaValues = async () => ({ scoreCount: 0, thumbnailCount: 0, auditCount: 0 });
             auditAppendEvent = async () => {};
+        },
+        prepareTrackingTest(mockBrowser) {
+            globalThis.browser = mockBrowser;
+            AUDIT_initializationPromise = Promise.resolve();
+            AUDIT_settings = auditNormalizeSettings({ mode: 'off', privateAccessAllowed: false });
+            AUDIT_settingsUnlocked = false;
+            AUDIT_writeQueue = Promise.resolve();
+            AUDIT_pendingScores = [];
+            auditGetMetaValues = async () => ({ scoreCount: 0, thumbnailCount: 0, auditCount: 0 });
+            auditFlushPending = async () => {};
+            auditUpdateModeIndicators = () => {};
+            auditStartPrivateMonitoring = () => {};
+            auditStartHeartbeat = () => {};
+            auditRefreshPrivateWindows = async () => {};
+            auditAppendEventNow = async () => {};
+            auditAppendEvent = async () => {};
         }
     };
 `, context);
@@ -184,6 +200,26 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(entirelyFutureIntervals)), []);
         'legacy accountability mode migrates to the settings lock');
     assert.strictEqual(initialState.settingsUnlocked, false);
     assert.strictEqual(initialState.privateAccessAllowed, true);
+
+    api.prepareTrackingTest({
+        extension: {
+            isAllowedIncognitoAccess: async () => false
+        },
+        storage: {
+            local: {
+                set: async () => {},
+                remove: async () => {}
+            }
+        }
+    });
+    const regularWindowAuditState = await api.handleMessage({
+        type: 'audit.setTracking',
+        enabled: true
+    });
+    assert.strictEqual(regularWindowAuditState.trackingEnabled, true,
+        'Audit can run for regular windows without private-window access');
+    assert.strictEqual(regularWindowAuditState.privateAccessAllowed, false,
+        'Audit reports that private windows are not covered');
 
     const savedProtectionStates = [];
     api.prepareProtectionTest({

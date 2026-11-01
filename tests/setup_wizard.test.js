@@ -7,6 +7,8 @@ const context = {};
 vm.createContext(context);
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+const setupPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.html'), 'utf8');
+const setupScript = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.js'), 'utf8');
 const start = source.indexOf("const BK_SETUP_COMPLETED_KEY");
 const end = source.indexOf('async function bkOpenSetupForNewUser', start);
 assert.ok(start >= 0 && end > start);
@@ -28,8 +30,35 @@ assert.strictEqual(
 assert.strictEqual(
     context.shouldOpenSetup({ setup_wizard_completed: true }),
     false,
-    'skipping or completing setup prevents it from reopening'
+    'completing setup prevents it from reopening'
 );
+
+const hiddenTabsStep = setupPage.indexOf('data-step="browser"');
+const personaStep = setupPage.indexOf('data-step="goal"');
+assert.ok(hiddenTabsStep >= 0 && hiddenTabsStep < personaStep,
+    'the hidden-tabs decision gates the rest of setup');
+assert.match(setupPage, /choose <strong>Keep Tabs Hidden<\/strong>[\s\S]*Done — continue/,
+    'the opening gate gives one concise Firefox instruction before continuing');
+for (const persona of ['everyday', 'boundaries', 'caregiver']) {
+    assert.match(setupPage, new RegExp(`name="setup-goal" value="${persona}"`),
+        `${persona} has a first-class setup path`);
+}
+assert.match(setupPage, /id="enable-audit" type="checkbox" checked/,
+    'protected setup paths recommend Audit by default');
+assert.match(setupPage, /id="audit-private-warning"[\s\S]*They can be used to bypass Audit/,
+    'the Audit step explains the private-window bypass risk');
+assert.match(setupPage, /rel="icon"[\s\S]*wingman_icon_32\.png/,
+    'the launched setup page uses the Wingman favicon');
+assert.match(setupScript, /goal === 'everyday'/,
+    'the everyday path keeps convenient on\/off controls available');
+assert.match(setupScript, /:\s*\['browser', 'goal'\]/,
+    'the everyday path skips advanced protection choices and the summary');
+assert.match(setupScript, /setupCurrentStep === 'goal' && !setupNeedsProtection\(\)/,
+    'the everyday path finishes directly from the starting-point screen');
+assert.match(setupScript, /type:\s*'audit\.enableSettingsLock'/,
+    'protected setup paths create a real settings password');
+assert.match(setupScript, /type:\s*'audit\.setTracking'/,
+    'Audit remains a separate setting even when recommended with protection');
 
 const openedUrls = [];
 const developmentContext = {

@@ -4,16 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Set up Wingman Jr.</title>
+  <link rel="icon" type="image/png" href="../icons/wingman_icon_32.png">
   <style>
     :root {
       color-scheme: light dark;
       font-family: "Segoe UI", Tahoma, sans-serif;
       --blue: #2f80ed;
+      --blue-dark: #1769cf;
       --ink: #1f2a44;
       --muted: #596780;
-      --line: rgba(31, 42, 68, 0.15);
-      --page: #f3f6fa;
+      --line: rgba(31, 42, 68, 0.16);
+      --page: #eef3f9;
       --card: #fff;
+      --soft-blue: rgba(47, 128, 237, 0.08);
+      --warning: #9a5b00;
+      --warning-bg: #fff6df;
     }
 
     * { box-sizing: border-box; }
@@ -21,274 +26,338 @@
     body {
       min-height: 100vh;
       margin: 0;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      background: var(--page);
+      padding: 28px;
+      background: radial-gradient(circle at top, #fff 0, var(--page) 58%);
       color: var(--ink);
     }
 
     main {
-      width: min(100%, 600px);
-      padding: 30px;
+      width: min(100%, 720px);
+      margin: 0 auto;
+      overflow: hidden;
       border: 1px solid rgba(31, 42, 68, 0.08);
-      border-radius: 16px;
+      border-radius: 18px;
       background: var(--card);
-      box-shadow: 0 14px 38px rgba(31, 42, 68, 0.12);
+      box-shadow: 0 18px 46px rgba(31, 42, 68, 0.14);
     }
 
-    header {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) minmax(150px, 190px);
-      align-items: start;
+    .wizard-header {
+      display: flex;
+      align-items: center;
       gap: 13px;
-      margin-bottom: 26px;
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
     }
 
-    header img {
-      width: 48px;
-      height: 48px;
-    }
+    .wizard-header img { width: 44px; height: 44px; }
+    .wizard-header-text { min-width: 0; }
+    .wizard-header h1 { margin: 0; font-size: 23px; line-height: 1.15; }
+    .step-intro, .choice small, .field-help, #setup-status { color: var(--muted); }
 
-    h1 {
-      margin: 0 0 3px;
-      font-size: 25px;
-      line-height: 1.15;
-    }
-
-    header p,
-    .choice small,
-    #setup-status {
+    .step-count {
+      margin-left: auto;
       color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
     }
 
-    header p { margin: 0; }
+    .wizard-step { padding: 28px; }
+    .wizard-step[hidden] { display: none; }
+    .wizard-step h2 { margin: 0 0 7px; font-size: 22px; line-height: 1.2; }
+    .step-intro { margin: 0 0 20px; line-height: 1.5; }
 
-    .firefox-tip {
+    .browser-gate {
       position: relative;
-      margin: -8px -8px 0 4px;
-      padding: 9px 48px 9px 10px;
-      border-radius: 8px;
-      background: rgba(47, 128, 237, 0.08);
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
+      min-height: 340px;
+      padding-top: 56px;
+      text-align: center;
     }
 
-    .firefox-tip::after {
-      content: '↗';
+    .browser-arrow {
       position: absolute;
-      top: 50%;
-      right: 9px;
-      transform: translateY(-50%);
+      top: 1px;
+      right: 12px;
       color: var(--blue);
-      font-size: 42px;
+      font-size: 84px;
       font-weight: 700;
-      line-height: 1;
+      line-height: 0.8;
+      transform: rotate(-8deg);
     }
 
-    .firefox-tip strong {
-      color: var(--ink);
+    .browser-gate h2 { font-size: 27px; }
+
+    .browser-instruction {
+      max-width: 540px;
+      margin: 20px auto 24px;
+      padding: 16px 18px;
+      border: 1px solid rgba(154, 91, 0, 0.28);
+      border-radius: 11px;
+      background: var(--warning-bg);
+      color: #704300;
+      font-size: 17px;
+      line-height: 1.5;
+      text-align: left;
     }
 
-    fieldset {
-      min-width: 0;
-      margin: 0 0 24px;
-      padding: 0;
-      border: 0;
-    }
+    .browser-instruction strong { color: #4e2f00; }
 
-    legend {
-      margin-bottom: 10px;
-      padding: 0;
-      font-size: 15px;
-      font-weight: 700;
-    }
-
-    .choices {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
+    fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+    legend { margin-bottom: 10px; padding: 0; font-size: 15px; font-weight: 700; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    .choices { display: grid; gap: 11px; }
+    .persona-choices { grid-template-columns: repeat(3, 1fr); }
+    .protection-choices { grid-template-columns: 1fr 1fr; }
 
     .choice {
       position: relative;
       display: flex;
-      min-height: 82px;
+      min-height: 112px;
       align-items: flex-start;
       gap: 10px;
-      padding: 14px;
+      padding: 16px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 11px;
+      background: var(--card);
       cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
     }
 
-    .choice.is-selected {
-      border-color: var(--blue);
-      background: rgba(47, 128, 237, 0.08);
-      box-shadow: 0 0 0 1px var(--blue);
-    }
-
-    .choice input {
-      width: 17px;
-      height: 17px;
-      margin: 2px 0 0;
-      accent-color: var(--blue);
-    }
-
+    .choice:hover { background: rgba(47, 128, 237, 0.035); }
+    .choice.is-selected { border-color: var(--blue); background: var(--soft-blue); box-shadow: 0 0 0 1px var(--blue); }
+    .choice input { width: 17px; height: 17px; flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--blue); }
     .choice span { display: block; }
-
-    .choice strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 14px;
-    }
-
-    .choice small {
-      display: block;
-      font-size: 12px;
-      line-height: 1.35;
-    }
+    .choice strong { display: block; margin-bottom: 5px; font-size: 14px; line-height: 1.25; }
+    .choice small { display: block; font-size: 12px; line-height: 1.42; }
 
     .recommended {
+      margin-top: 8px;
       color: var(--blue);
       font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.25px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
       text-transform: uppercase;
     }
 
-    footer {
+    .protection-panel {
+      margin-top: 20px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(47, 128, 237, 0.035);
+    }
+
+    .protection-panel h3 { margin: 0 0 6px; font-size: 16px; }
+    .protection-panel > p { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .password-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field label { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 700; }
+
+    .field input {
+      width: 100%;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--card);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .field-help { margin: 8px 0 0; font-size: 11px; }
+    #password-status[data-state="error"], #setup-status[data-state="error"] { color: #b42318; }
+    #password-status[data-state="saved"] { color: #18794e; }
+
+    .audit-choice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--card);
+    }
+
+    .audit-choice input { width: 17px; height: 17px; flex: 0 0 auto; margin-top: 2px; accent-color: var(--blue); }
+    .audit-choice strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    .audit-choice small { display: block; color: var(--muted); font-size: 11px; line-height: 1.45; }
+
+    .coverage-warning {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 12px 0 0;
+      padding: 12px 14px;
+      border: 1px solid rgba(154, 91, 0, 0.28);
+      border-radius: 8px;
+      background: var(--warning-bg);
+      color: #704300;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .coverage-warning[hidden] { display: none; }
+    .coverage-warning-icon {
+      flex: 0 0 auto;
+      color: var(--warning);
+      font-size: 24px;
+      line-height: 1;
+    }
+    .coverage-warning strong { color: #4e2f00; }
+
+    .summary { display: grid; gap: 10px; margin: 18px 0; }
+    .summary-row { display: grid; grid-template-columns: 150px 1fr; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .summary-row span:first-child { color: var(--muted); font-weight: 700; }
+
+    .wizard-footer {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
-      padding-top: 2px;
+      padding: 16px 28px 22px;
+      border-top: 1px solid var(--line);
     }
 
+    .wizard-footer[hidden] { display: none; }
+
     button {
-      min-width: 82px;
-      padding: 9px 18px;
+      min-width: 94px;
+      padding: 10px 18px;
       border: 1px solid var(--line);
       border-radius: 7px;
-      background: #fff;
+      background: var(--card);
       color: var(--ink);
       cursor: pointer;
       font: inherit;
       font-weight: 700;
     }
 
-    button[type="submit"] {
-      border-color: var(--blue);
-      background: var(--blue);
-      color: #fff;
-    }
+    button.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    button.primary:hover { background: var(--blue-dark); }
+    button:hover { filter: brightness(0.98); }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    #setup-status { flex: 1; margin: 0; font-size: 12px; }
 
-    button:hover { filter: brightness(0.97); }
-    button:focus-visible,
-    input:focus-visible {
-      outline: 2px solid var(--blue);
-      outline-offset: 2px;
-    }
-    button:disabled { cursor: wait; opacity: 0.65; }
-
-    #setup-status {
-      flex: 1;
-      margin: 0;
-      font-size: 12px;
-    }
-
-    #setup-status[data-state="error"] { color: #b42318; }
-
-    @media (max-width: 520px) {
+    @media (max-width: 650px) {
       body { padding: 0; }
-      main {
-        min-height: 100vh;
-        padding: 24px 18px;
-        border: 0;
-        border-radius: 0;
-        box-shadow: none;
-      }
-      header { grid-template-columns: auto minmax(0, 1fr); }
-      .firefox-tip {
-        grid-column: 1 / -1;
-        margin: 0;
-      }
-      .choices { grid-template-columns: 1fr; }
+      main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+      .wizard-header, .wizard-step, .wizard-footer { padding-left: 18px; padding-right: 18px; }
+      .persona-choices, .protection-choices, .password-grid { grid-template-columns: 1fr; }
+      .choice { min-height: auto; }
+      .browser-arrow { right: 2px; }
+      .summary-row { grid-template-columns: 1fr; gap: 3px; }
     }
 
     @media (prefers-color-scheme: dark) {
-      :root {
-        --ink: #e8edf7;
-        --muted: #aeb9cc;
-        --line: rgba(232, 237, 247, 0.2);
-        --page: #141922;
-        --card: #202735;
-      }
-      button { background: #293243; }
+      :root { --ink: #e8edf7; --muted: #aeb9cc; --line: rgba(232, 237, 247, 0.2); --page: #141922; --card: #202735; --soft-blue: rgba(47, 128, 237, 0.17); --warning-bg: #362b17; }
+      body { background: var(--page); }
+      .browser-instruction, .coverage-warning { color: #f4cc84; }
+      .browser-instruction strong, .coverage-warning strong { color: #ffe2aa; }
     }
   </style>
 </head>
 <body>
   <main>
-    <header>
+    <header class="wizard-header">
       <img src="../icons/wingman_icon_32.png" alt="">
-      <div>
-        <h1>Quick setup</h1>
-        <p>Two quick choices for you or your family.</p>
+      <div class="wizard-header-text">
+        <h1>Wingman Jr. Setup</h1>
       </div>
-      <aside class="firefox-tip">
-        Firefox may also ask about hidden tabs. Choose <strong>Keep Tabs Hidden</strong> so filtering keeps working.
-      </aside>
+      <span class="step-count" id="step-count">Before we begin</span>
     </header>
 
     <form id="setup-form">
-      <fieldset>
-        <legend>When an image is blocked</legend>
-        <div class="choices">
-          <label class="choice is-selected">
-            <input type="radio" name="blocked-image" value="quiet" checked>
-            <span>
-              <strong>Replace it with a safe image</strong>
-              <small>Uses one already on the page when possible.</small>
-              <span class="recommended">Recommended</span>
-            </span>
-          </label>
-          <label class="choice">
-            <input type="radio" name="blocked-image" value="visible">
-            <span>
-              <strong>Show a blocked image</strong>
-              <small>Makes it clear Wingman Jr. blocked something.</small>
-            </span>
-          </label>
+      <section class="wizard-step browser-gate" data-step="browser">
+        <div class="browser-arrow" aria-hidden="true">&#x2197;</div>
+        <h2>First, answer Firefox</h2>
+        <div class="browser-instruction">
+          In the message at the <strong>top-right</strong>, choose <strong>Keep Tabs Hidden</strong>. Otherwise filtering may stop working.
         </div>
-      </fieldset>
+        <button class="primary" id="hidden-tabs-confirmed" type="button">Done — continue</button>
+      </section>
 
-      <fieldset>
-        <legend>On/off controls</legend>
-        <div class="choices">
-          <label class="choice is-selected">
-            <input type="radio" name="on-off-controls" value="hidden" checked>
-            <span>
-              <strong>Hide them</strong>
-              <small>Usually best for kids. Settings stay available.</small>
-              <span class="recommended">Recommended</span>
-            </span>
+      <section class="wizard-step" data-step="goal" hidden>
+        <h2>Choose your starting point</h2>
+        <p class="step-intro">You can adjust every individual setting later.</p>
+        <fieldset>
+          <legend class="visually-hidden">Setup goal</legend>
+          <div class="choices persona-choices">
+            <label class="choice is-selected">
+              <input type="radio" name="setup-goal" value="everyday" checked>
+              <span><strong>Safer everyday browsing</strong><small>Protection for yourself with convenient controls when you need them.</small><span class="recommended">Recommended starting point</span></span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="setup-goal" value="boundaries">
+              <span><strong>Stronger personal boundaries</strong><small>Add friction around changing or disabling protection.</small></span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="setup-goal" value="caregiver">
+              <span><strong>Protect someone I care for</strong><small>Guard the settings and keep a local record of filtering activity.</small></span>
+            </label>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="wizard-step" data-step="level" hidden>
+        <h2>Choose a protection level</h2>
+        <p class="step-intro">This becomes the default for new sites. You can give individual sites their own zone later.</p>
+        <fieldset>
+          <legend class="visually-hidden">Protection level</legend>
+          <div class="choices protection-choices">
+            <label class="choice is-selected">
+              <input type="radio" name="protection-level" value="automatic" checked>
+              <span><strong>Adaptive</strong><small>Starts balanced, then adjusts based on what Wingman Jr. detects.</small><span class="recommended">Recommended</span></span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="protection-level" value="untrusted">
+              <span><strong>Strict</strong><small>Keeps new sites in the Untrusted zone, blocking more aggressively until you change them.</small></span>
+            </label>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="wizard-step" data-step="protection" hidden>
+        <h2 id="protection-heading">Protect the settings</h2>
+        <p class="step-intro" id="protection-intro">A password prevents filtering controls and settings from being changed casually.</p>
+        <div class="protection-panel">
+          <h3>Create a settings password</h3>
+          <p id="password-guidance">For stronger boundaries, consider asking someone you trust to choose or hold this password.</p>
+          <div class="password-grid">
+            <div class="field">
+              <label for="settings-password">Password</label>
+              <input id="settings-password" type="password" minlength="8" autocomplete="new-password">
+            </div>
+            <div class="field">
+              <label for="settings-password-confirm">Confirm password</label>
+              <input id="settings-password-confirm" type="password" minlength="8" autocomplete="new-password">
+            </div>
+          </div>
+          <p class="field-help" id="password-status" role="status" aria-live="polite">Use at least eight characters.</p>
+          <label class="audit-choice" for="enable-audit">
+            <input id="enable-audit" type="checkbox" checked>
+            <span><strong>Keep local audit history <span class="recommended">Recommended</span></strong><small>Records filtering activity and small blocked-image previews on this device.</small></span>
           </label>
-          <label class="choice">
-            <input type="radio" name="on-off-controls" value="shown">
-            <span>
-              <strong>Show them</strong>
-              <small>Better for adults who want to pause or turn off filtering.</small>
-            </span>
-          </label>
+          <div class="coverage-warning" id="audit-private-warning" role="note">
+            <span class="coverage-warning-icon" aria-hidden="true">&#9888;</span>
+            <span><strong>Private Windows aren’t covered.</strong> They can be used to bypass Audit. After setup: Firefox Add-ons → Wingman Jr. → <i>Run in Private Windows</i> → <i>Allow</i>.</span>
+          </div>
         </div>
-      </fieldset>
+      </section>
 
-      <footer>
+      <section class="wizard-step" data-step="summary" hidden>
+        <h2>You’re ready to start</h2>
+        <p class="step-intro">Here’s the starting setup Wingman Jr. will use.</p>
+        <div class="summary" id="setup-summary"></div>
+        <div class="coverage-warning" id="summary-privacy" role="note" hidden>
+          <span class="coverage-warning-icon" aria-hidden="true">&#9888;</span>
+          <span><strong>Reminder:</strong> Private Windows can bypass Audit until you allow Wingman Jr. to run there.</span>
+        </div>
+      </section>
+
+      <footer class="wizard-footer" id="wizard-footer" hidden>
         <p id="setup-status" role="status" aria-live="polite"></p>
-        <button id="skip-setup" type="button">Skip</button>
-        <button type="submit">OK</button>
+        <button id="wizard-back" type="button">Back</button>
+        <button class="primary" id="wizard-next" type="button">Continue</button>
       </footer>
     </form>
   </main>

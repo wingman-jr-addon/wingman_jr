@@ -60,8 +60,12 @@ assert.match(optionsPage, /id="enable_settings_lock" disabled/,
     'protection cannot be submitted until password validation succeeds');
 assert.doesNotMatch(optionsPage, /I understand that private browsing is not currently included/,
     'the obsolete incomplete-private-browsing acknowledgement is gone');
-assert.doesNotMatch(audit, /allowIncompletePrivateCoverage/,
-    'audit activation always requires complete private-window coverage');
+assert.doesNotMatch(audit, /private-coverage-required/,
+    'missing private-window access does not block Audit activation');
+assert.doesNotMatch(options, /enabled && !OPT_securityState\.privateAccessAllowed/,
+    'settings do not block Audit activation without private-window access');
+assert.match(optionsPage, /Someone can open a Private Window to browse without that activity appearing in Audit/,
+    'settings explain why private-window coverage matters');
 assert.doesNotMatch(audit + options + optionsPage, /AUDIT_UNLOCK_MS|five minutes/i,
     'settings unlock no longer expires on a timer');
 assert.match(options, /async function optInitializeSecurityState\(\)[\s\S]*type:\s*'audit\.lockSettings'/,

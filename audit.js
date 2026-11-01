@@ -660,12 +660,6 @@ async function auditSetTracking(enabled) {
     await auditFlushPending();
     return auditEnqueueWrite(async () => {
         const privateAllowed = await auditReadPrivateAccess();
-        if (nextMode === AUDIT_MODES.AUDIT
-            && !privateAllowed) {
-            const error = new Error('Enable Wingman Jr. in private windows before turning audit on.');
-            error.code = 'private-coverage-required';
-            throw error;
-        }
 
         if (nextMode === AUDIT_MODES.OFF) {
             auditStopPrivateMonitoring();
