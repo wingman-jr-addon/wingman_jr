@@ -17,5 +17,7 @@ assert.match(processor, /buffers\[0\]\.slice\(0\)/);
 assert.match(processor, /legacy-sync-worker-fallback/);
 assert.match(processor, /legacy-sync-animated-webp/);
 assert.match(processor, /procPredictPreparedPixels/);
+assert.match(processor, /allowWorkerDecode: false/);
+assert.match(processor, /entry\.allowWorkerDecode !== false/);
 
 console.log('worker image decoder contract tests passed');

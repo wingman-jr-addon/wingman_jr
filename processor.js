@@ -833,7 +833,7 @@ async function procDecodeImageLegacy(blob, profile, decodeMode = 'legacy-sync') 
 }
 
 async function procDecodeImageForScan(entry, blob, profile, isAnimatedWebp) {
-    if(!isAnimatedWebp) {
+    if(!isAnimatedWebp && entry.allowWorkerDecode !== false) {
         const workerResult = await procTryWorkerImageDecode(entry, profile);
         if(workerResult.ok) {
             const eventLoopStats = workerResult.eventLoopStats;
@@ -1642,7 +1642,11 @@ async function procOnPortMessage(m) {
                 mimeType: m.mimeType,
                 startTime: performance.now(),
                 buffers: m.buffers,
-                threshold: m.threshold
+                threshold: m.threshold,
+                // GIF frames have their own scheduler and can arrive from
+                // several GIF chains concurrently. Keep their established
+                // synchronous path out of the single static-image Worker lane.
+                allowWorkerDecode: false
             };
             let gifScanResult = await procPerformFiltering(gifRequest);
             let gifResponse = {
