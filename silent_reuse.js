@@ -7,7 +7,9 @@ const SMR_ENABLED = true;
 const SMR_MAX_SCOPES = 24;
 const SMR_MAX_IMAGES_PER_SCOPE = 48;
 const SMR_SCOPE_TTL_MS = 10 * 60 * 1000;
-const SMR_THUMB_MAX_DIMENSION = 384;
+const SMR_MAX_SOURCE_BYTES = 512 * 1024;
+const SMR_MAX_SCOPE_BYTES = 8 * 1024 * 1024;
+const SMR_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const SMR_MIN_SOURCE_DIMENSION = 64;
 const SMR_MIN_SOURCE_AREA = 96 * 96;
 const SMR_MIN_COHORT_SIZE = 2;
@@ -68,6 +70,72 @@ function SMR_pruneScopes(now = Date.now()) {
     }
 }
 
+function SMR_removeCandidate(scope, index) {
+    const removed = scope.images.splice(index, 1)[0];
+    if (removed) {
+        scope.byteSize = Math.max(0, scope.byteSize - removed.byteSize);
+    }
+    return removed;
+}
+
+function SMR_findOldestCandidateIndex(scope) {
+    let oldestIndex = 0;
+    for (let index = 1; index < scope.images.length; index++) {
+        if (scope.images[index].lastRelevantAt < scope.images[oldestIndex].lastRelevantAt) {
+            oldestIndex = index;
+        }
+    }
+    return oldestIndex;
+}
+
+function SMR_pruneScopeBudget(scope) {
+    let evictedCount = 0;
+    while (scope.images.length > 0
+        && (scope.images.length > SMR_MAX_IMAGES_PER_SCOPE
+            || scope.byteSize > SMR_MAX_SCOPE_BYTES)) {
+        if (SMR_removeCandidate(scope, SMR_findOldestCandidateIndex(scope))) {
+            evictedCount++;
+        }
+    }
+    return evictedCount;
+}
+
+function SMR_getTotalBytes() {
+    let total = 0;
+    for (const scope of SMR_scopes.values()) {
+        total += scope.byteSize;
+    }
+    return total;
+}
+
+function SMR_pruneGlobalBudget() {
+    let totalBytes = SMR_getTotalBytes();
+    let evictedCount = 0;
+    while (totalBytes > SMR_MAX_TOTAL_BYTES) {
+        let oldestScope = null;
+        let oldestIndex = -1;
+        for (const scope of SMR_scopes.values()) {
+            for (let index = 0; index < scope.images.length; index++) {
+                if (oldestScope === null
+                    || scope.images[index].lastRelevantAt
+                        < oldestScope.images[oldestIndex].lastRelevantAt) {
+                    oldestScope = scope;
+                    oldestIndex = index;
+                }
+            }
+        }
+        if (oldestScope === null) {
+            break;
+        }
+        const removed = SMR_removeCandidate(oldestScope, oldestIndex);
+        totalBytes -= removed?.byteSize || 0;
+        if (removed) {
+            evictedCount++;
+        }
+    }
+    return evictedCount;
+}
+
 function SMR_getScope(scopeKey, createIfMissing) {
     if (!scopeKey) {
         return null;
@@ -78,6 +146,7 @@ function SMR_getScope(scopeKey, createIfMissing) {
     if (!scope && createIfMissing) {
         scope = {
             lastSeen: Date.now(),
+            byteSize: 0,
             images: []
         };
         SMR_scopes.set(scopeKey, scope);
@@ -100,22 +169,6 @@ function SMR_isConfidentlySafe(sqrxrScore, threshold) {
     return score < Math.max(0, admissionThreshold);
 }
 
-function SMR_makeThumbnail(img) {
-    const scale = Math.min(1, SMR_THUMB_MAX_DIMENSION / Math.max(img.width, img.height));
-    const width = Math.max(1, Math.round(img.width * scale));
-    const height = Math.max(1, Math.round(img.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
-    context.fillStyle = '#f4f4f4';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(img, 0, 0, width, height);
-    return canvas.toDataURL('image/jpeg', 0.72);
-}
-
 function SMR_getUrlParts(rawUrl) {
     try {
         const parsed = new URL(rawUrl);
@@ -129,15 +182,21 @@ function SMR_getUrlParts(rawUrl) {
     }
 }
 
-function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
+function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext, sourceBlob = null) {
     if (!SMR_ENABLED || !requestContext?.scopeKey || !SMR_isConfidentlySafe(sqrxrScore, threshold)) {
-        return;
+        return { outcome: 'not-admitted' };
     }
     if (img.width < SMR_MIN_SOURCE_DIMENSION || img.height < SMR_MIN_SOURCE_DIMENSION) {
-        return;
+        return { outcome: 'too-small' };
     }
     if (img.width * img.height < SMR_MIN_SOURCE_AREA) {
-        return;
+        return { outcome: 'too-small' };
+    }
+    if (!(sourceBlob instanceof Blob) || sourceBlob.size === 0) {
+        return { outcome: 'no-source-bytes' };
+    }
+    if (sourceBlob.size > SMR_MAX_SOURCE_BYTES) {
+        return { outcome: 'too-large', byteSize: sourceBlob.size };
     }
 
     const scope = SMR_getScope(requestContext.scopeKey, true);
@@ -146,14 +205,6 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
         ? scope.images.findIndex(candidate => candidate.sourceUrl === sourceUrl)
         : -1;
 
-    let dataUrl;
-    try {
-        dataUrl = SMR_makeThumbnail(img);
-    } catch (error) {
-        WJR_DEBUG && console.warn(`SILENT REUSE: Unable to cache safe image: ${error}`);
-        return;
-    }
-
     const urlParts = SMR_getUrlParts(sourceUrl);
     const previousCandidate = duplicateIndex >= 0 ? scope.images[duplicateIndex] : null;
     const now = Date.now();
@@ -161,7 +212,8 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
         sourceUrl,
         sourceHost: urlParts.host,
         sourceDirectory: urlParts.directory,
-        dataUrl,
+        blob: sourceBlob,
+        byteSize: sourceBlob.size,
         width: img.width,
         height: img.height,
         addedAt: now,
@@ -170,18 +222,19 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
     };
 
     if (duplicateIndex >= 0) {
-        scope.images.splice(duplicateIndex, 1);
+        SMR_removeCandidate(scope, duplicateIndex);
     }
     scope.images.push(candidate);
-    while (scope.images.length > SMR_MAX_IMAGES_PER_SCOPE) {
-        let evictionIndex = 0;
-        for (let index = 1; index < scope.images.length; index++) {
-            if (scope.images[index].lastRelevantAt < scope.images[evictionIndex].lastRelevantAt) {
-                evictionIndex = index;
-            }
-        }
-        scope.images.splice(evictionIndex, 1);
-    }
+    scope.byteSize += candidate.byteSize;
+    const evictedCount = SMR_pruneScopeBudget(scope) + SMR_pruneGlobalBudget();
+    const wasRetained = scope.images.includes(candidate);
+    return {
+        outcome: wasRetained ? 'admitted' : 'budget-evicted',
+        byteSize: candidate.byteSize,
+        evictedCount,
+        scopeBytes: scope.byteSize,
+        scopeSize: scope.images.length
+    };
 }
 
 function SMR_hashString(value) {
@@ -245,7 +298,7 @@ function SMR_pickReplacementSource(targetImg, requestContext) {
     selected.lastRelevantAt = Date.now();
 
     return {
-        src: selected.dataUrl,
+        blob: selected.blob,
         label: 'same-page-safe-image',
         isSamePageReuse: true,
         formatting: {

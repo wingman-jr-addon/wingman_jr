@@ -556,7 +556,13 @@ async function procPerformFiltering(entry) {
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     if (typeof SMR_observeSafeImage === 'function') {
-                        SMR_observeSafeImage(img, sqrxrScore, entry.threshold, entry.reuseContext);
+                        SMR_observeSafeImage(
+                            img,
+                            sqrxrScore,
+                            entry.threshold,
+                            entry.reuseContext,
+                            blob
+                        );
                     }
                     result.result = 'pass';
                     result.imageBytes = await blob.arrayBuffer();

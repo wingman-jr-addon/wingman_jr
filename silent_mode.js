@@ -59,6 +59,15 @@ function SM_getActiveCollection() {
     return SM_customCollections.find(collection => collection.id === SM_activeCollectionId) || null;
 }
 
+function SM_pickBuiltInReplacementSource() {
+    const index = SM_getNextIndex(SM_BUILTIN_COLLECTION_ID, SM_DATA.length);
+    const entry = SM_DATA[index];
+    return {
+        src: entry.file,
+        label: entry.file
+    };
+}
+
 function SM_pickReplacementSource(img, replacementContext) {
     const customCollection = SM_getActiveCollection();
     if (customCollection && customCollection.images && customCollection.images.length > 0) {
@@ -77,12 +86,7 @@ function SM_pickReplacementSource(img, replacementContext) {
         }
     }
 
-    const index = SM_getNextIndex(SM_BUILTIN_COLLECTION_ID, SM_DATA.length);
-    const entry = SM_DATA[index];
-    return {
-        src: entry.file,
-        label: entry.file
-    };
+    return SM_pickBuiltInReplacementSource();
 }
 
 //Do best to format the image with matching dimensions
@@ -109,18 +113,65 @@ async function smFormatImage(srcImg, targetWidth, targetHeight, id, formatting =
     return targetCanvas.toDataURL();
 }
 
+async function smMaterializeReplacementSource(replacementSource, targetImg, visibleScore) {
+    let objectUrl = null;
+    try {
+        const sourceUrl = replacementSource.blob
+            ? (objectUrl = URL.createObjectURL(replacementSource.blob))
+            : replacementSource.src;
+        const replacementRawImage = await smLoadImagePromise(sourceUrl);
+        return await smFormatImage(
+            replacementRawImage,
+            targetImg.width,
+            targetImg.height,
+            visibleScore,
+            replacementSource.formatting
+        );
+    } finally {
+        if (objectUrl !== null) {
+            URL.revokeObjectURL(objectUrl);
+        }
+    }
+}
+
+async function smMaterializeReplacementWithFallback(replacementSource, targetImg, visibleScore) {
+    try {
+        return {
+            replacementSource,
+            imageDataUrl: await smMaterializeReplacementSource(
+                replacementSource,
+                targetImg,
+                visibleScore
+            )
+        };
+    } catch (error) {
+        if (!replacementSource.isSamePageReuse) {
+            throw error;
+        }
+        WJR_DEBUG && console.warn(`SILENT REUSE: Unable to materialize cached image: ${error}`);
+        const fallbackSource = SM_pickBuiltInReplacementSource();
+        return {
+            replacementSource: fallbackSource,
+            imageDataUrl: await smMaterializeReplacementSource(
+                fallbackSource,
+                targetImg,
+                visibleScore
+            )
+        };
+    }
+}
+
 async function SM_getReplacementSVG(img, visibleScore, originalDataURL, replacementContext = null) {
     WJR_DEBUG && console.log(`SILENT: Creating replacement for image ${img.width}x${img.height} score ${visibleScore}`);
 
     let replacementSource = SM_pickReplacementSource(img, replacementContext);
-    let replacementRawImage = await smLoadImagePromise(replacementSource.src);
-    let replacementImageDataURL = await smFormatImage(
-        replacementRawImage,
-        img.width,
-        img.height,
-        visibleScore,
-        replacementSource.formatting
+    const materialized = await smMaterializeReplacementWithFallback(
+        replacementSource,
+        img,
+        visibleScore
     );
+    replacementSource = materialized.replacementSource;
+    const replacementImageDataURL = materialized.imageDataUrl;
 
     let fontSize = Math.round(img.height*0.08);
 
