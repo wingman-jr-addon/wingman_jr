@@ -468,6 +468,13 @@ function procConcatBufferViews(buffers) {
     return bytes;
 }
 
+function procGetOriginalResponseBytes(buffers) {
+    if(buffers.length === 1) {
+        return buffers[0];
+    }
+    return procConcatBufferViews(buffers).buffer;
+}
+
 function procIsAnimatedWebp(buffers) {
     let bytes = procConcatBufferViews(buffers);
     if(bytes.byteLength < 12
@@ -637,10 +644,13 @@ async function procPerformFiltering(entry) {
                             : 'unavailable';
                     }
                     result.result = 'pass';
-                    const blobCopyStartTime = performance.now();
-                    result.imageBytes = await blob.arrayBuffer();
+                    const bufferReturnStartTime = performance.now();
+                    result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
                     if(profile) {
-                        profile.blobCopyMs = performance.now() - blobCopyStartTime;
+                        profile.bufferReturnMs = performance.now() - bufferReturnStartTime;
+                        profile.bufferReturnStrategy = entry.buffers.length === 1
+                            ? 'single-buffer-reuse'
+                            : 'multi-buffer-concat';
                     }
                     result.sqrxrScore = sqrxrScore;
                 } else {
@@ -673,16 +683,16 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('WEBREQ: Finishing '+entry.requestId);
             } else {
                 result.result = 'tiny';
-                result.imageBytes = await blob.arrayBuffer();
+                result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
             }
         } else {
             result.result = 'tiny';
-            result.imageBytes = await blob.arrayBuffer();
+            result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
         }
     } catch(e) {
         console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e)+' '+e.stack);
         result.result = 'error';
-        result.imageBytes = result.imageBytes || await blob.arrayBuffer();
+        result.imageBytes = result.imageBytes || procGetOriginalResponseBytes(entry.buffers);
     } finally {
         WJR_DEBUG && console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
