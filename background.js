@@ -53,6 +53,197 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 
+const BK_PROFILE_IDLE_FLUSH_MS = 3000;
+const BK_PROFILE_TOP_SLOW_COUNT = 12;
+let BK_profileRecords = [];
+let BK_profileFlushTimer = null;
+
+function bkProfileEnabled() {
+    return typeof WJR_PROFILE !== 'undefined' && WJR_PROFILE === true;
+}
+
+function bkProfileHostname(url) {
+    if(typeof url !== 'string' || !url) {
+        return '';
+    }
+    try {
+        return new URL(url).hostname;
+    } catch {
+        return '';
+    }
+}
+
+function bkCreateProfileContext(details, mimeType) {
+    if(!bkProfileEnabled()) {
+        return null;
+    }
+    return {
+        requestId: details.requestId,
+        tabId: details.tabId,
+        pageHost: bkProfileHostname(details.documentUrl || details.originUrl),
+        resourceHost: bkProfileHostname(details.url),
+        mimeType: mimeType,
+        headersReceivedAt: Date.now()
+    };
+}
+
+function bkProfileMetricStats(records, metric) {
+    const values = records
+        .map(record => record[metric])
+        .filter(value => Number.isFinite(value))
+        .sort((left, right) => left - right);
+    if(values.length === 0) {
+        return null;
+    }
+    const percentile = ratio => values[Math.min(
+        values.length - 1,
+        Math.max(0, Math.ceil(values.length * ratio) - 1)
+    )];
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+        avg: Math.round(total / values.length),
+        p50: Math.round(percentile(0.50)),
+        p95: Math.round(percentile(0.95)),
+        max: Math.round(values[values.length - 1]),
+        total: Math.round(total)
+    };
+}
+
+function bkProfileBuildSummary(records) {
+    const metricNames = [
+        'headersToFirstByteMs',
+        'downloadMs',
+        'queueWaitMs',
+        'blobSetupMs',
+        'objectUrlSetupMs',
+        'decodeMs',
+        'imageLoadWaitMs',
+        'scanMs',
+        'modelInferenceMs',
+        'safeReuseMs',
+        'blobCopyMs',
+        'bufferReturnMs',
+        'postScanMs',
+        'processingMs',
+        'processorReturnMs',
+        'ipcMs',
+        'filterReleaseMs',
+        'releaseMs',
+        'heldResponseMs'
+    ];
+    const metrics = {};
+    metricNames.forEach(metric => {
+        metrics[metric] = bkProfileMetricStats(records, metric);
+    });
+    const resultCounts = {};
+    records.forEach(record => {
+        const result = record.result || 'unknown';
+        resultCounts[result] = (resultCounts[result] || 0) + 1;
+    });
+    const safeReuseOutcomes = {};
+    records.forEach(record => {
+        const outcome = record.safeReuseOutcome || 'not-recorded';
+        safeReuseOutcomes[outcome] = (safeReuseOutcomes[outcome] || 0) + 1;
+    });
+    const topSlow = [...records]
+        .sort((left, right) => (right.heldResponseMs || 0) - (left.heldResponseMs || 0))
+        .slice(0, BK_PROFILE_TOP_SLOW_COUNT)
+        .map(record => ({
+            requestId: record.requestId,
+            pageHost: record.pageHost,
+            resourceHost: record.resourceHost,
+            mimeType: record.mimeType,
+            result: record.result,
+            bytes: record.byteCount,
+            buffers: record.bufferCount,
+            dimensions: Number.isFinite(record.width) && Number.isFinite(record.height)
+                ? `${record.width}x${record.height}`
+                : null,
+            animatedWebp: record.animatedWebp === true,
+            queueDepth: record.queueDepthAtEnqueue,
+            backlog: record.backlogAtEnqueue,
+            inFlightAtStart: record.inFlightAtStart,
+            heldResponseMs: record.heldResponseMs,
+            downloadMs: record.downloadMs,
+            queueWaitMs: record.queueWaitMs,
+            blobSetupMs: Math.round(record.blobSetupMs || 0),
+            decodeMs: record.decodeMs,
+            imageLoadWaitMs: Math.round(record.imageLoadWaitMs || 0),
+            scanMs: record.scanMs,
+            modelInferenceMs: Math.round(record.modelInferenceMs || 0),
+            safeReuseMs: Math.round(record.safeReuseMs || 0),
+            safeReuseOutcome: record.safeReuseOutcome,
+            safeReuseEvictions: record.safeReuseEvictions,
+            blobCopyMs: Math.round(record.blobCopyMs || 0),
+            bufferReturnMs: Math.round(record.bufferReturnMs || 0),
+            bufferReturnStrategy: record.bufferReturnStrategy,
+            postScanMs: record.postScanMs,
+            processingMs: record.processingMs,
+            processorReturnMs: record.processorReturnMs,
+            ipcMs: record.ipcMs,
+            filterReleaseMs: record.filterReleaseMs,
+            releaseMs: record.releaseMs
+        }));
+    return {
+        capturedAt: new Date().toISOString(),
+        imageCount: records.length,
+        pageHosts: [...new Set(records.map(record => record.pageHost).filter(Boolean))],
+        resultCounts: resultCounts,
+        safeReuseDisabled: records.some(record => record.safeReuseDisabled === true),
+        safeReuseOutcomes: safeReuseOutcomes,
+        safeReuseEvictions: records.reduce(
+            (sum, record) => sum + (record.safeReuseEvictions || 0),
+            0
+        ),
+        totalBytes: records.reduce((sum, record) => sum + (record.byteCount || 0), 0),
+        maxQueueDepth: records.reduce(
+            (maximum, record) => Math.max(maximum, record.queueDepthAtEnqueue || 0),
+            0
+        ),
+        maxBacklog: records.reduce(
+            (maximum, record) => Math.max(maximum, record.backlogAtEnqueue || 0),
+            0
+        ),
+        maxInFlightAtStart: records.reduce(
+            (maximum, record) => Math.max(maximum, record.inFlightAtStart || 0),
+            0
+        ),
+        metrics: metrics,
+        topSlow: topSlow
+    };
+}
+
+function bkProfileFlush() {
+    if(BK_profileRecords.length === 0) {
+        return null;
+    }
+    const records = BK_profileRecords;
+    BK_profileRecords = [];
+    BK_profileFlushTimer = null;
+    const summary = bkProfileBuildSummary(records);
+    console.info('[WJR_PROFILE] '+JSON.stringify(summary));
+    return summary;
+}
+
+function bkProfileReset() {
+    BK_profileRecords = [];
+    if(BK_profileFlushTimer !== null) {
+        clearTimeout(BK_profileFlushTimer);
+        BK_profileFlushTimer = null;
+    }
+}
+
+function bkProfileRecord(record) {
+    if(!bkProfileEnabled() || !record) {
+        return;
+    }
+    BK_profileRecords.push(record);
+    if(BK_profileFlushTimer !== null) {
+        clearTimeout(BK_profileFlushTimer);
+    }
+    BK_profileFlushTimer = setTimeout(bkProfileFlush, BK_PROFILE_IDLE_FLUSH_MS);
+}
+
 const BK_revealAllowlist = new Set();
 const BK_revealAllowlistQueue = [];
 const BK_revealAllowlistMaxSize = 1000;
@@ -83,6 +274,12 @@ function bkInitialize() {
     statusOnLoaded();
     bkUpdateFromSettings();
     bkRestoreMasterFilteringState();
+    if(bkProfileEnabled()) {
+        console.info(
+            '[WJR_PROFILE] enabled; call bkProfileReset() before a reload. '
+            +'A JSON summary is emitted after '+BK_PROFILE_IDLE_FLUSH_MS+'ms of idle time.'
+        );
+    }
 }
 
 function bkOnClientConnected(port) {
@@ -190,6 +387,7 @@ function bkReloadProcessors() {
 function bkOnProcessorMessage(m) {
     switch (m.type) {
         case 'scan': {
+            const backgroundReceivedAt = Date.now();
             WJR_DEBUG && console.debug('PROC: '+m);
             if(m.requestId.startsWith('crash')) {
                 bkHandleCrashDetectionResult(m);
@@ -197,6 +395,31 @@ function bkOnProcessorMessage(m) {
                 let filter = BK_openFilters[m.requestId];
                 filter.write(m.imageBytes);
                 filter.close();
+                if(m.profile) {
+                    const releasedAt = Date.now();
+                    m.profile.backgroundReceivedAt = backgroundReceivedAt;
+                    m.profile.responseReleasedAt = releasedAt;
+                    m.profile.ipcMs = m.profile.processorPostedAt == null
+                        ? null
+                        : Math.max(0, backgroundReceivedAt - m.profile.processorPostedAt);
+                    m.profile.filterReleaseMs = Math.max(0, releasedAt - backgroundReceivedAt);
+                    m.profile.releaseMs = Math.max(
+                        0,
+                        releasedAt - (m.profile.processingCompletedAt || releasedAt)
+                    );
+                    m.profile.headersToFirstByteMs = m.profile.firstByteAt == null
+                        ? null
+                        : Math.max(0, m.profile.firstByteAt - m.profile.headersReceivedAt);
+                    m.profile.downloadMs = m.profile.firstByteAt == null
+                        ? null
+                        : Math.max(0, m.profile.bodyEndedAt - m.profile.firstByteAt);
+                    m.profile.heldResponseMs = Math.max(
+                        0,
+                        releasedAt - m.profile.headersReceivedAt
+                    );
+                    m.profile.result = m.result;
+                    bkProfileRecord(m.profile);
+                }
                 delete BK_openFilters[m.requestId];
                 WJR_DEBUG && console.debug('OPEN FILTERS: '+Object.keys(BK_openFilters).length);
             }
@@ -871,6 +1094,8 @@ async function bkImageListener(details, shouldBlockSilently = false, existingPla
 async function bkImageListenerNormal(details, mimeType, requestPlan) {
     WJR_DEBUG && console.debug('WEBREQ: start headers '+details.requestId);
     let dataStartTime = null;
+    let receivedBytes = 0;
+    let profileContext = bkCreateProfileContext(details, mimeType);
     let filter = browser.webRequest.filterResponseData(details.requestId);
 
     let processor = bkGetNextProcessor().port;
@@ -882,6 +1107,7 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
         threshold: requestPlan.threshold,
         adaptiveContext: requestPlan.adaptiveContext,
         auditContext: requestPlan.auditContext,
+        profileContext: profileContext,
         reuseContext: typeof SMR_makeRequestContext === 'function'
             ? SMR_makeRequestContext(details)
             : null
@@ -890,8 +1116,9 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
 
     filter.ondata = event => {
         if (dataStartTime == null) {
-            dataStartTime = performance.now();
+            dataStartTime = Date.now();
         }
+        receivedBytes += event.data.byteLength;
         WJR_DEBUG && console.debug('WEBREQ: data '+details.requestId);
         processor.postMessage({
             type: 'ondata',
@@ -921,7 +1148,12 @@ async function bkImageListenerNormal(details, mimeType, requestPlan) {
         BK_openFilters[details.requestId] = filter;
         processor.postMessage({
             type: 'onstop',
-            requestId: details.requestId
+            requestId: details.requestId,
+            profileNetwork: profileContext ? {
+                firstByteAt: dataStartTime,
+                bodyEndedAt: Date.now(),
+                receivedBytes: receivedBytes
+            } : null
         });
     }
     return details;

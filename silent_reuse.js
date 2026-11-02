@@ -131,13 +131,13 @@ function SMR_getUrlParts(rawUrl) {
 
 function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
     if (!SMR_ENABLED || !requestContext?.scopeKey || !SMR_isConfidentlySafe(sqrxrScore, threshold)) {
-        return;
+        return { outcome: 'not-admitted', evictedCount: 0, scopeSize: 0 };
     }
     if (img.width < SMR_MIN_SOURCE_DIMENSION || img.height < SMR_MIN_SOURCE_DIMENSION) {
-        return;
+        return { outcome: 'too-small', evictedCount: 0, scopeSize: 0 };
     }
     if (img.width * img.height < SMR_MIN_SOURCE_AREA) {
-        return;
+        return { outcome: 'too-small', evictedCount: 0, scopeSize: 0 };
     }
 
     const scope = SMR_getScope(requestContext.scopeKey, true);
@@ -151,7 +151,11 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
         dataUrl = SMR_makeThumbnail(img);
     } catch (error) {
         WJR_DEBUG && console.warn(`SILENT REUSE: Unable to cache safe image: ${error}`);
-        return;
+        return {
+            outcome: 'thumbnail-error',
+            evictedCount: 0,
+            scopeSize: scope.images.length
+        };
     }
 
     const urlParts = SMR_getUrlParts(sourceUrl);
@@ -173,6 +177,7 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
         scope.images.splice(duplicateIndex, 1);
     }
     scope.images.push(candidate);
+    let evictedCount = 0;
     while (scope.images.length > SMR_MAX_IMAGES_PER_SCOPE) {
         let evictionIndex = 0;
         for (let index = 1; index < scope.images.length; index++) {
@@ -181,7 +186,13 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext) {
             }
         }
         scope.images.splice(evictionIndex, 1);
+        evictedCount++;
     }
+    return {
+        outcome: duplicateIndex >= 0 ? 'replaced' : 'admitted',
+        evictedCount,
+        scopeSize: scope.images.length
+    };
 }
 
 function SMR_hashString(value) {

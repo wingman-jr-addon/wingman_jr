@@ -15,6 +15,14 @@ const PROC_MIN_IMAGE_BYTES = 1024;
 
 let WJR_DEBUG = false;
 
+// Local profiling switch. This branch intentionally enables lightweight timing
+// collection without enabling WJR_DEBUG, whose console image rendering changes
+// the workload enough to skew page-load measurements.
+const WJR_PROFILE = true;
+// Flip this for the second capture to isolate the cost of eagerly generating
+// same-page safe-image thumbnails. It does not disable image scanning.
+const WJR_PROFILE_DISABLE_SAFE_REUSE = false;
+
 function procOnModelLoadProgress(percentage) {
     WJR_DEBUG && console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
@@ -202,7 +210,7 @@ function drawImage(c, imgElement) {
     c.ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
 }
 
-async function procPredict(imgElement) {
+async function procPredict(imgElement, profile = null) {
     let c = procGetCtx();
     try {
         const drawStartTime = performance.now();
@@ -235,6 +243,10 @@ async function procPredict(imgElement) {
         });
 
         const totalTime = performance.now() - startTime;
+        if(profile) {
+            profile.modelInferenceMs = (profile.modelInferenceMs || 0) + totalTime;
+            profile.modelInferenceCount = (profile.modelInferenceCount || 0) + 1;
+        }
         PROC_inferenceTimeTotal += totalTime;
         PROC_inferenceCountTotal++;
         const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
@@ -493,7 +505,7 @@ function procWait(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
+async function procPredictImageSamples(img, threshold, isAnimatedWebp, profile = null) {
     // Static images keep the original one-prediction behavior. Animated WebP
     // gets a short time-based sample because <img> offers no frame-seek API.
     let sampleCount = isAnimatedWebp ? PROC_ANIMATED_WEBP_SAMPLE_COUNT : 1;
@@ -502,7 +514,7 @@ async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
         if(sampleIndex > 0) {
             await procWait(PROC_ANIMATED_WEBP_SAMPLE_INTERVAL_MS);
         }
-        let score = await procPredict(img);
+        let score = await procPredict(img, profile);
         if(worstScore === null
             || procGetPrimaryScore(score) > procGetPrimaryScore(worstScore)) {
             worstScore = score;
@@ -518,6 +530,18 @@ async function procPredictImageSamples(img, threshold, isAnimatedWebp) {
 
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
+    const materializationStartTime = performance.now();
+    let profile = WJR_PROFILE && entry.profileContext
+        ? entry.profileContext
+        : null;
+    if(profile) {
+        profile.processingStartedAt = Date.now();
+        profile.inFlightAtStart = PROC_inFlight;
+        profile.queueWaitMs = Math.max(
+            0,
+            profile.processingStartedAt - (profile.bodyEndedAt || profile.processingStartedAt)
+        );
+    }
     WJR_DEBUG && console.info('WEBREQP: starting work for '+entry.requestId +' from '+entry.url);
     let result = {
         type: 'scan',
@@ -531,13 +555,33 @@ async function procPerformFiltering(entry) {
     for(let i=0; i<entry.buffers.length; i++) {
         byteCount += entry.buffers[i].byteLength;
     }
+    if(profile) {
+        profile.byteCount = byteCount;
+        profile.bufferCount = entry.buffers.length;
+    }
     let blob = new Blob(entry.buffers, {type: entry.mimeType});
+    if(profile) {
+        profile.blobSetupMs = performance.now() - materializationStartTime;
+    }
     let url = null;
     try
     {
         if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
+            const objectUrlStartTime = performance.now();
             url = URL.createObjectURL(blob);
+            if(profile) {
+                profile.objectUrlSetupMs = performance.now() - objectUrlStartTime;
+                profile.imageLoadStartedAt = Date.now();
+            }
+            const imageLoadStartTime = performance.now();
             let img = await procLoadImagePromise(url);
+            if(profile) {
+                profile.imageDecodedAt = Date.now();
+                profile.decodeMs = Math.max(0, profile.imageDecodedAt - profile.processingStartedAt);
+                profile.imageLoadWaitMs = performance.now() - imageLoadStartTime;
+                profile.width = img.width;
+                profile.height = img.height;
+            }
             WJR_DEBUG && console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
@@ -550,16 +594,54 @@ async function procPerformFiltering(entry) {
                 if(isAnimatedWebp) {
                     WJR_DEBUG && console.debug('ML: Sampling animated WebP '+entry.requestId);
                 }
-                let sqrxrScore = await procPredictImageSamples(img, entry.threshold, isAnimatedWebp);
+                if(profile) {
+                    profile.scanStartedAt = Date.now();
+                    profile.animatedWebp = isAnimatedWebp;
+                }
+                let sqrxrScore = await procPredictImageSamples(
+                    img,
+                    entry.threshold,
+                    isAnimatedWebp,
+                    profile
+                );
+                if(profile) {
+                    profile.scanCompletedAt = Date.now();
+                    profile.scanMs = Math.max(0, profile.scanCompletedAt - profile.scanStartedAt);
+                }
                 result.adaptiveScore = procGetPrimaryScore(sqrxrScore);
                 result.auditRating = procGetAuditRating(sqrxrScore);
                 if(procIsSafe(sqrxrScore, entry.threshold)) {
                     WJR_DEBUG && console.log('ML: Passed: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
-                    if (typeof SMR_observeSafeImage === 'function') {
-                        SMR_observeSafeImage(img, sqrxrScore, entry.threshold, entry.reuseContext);
+                    if(profile) {
+                        profile.safeReuseDisabled = WJR_PROFILE_DISABLE_SAFE_REUSE;
+                    }
+                    if (!WJR_PROFILE_DISABLE_SAFE_REUSE
+                        && typeof SMR_observeSafeImage === 'function') {
+                        const safeReuseStartTime = performance.now();
+                        const reuseResult = SMR_observeSafeImage(
+                            img,
+                            sqrxrScore,
+                            entry.threshold,
+                            entry.reuseContext
+                        );
+                        if(profile) {
+                            profile.safeReuseMs = performance.now() - safeReuseStartTime;
+                            profile.safeReuseOutcome = reuseResult?.outcome || 'unknown';
+                            profile.safeReuseEvictions = reuseResult?.evictedCount || 0;
+                            profile.safeReuseScopeSize = reuseResult?.scopeSize || 0;
+                        }
+                    } else if(profile) {
+                        profile.safeReuseMs = 0;
+                        profile.safeReuseOutcome = WJR_PROFILE_DISABLE_SAFE_REUSE
+                            ? 'profile-disabled'
+                            : 'unavailable';
                     }
                     result.result = 'pass';
+                    const blobCopyStartTime = performance.now();
                     result.imageBytes = await blob.arrayBuffer();
+                    if(profile) {
+                        profile.blobCopyMs = performance.now() - blobCopyStartTime;
+                    }
                     result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
@@ -605,6 +687,17 @@ async function procPerformFiltering(entry) {
         WJR_DEBUG && console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
             URL.revokeObjectURL(url);
+        }
+        if(profile) {
+            profile.processingCompletedAt = Date.now();
+            profile.processingMs = Math.max(
+                0,
+                profile.processingCompletedAt - profile.processingStartedAt
+            );
+            profile.postScanMs = profile.scanCompletedAt == null
+                ? null
+                : Math.max(0, profile.processingCompletedAt - profile.scanCompletedAt);
+            result.profile = profile;
         }
     }
     return result;
@@ -801,6 +894,14 @@ async function procCheckProcess() {
         try {
             const auditThumbnail = result.auditThumbnail;
             delete result.auditThumbnail;
+            if(result.profile) {
+                result.profile.processorPostedAt = Date.now();
+                result.profile.processorReturnMs = Math.max(
+                    0,
+                    result.profile.processorPostedAt
+                        - (result.profile.processingCompletedAt || result.profile.processorPostedAt)
+                );
+            }
             PROC_port.postMessage(result);
             PROC_port.postMessage({
                 type:'stat',
@@ -1137,6 +1238,7 @@ async function procOnPortMessage(m) {
                 adaptiveContext: m.adaptiveContext || null,
                 auditContext: m.auditContext || null,
                 reuseContext: m.reuseContext || null,
+                profileContext: m.profileContext || null,
                 startTime: performance.now(),
                 buffers: []
             };
@@ -1158,6 +1260,14 @@ async function procOnPortMessage(m) {
         }
         break;
         case 'onstop': {
+            if(PROC_openRequests[m.requestId]?.profileContext && m.profileNetwork) {
+                Object.assign(PROC_openRequests[m.requestId].profileContext, m.profileNetwork);
+                PROC_openRequests[m.requestId].profileContext.queueDepthAtEnqueue =
+                    PROC_processingQueue.length;
+                PROC_openRequests[m.requestId].profileContext.inFlightAtEnqueue = PROC_inFlight;
+                PROC_openRequests[m.requestId].profileContext.backlogAtEnqueue =
+                    PROC_processingQueue.length + PROC_inFlight;
+            }
             PROC_processingQueue.push(PROC_openRequests[m.requestId]);
             delete PROC_openRequests[m.requestId];
             await procCheckProcess();
