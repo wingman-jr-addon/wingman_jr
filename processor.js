@@ -629,7 +629,8 @@ async function procPerformFiltering(entry) {
                             img,
                             sqrxrScore,
                             entry.threshold,
-                            entry.reuseContext
+                            entry.reuseContext,
+                            blob
                         );
                         if(profile) {
                             profile.safeReuseMs = performance.now() - safeReuseStartTime;
