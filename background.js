@@ -121,6 +121,13 @@ function bkProfileBuildSummary(records) {
         'decodeEventLoopDelayMs',
         'decodeEventLoopMaxDelayMs',
         'decodeEventLoopMaxGapMs',
+        'workerInputCopyMs',
+        'workerDecodeQueueWaitMs',
+        'workerRoundTripMs',
+        'workerDecodeMs',
+        'workerResizeMs',
+        'workerReadbackMs',
+        'workerTotalMs',
         'scanMs',
         'modelInferenceMs',
         'safeReuseMs',
@@ -163,6 +170,8 @@ function bkProfileBuildSummary(records) {
                 ? `${record.width}x${record.height}`
                 : null,
             animatedWebp: record.animatedWebp === true,
+            decodeMode: record.decodeMode,
+            workerDecodeQueueDepth: record.workerDecodeQueueDepthAtEnqueue,
             queueDepth: record.queueDepthAtEnqueue,
             backlog: record.backlogAtEnqueue,
             inFlightAtStart: record.inFlightAtStart,
@@ -176,6 +185,14 @@ function bkProfileBuildSummary(records) {
             decodeEventLoopMaxDelayMs: Math.round(record.decodeEventLoopMaxDelayMs || 0),
             decodeEventLoopMaxGapMs: Math.round(record.decodeEventLoopMaxGapMs || 0),
             decodeEventLoopSamples: record.decodeEventLoopSamples,
+            workerInputCopyMs: Math.round(record.workerInputCopyMs || 0),
+            workerDecodeQueueWaitMs: Math.round(record.workerDecodeQueueWaitMs || 0),
+            workerRoundTripMs: Math.round(record.workerRoundTripMs || 0),
+            workerDecodeMs: Math.round(record.workerDecodeMs || 0),
+            workerResizeMs: Math.round(record.workerResizeMs || 0),
+            workerReadbackMs: Math.round(record.workerReadbackMs || 0),
+            workerTotalMs: Math.round(record.workerTotalMs || 0),
+            workerFallbackReason: record.workerFallbackReason,
             scanMs: record.scanMs,
             modelInferenceMs: Math.round(record.modelInferenceMs || 0),
             safeReuseMs: Math.round(record.safeReuseMs || 0),
@@ -194,6 +211,11 @@ function bkProfileBuildSummary(records) {
     return {
         capturedAt: new Date().toISOString(),
         imageCount: records.length,
+        decodeModes: records.reduce((counts, record) => {
+            const mode = record.decodeMode || 'not-recorded';
+            counts[mode] = (counts[mode] || 0) + 1;
+            return counts;
+        }, {}),
         pageHosts: [...new Set(records.map(record => record.pageHost).filter(Boolean))],
         resultCounts: resultCounts,
         safeReuseDisabled: records.some(record => record.safeReuseDisabled === true),
@@ -205,6 +227,13 @@ function bkProfileBuildSummary(records) {
         totalBytes: records.reduce((sum, record) => sum + (record.byteCount || 0), 0),
         maxQueueDepth: records.reduce(
             (maximum, record) => Math.max(maximum, record.queueDepthAtEnqueue || 0),
+            0
+        ),
+        maxWorkerDecodeQueueDepth: records.reduce(
+            (maximum, record) => Math.max(
+                maximum,
+                record.workerDecodeQueueDepthAtEnqueue || 0
+            ),
             0
         ),
         maxBacklog: records.reduce(

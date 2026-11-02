@@ -265,6 +265,40 @@ function drawImage(c, imgElement) {
     c.ctx.drawImage(imgElement, 0, 0, imgElement.width, imgElement.height, 0, 0, PROC_IMAGE_SIZE,PROC_IMAGE_SIZE);
 }
 
+function procPredictPreparedPixels(pixels, profile = null) {
+    const startTime = performance.now();
+    const syncedResult = tf.tidy(() => {
+        const rightSizeImageDataTF = tf.browser.fromPixels(pixels);
+        const floatImg = rightSizeImageDataTF.toFloat();
+        let normalized;
+        if (PROC_activeModelSelection === 'sqrxr_112') {
+            const scaled = floatImg.div(PROC_CLASSIC_SCALE_TENSOR);
+            normalized = scaled.sub(PROC_CLASSIC_SHIFT_TENSOR);
+        } else {
+            const scaled = floatImg.div(PROC_PIXEL_SCALE_TENSOR);
+            const centered = scaled.sub(PROC_MEAN_TENSOR);
+            normalized = centered.div(PROC_STD_TENSOR);
+        }
+        // Reshape to a single-element batch so we can pass it to predict.
+        const batched = normalized.expandDims(0);
+        const result = PROC_wingman.predict(batched, {batchSize: 1});
+        return [result[0].dataSync(), result[1].dataSync()];
+    });
+
+    const totalTime = performance.now() - startTime;
+    if(profile) {
+        profile.modelInferenceMs = (profile.modelInferenceMs || 0) + totalTime;
+        profile.modelInferenceCount = (profile.modelInferenceCount || 0) + 1;
+    }
+    PROC_inferenceTimeTotal += totalTime;
+    PROC_inferenceCountTotal++;
+    const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
+    WJR_DEBUG && console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
+
+    WJR_DEBUG && console.debug('ML: Prediction: '+syncedResult[0]);
+    return syncedResult;
+}
+
 async function procPredict(imgElement, profile = null) {
     let c = procGetCtx();
     try {
@@ -278,37 +312,7 @@ async function procPredict(imgElement, profile = null) {
         const totalDrawTime = performance.now() - drawStartTime;
         WJR_DEBUG && console.debug(`PERF: Draw time in ${Math.floor(totalDrawTime)}ms`);
 
-        const startTime = performance.now();
-        const syncedResult = tf.tidy(() => {
-            const rightSizeImageDataTF = tf.browser.fromPixels(c.canvas);
-            const floatImg = rightSizeImageDataTF.toFloat();
-            let normalized;
-            if (PROC_activeModelSelection === 'sqrxr_112') {
-                const scaled = floatImg.div(PROC_CLASSIC_SCALE_TENSOR);
-                normalized = scaled.sub(PROC_CLASSIC_SHIFT_TENSOR);
-            } else {
-                const scaled = floatImg.div(PROC_PIXEL_SCALE_TENSOR);
-                const centered = scaled.sub(PROC_MEAN_TENSOR);
-                normalized = centered.div(PROC_STD_TENSOR);
-            }
-            // Reshape to a single-element batch so we can pass it to predict.
-            const batched = normalized.expandDims(0);
-            const result = PROC_wingman.predict(batched, {batchSize: 1});
-            return [result[0].dataSync(), result[1].dataSync()];
-        });
-
-        const totalTime = performance.now() - startTime;
-        if(profile) {
-            profile.modelInferenceMs = (profile.modelInferenceMs || 0) + totalTime;
-            profile.modelInferenceCount = (profile.modelInferenceCount || 0) + 1;
-        }
-        PROC_inferenceTimeTotal += totalTime;
-        PROC_inferenceCountTotal++;
-        const avgTime = PROC_inferenceTimeTotal / PROC_inferenceCountTotal;
-        WJR_DEBUG && console.debug(`PERF: Model inference in ${Math.floor(totalTime)}ms and avg of ${Math.floor(avgTime)}ms for ${PROC_inferenceCountTotal} scanned images`);
-
-        WJR_DEBUG && console.debug('ML: Prediction: '+syncedResult[0]);
-        return syncedResult;
+        return procPredictPreparedPixels(c.canvas, profile);
     } finally {
         procReturnCtx(c);
     }
@@ -530,6 +534,200 @@ function procGetOriginalResponseBytes(buffers) {
     return procConcatBufferViews(buffers).buffer;
 }
 
+const PROC_WORKER_DECODE_MODE = 'worker-webcodecs-rgba';
+const PROC_WORKER_DECODE_TIMEOUT_MS = 5000;
+let PROC_workerDecoder = null;
+let PROC_workerDecoderDisabled = false;
+let PROC_workerDecodeSequence = 0;
+let PROC_workerDecodeActive = null;
+let PROC_workerDecodeWaiting = [];
+let PROC_workerUnsupportedMimeTypes = new Set();
+
+function procWorkerDecodeFailure(error, unsupported = false) {
+    return {
+        ok: false,
+        unsupported: unsupported,
+        error: `${error?.message || error || 'Unknown worker decoder error'}`
+    };
+}
+
+function procDrainWorkerDecodeQueue(error) {
+    const failure = procWorkerDecodeFailure(error);
+    if(PROC_workerDecodeActive) {
+        clearTimeout(PROC_workerDecodeActive.timeoutId);
+        PROC_workerDecodeActive.stopEventLoopProbe?.();
+        PROC_workerDecodeActive.resolve(failure);
+        PROC_workerDecodeActive = null;
+    }
+    while(PROC_workerDecodeWaiting.length > 0) {
+        PROC_workerDecodeWaiting.shift().resolve(failure);
+    }
+}
+
+function procEnsureWorkerDecoder() {
+    if(PROC_workerDecoder || PROC_workerDecoderDisabled) {
+        return PROC_workerDecoder;
+    }
+    try {
+        PROC_workerDecoder = new Worker(browser.runtime.getURL('decoder_worker.js'));
+        PROC_workerDecoder.onmessage = event => {
+            const active = PROC_workerDecodeActive;
+            if(!active || event.data.requestId !== active.requestId) {
+                console.warn(`DECODER WORKER: Ignoring unexpected result ${event.data.requestId}`);
+                return;
+            }
+            const receivedAt = performance.now();
+            clearTimeout(active.timeoutId);
+            const eventLoopStats = active.stopEventLoopProbe?.() || null;
+            const result = {
+                ...event.data,
+                queueWaitMs: active.startedAt - active.queuedAt,
+                roundTripMs: receivedAt - active.startedAt,
+                eventLoopStats: eventLoopStats
+            };
+            if(result.unsupported) {
+                PROC_workerUnsupportedMimeTypes.add(active.mimeType);
+            }
+            PROC_workerDecodeActive = null;
+            active.resolve(result);
+            procPumpWorkerDecodeQueue();
+        };
+        PROC_workerDecoder.onerror = event => {
+            console.error(`DECODER WORKER: ${event.message || 'Worker failure'}`);
+            event.preventDefault?.();
+            PROC_workerDecoderDisabled = true;
+            PROC_workerDecoder?.terminate();
+            PROC_workerDecoder = null;
+            procDrainWorkerDecodeQueue(event.message || 'Worker failure');
+        };
+    } catch(error) {
+        PROC_workerDecoderDisabled = true;
+        PROC_workerDecoder = null;
+        WJR_DEBUG && console.warn(`DECODER WORKER: Unable to start: ${error}`);
+    }
+    return PROC_workerDecoder;
+}
+
+function procPumpWorkerDecodeQueue() {
+    if(PROC_workerDecodeActive || PROC_workerDecodeWaiting.length === 0) {
+        return;
+    }
+    const worker = procEnsureWorkerDecoder();
+    if(!worker) {
+        procDrainWorkerDecodeQueue('Worker decoder unavailable');
+        return;
+    }
+    const job = PROC_workerDecodeWaiting.shift();
+    PROC_workerDecodeActive = job;
+    job.startedAt = performance.now();
+    if(job.profile) {
+        job.profile.workerDecodeStartedAt = Date.now();
+    }
+    job.stopEventLoopProbe = job.profile
+        ? procStartEventLoopDelayProbe()
+        : null;
+    job.timeoutId = setTimeout(() => {
+        if(PROC_workerDecodeActive !== job) {
+            return;
+        }
+        PROC_workerDecoderDisabled = true;
+        PROC_workerDecoder?.terminate();
+        PROC_workerDecoder = null;
+        procDrainWorkerDecodeQueue(
+            `Worker decode exceeded ${PROC_WORKER_DECODE_TIMEOUT_MS}ms`
+        );
+    }, PROC_WORKER_DECODE_TIMEOUT_MS);
+    try {
+        worker.postMessage({
+            type: 'decode',
+            requestId: job.requestId,
+            mimeType: job.mimeType,
+            preprocessing: job.preprocessing,
+            imageBytes: job.imageBytes
+        }, [job.imageBytes]);
+    } catch(error) {
+        clearTimeout(job.timeoutId);
+        job.stopEventLoopProbe?.();
+        PROC_workerDecodeActive = null;
+        job.resolve(procWorkerDecodeFailure(error));
+        procPumpWorkerDecodeQueue();
+    }
+}
+
+function procQueueWorkerDecode(imageBytes, mimeType, preprocessing, profile) {
+    if(PROC_workerDecoderDisabled || PROC_workerUnsupportedMimeTypes.has(mimeType)) {
+        return Promise.resolve(procWorkerDecodeFailure(
+            `Worker decoder unavailable for ${mimeType}`,
+            true
+        ));
+    }
+    const requestId = ++PROC_workerDecodeSequence;
+    const queuedAt = performance.now();
+    if(profile) {
+        profile.workerDecodeQueueDepthAtEnqueue = PROC_workerDecodeWaiting.length
+            + (PROC_workerDecodeActive ? 1 : 0);
+    }
+    const promise = new Promise(resolve => {
+        PROC_workerDecodeWaiting.push({
+            requestId: requestId,
+            mimeType: mimeType,
+            preprocessing: preprocessing,
+            imageBytes: imageBytes,
+            profile: profile,
+            queuedAt: queuedAt,
+            startedAt: null,
+            stopEventLoopProbe: null,
+            timeoutId: null,
+            resolve: resolve
+        });
+    });
+    procPumpWorkerDecodeQueue();
+    return promise;
+}
+
+function procCopyResponseBytesForWorker(buffers) {
+    if(buffers.length === 1) {
+        return buffers[0].slice(0);
+    }
+    return procConcatBufferViews(buffers).buffer;
+}
+
+function procNormalizeImageMimeType(mimeType) {
+    return `${mimeType || ''}`.split(';', 1)[0].trim().toLowerCase();
+}
+
+async function procTryWorkerImageDecode(entry, profile) {
+    const mimeType = procNormalizeImageMimeType(entry.mimeType);
+    if(PROC_workerDecoderDisabled
+        || !mimeType
+        || PROC_workerUnsupportedMimeTypes.has(mimeType)) {
+        return procWorkerDecodeFailure(
+            `Worker decoder unavailable for ${mimeType || entry.mimeType}`,
+            true
+        );
+    }
+    const copyStartedAt = performance.now();
+    const workerBytes = procCopyResponseBytesForWorker(entry.buffers);
+    const copyMs = performance.now() - copyStartedAt;
+    const result = await procQueueWorkerDecode(
+        workerBytes,
+        mimeType,
+        PROC_activeModelSelection,
+        profile
+    );
+    if(profile) {
+        profile.workerInputCopyMs = copyMs;
+        profile.workerDecodeQueueWaitMs = result.queueWaitMs ?? null;
+        profile.workerRoundTripMs = result.roundTripMs ?? null;
+        profile.workerDecodeMs = result.decodeMs ?? null;
+        profile.workerResizeMs = result.resizeMs ?? null;
+        profile.workerReadbackMs = result.readbackMs ?? null;
+        profile.workerTotalMs = result.totalMs ?? null;
+        profile.workerFallbackReason = result.ok ? null : result.error;
+    }
+    return result;
+}
+
 function procIsAnimatedWebp(buffers) {
     let bytes = procConcatBufferViews(buffers);
     if(bytes.byteLength < 12
@@ -590,6 +788,102 @@ async function procPredictImageSamples(img, threshold, isAnimatedWebp, profile =
     return worstScore;
 }
 
+async function procDecodeImageLegacy(blob, profile, decodeMode = 'legacy-sync') {
+    const objectUrlStartTime = performance.now();
+    const url = URL.createObjectURL(blob);
+    if(profile) {
+        profile.decodeMode = decodeMode;
+        profile.objectUrlSetupMs = performance.now() - objectUrlStartTime;
+        profile.imageLoadStartedAt = Date.now();
+    }
+    const imageLoadStartTime = performance.now();
+    const stopEventLoopDelayProbe = profile
+        ? procStartEventLoopDelayProbe()
+        : null;
+    let decodeEventLoopStats = null;
+    try {
+        const img = await procLoadImagePromise(url);
+        decodeEventLoopStats = stopEventLoopDelayProbe?.() || null;
+        if(profile) {
+            profile.imageDecodedAt = Date.now();
+            profile.decodeMs = Math.max(
+                0,
+                profile.imageDecodedAt - profile.processingStartedAt
+            );
+            profile.imageLoadWaitMs = performance.now() - imageLoadStartTime;
+            profile.decodeEventLoopDelayMs = decodeEventLoopStats?.totalDelayMs ?? null;
+            profile.decodeEventLoopMaxDelayMs = decodeEventLoopStats?.maxDelayMs ?? null;
+            profile.decodeEventLoopMaxGapMs = decodeEventLoopStats?.maxGapMs ?? null;
+            profile.decodeEventLoopSamples = decodeEventLoopStats?.sampleCount ?? null;
+            profile.width = img.width;
+            profile.height = img.height;
+        }
+        return {
+            image: img,
+            pixels: null,
+            width: img.width,
+            height: img.height,
+            url: url
+        };
+    } catch(error) {
+        stopEventLoopDelayProbe?.();
+        URL.revokeObjectURL(url);
+        throw error;
+    }
+}
+
+async function procDecodeImageForScan(entry, blob, profile, isAnimatedWebp) {
+    if(!isAnimatedWebp) {
+        const workerResult = await procTryWorkerImageDecode(entry, profile);
+        if(workerResult.ok) {
+            const eventLoopStats = workerResult.eventLoopStats;
+            if(profile) {
+                profile.decodeMode = PROC_WORKER_DECODE_MODE;
+                profile.imageDecodedAt = Date.now();
+                profile.decodeMs = Math.max(
+                    0,
+                    profile.imageDecodedAt - profile.processingStartedAt
+                );
+                profile.imageLoadStartedAt = profile.workerDecodeStartedAt;
+                profile.imageLoadWaitMs = workerResult.roundTripMs;
+                profile.decodeEventLoopDelayMs = eventLoopStats?.totalDelayMs ?? null;
+                profile.decodeEventLoopMaxDelayMs = eventLoopStats?.maxDelayMs ?? null;
+                profile.decodeEventLoopMaxGapMs = eventLoopStats?.maxGapMs ?? null;
+                profile.decodeEventLoopSamples = eventLoopStats?.sampleCount ?? null;
+                profile.width = workerResult.width;
+                profile.height = workerResult.height;
+            }
+            return {
+                image: {
+                    width: workerResult.width,
+                    height: workerResult.height
+                },
+                pixels: workerResult.pixels,
+                width: workerResult.width,
+                height: workerResult.height,
+                url: null
+            };
+        }
+    }
+    const fallbackMode = isAnimatedWebp
+        ? 'legacy-sync-animated-webp'
+        : 'legacy-sync-worker-fallback';
+    return procDecodeImageLegacy(blob, profile, fallbackMode);
+}
+
+function procCreatePreparedPixelCanvas(pixelBuffer) {
+    const canvas = document.createElement('canvas');
+    canvas.width = PROC_IMAGE_SIZE;
+    canvas.height = PROC_IMAGE_SIZE;
+    const context = canvas.getContext('2d', { alpha: false });
+    context.putImageData(new ImageData(
+        new Uint8ClampedArray(pixelBuffer),
+        PROC_IMAGE_SIZE,
+        PROC_IMAGE_SIZE
+    ), 0, 0);
+    return canvas;
+}
+
 async function procPerformFiltering(entry) {
     let dataEndTime = performance.now();
     const materializationStartTime = performance.now();
@@ -629,43 +923,22 @@ async function procPerformFiltering(entry) {
     try
     {
         if(byteCount >= PROC_MIN_IMAGE_BYTES) { //only scan if the image is complex enough to be objectionable
-            const objectUrlStartTime = performance.now();
-            url = URL.createObjectURL(blob);
-            if(profile) {
-                profile.objectUrlSetupMs = performance.now() - objectUrlStartTime;
-                profile.imageLoadStartedAt = Date.now();
-            }
-            const imageLoadStartTime = performance.now();
-            const stopEventLoopDelayProbe = profile
-                ? procStartEventLoopDelayProbe()
-                : null;
-            let img;
-            let decodeEventLoopStats = null;
-            try {
-                img = await procLoadImagePromise(url);
-            } finally {
-                decodeEventLoopStats = stopEventLoopDelayProbe?.() || null;
-            }
-            if(profile) {
-                profile.imageDecodedAt = Date.now();
-                profile.decodeMs = Math.max(0, profile.imageDecodedAt - profile.processingStartedAt);
-                profile.imageLoadWaitMs = performance.now() - imageLoadStartTime;
-                profile.decodeEventLoopDelayMs = decodeEventLoopStats?.totalDelayMs ?? null;
-                profile.decodeEventLoopMaxDelayMs = decodeEventLoopStats?.maxDelayMs ?? null;
-                profile.decodeEventLoopMaxGapMs = decodeEventLoopStats?.maxGapMs ?? null;
-                profile.decodeEventLoopSamples = decodeEventLoopStats?.sampleCount ?? null;
-                profile.width = img.width;
-                profile.height = img.height;
-            }
+            // Animated WebP keeps its existing time-based <img> sampling path.
+            // WebCodecs is used here only for one-frame image scans.
+            const isAnimatedWebp = entry.mimeType.toLowerCase().startsWith('image/webp')
+                && procIsAnimatedWebp(entry.buffers);
+            const decoded = await procDecodeImageForScan(
+                entry,
+                blob,
+                profile,
+                isAnimatedWebp
+            );
+            const img = decoded.image;
+            url = decoded.url;
             WJR_DEBUG && console.debug('img loaded '+entry.requestId)
             if(img.width>=PROC_MIN_IMAGE_SIZE && img.height>=PROC_MIN_IMAGE_SIZE){ //there's a lot of 1x1 pictures in the world that don't need filtering!
                 WJR_DEBUG && console.debug('ML: predict '+entry.requestId+' size '+img.width+'x'+img.height+', materialization occured with '+byteCount+' bytes');
                 let imgLoadTime = performance.now();
-                // Perform the byte inspection here, after all response chunks
-                // have been assembled. At header-routing time we only knew that
-                // this was some kind of image/webp.
-                let isAnimatedWebp = entry.mimeType.toLowerCase().startsWith('image/webp')
-                    && procIsAnimatedWebp(entry.buffers);
                 if(isAnimatedWebp) {
                     WJR_DEBUG && console.debug('ML: Sampling animated WebP '+entry.requestId);
                 }
@@ -673,12 +946,18 @@ async function procPerformFiltering(entry) {
                     profile.scanStartedAt = Date.now();
                     profile.animatedWebp = isAnimatedWebp;
                 }
-                let sqrxrScore = await procPredictImageSamples(
-                    img,
-                    entry.threshold,
-                    isAnimatedWebp,
-                    profile
-                );
+                let sqrxrScore = decoded.pixels
+                    ? procPredictPreparedPixels({
+                        data: new Uint8Array(decoded.pixels),
+                        width: PROC_IMAGE_SIZE,
+                        height: PROC_IMAGE_SIZE
+                    }, profile)
+                    : await procPredictImageSamples(
+                        img,
+                        entry.threshold,
+                        isAnimatedWebp,
+                        profile
+                    );
                 if(profile) {
                     profile.scanCompletedAt = Date.now();
                     profile.scanMs = Math.max(0, profile.scanCompletedAt - profile.scanStartedAt);
@@ -725,12 +1004,15 @@ async function procPerformFiltering(entry) {
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
                     let svgText = await procCommonCreateSvgFromBlob(img, sqrxrScore, blob, entry.reuseContext);
-                    procCommonWarnImg(img, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
+                    const displayImage = decoded.pixels
+                        ? procCreatePreparedPixelCanvas(decoded.pixels)
+                        : img;
+                    procCommonWarnImg(displayImage, 'BLOCKED IMG '+procScoreToStr(sqrxrScore));
                     let encoder = new TextEncoder();
                     let encodedTypedBuffer = encoder.encode(svgText);
                     result.result = 'block';
                     if (PROC_isAuditEnabled) {
-                        result.auditThumbnail = procCreateAuditThumbnail(img);
+                        result.auditThumbnail = procCreateAuditThumbnail(displayImage);
                     }
                     result.imageBytes = encodedTypedBuffer.buffer;
                 }

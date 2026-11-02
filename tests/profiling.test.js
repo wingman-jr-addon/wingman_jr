@@ -35,6 +35,10 @@ const records = [
         width: 200,
         height: 300,
         queueDepthAtEnqueue: 1,
+        decodeMode: 'worker-webcodecs-rgba',
+        workerDecodeQueueDepthAtEnqueue: 0,
+        workerDecodeMs: 12,
+        workerRoundTripMs: 18,
         backlogAtEnqueue: 2,
         inFlightAtStart: 1,
         safeReuseOutcome: 'admitted',
@@ -57,6 +61,10 @@ const records = [
         width: 400,
         height: 500,
         queueDepthAtEnqueue: 4,
+        decodeMode: 'legacy-sync-worker-fallback',
+        workerDecodeQueueDepthAtEnqueue: 1,
+        workerDecodeMs: 30,
+        workerRoundTripMs: 40,
         backlogAtEnqueue: 6,
         inFlightAtStart: 1,
         safeReuseOutcome: 'admitted',
@@ -81,6 +89,7 @@ const summary = context.profilingTestApi.buildSummary(records);
 assert.strictEqual(summary.imageCount, 2);
 assert.strictEqual(summary.totalBytes, 3000);
 assert.strictEqual(summary.maxQueueDepth, 4);
+assert.strictEqual(summary.maxWorkerDecodeQueueDepth, 1);
 assert.strictEqual(summary.maxBacklog, 6);
 assert.strictEqual(summary.maxInFlightAtStart, 1);
 assert.strictEqual(summary.resultCounts.pass, 1);
@@ -92,6 +101,10 @@ assert.strictEqual(summary.metrics.decodeEventLoopDelayMs.avg, 43);
 assert.strictEqual(summary.metrics.decodeEventLoopMaxGapMs.max, 85);
 assert.strictEqual(summary.topSlow[0].decodeEventLoopMaxDelayMs, 60);
 assert.strictEqual(summary.topSlow[0].decodeEventLoopSamples, 7);
+assert.strictEqual(summary.decodeModes['worker-webcodecs-rgba'], 1);
+assert.strictEqual(summary.decodeModes['legacy-sync-worker-fallback'], 1);
+assert.strictEqual(summary.metrics.workerDecodeMs.avg, 21);
+assert.strictEqual(summary.topSlow[0].workerRoundTripMs, 40);
 assert.strictEqual(context.profilingTestApi.hostname('https://example.com/private/path?q=secret'), 'example.com');
 
 console.log('profiling summary tests passed');
