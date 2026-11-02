@@ -41,6 +41,10 @@ const records = [
         safeReuseEvictions: 0,
         heldResponseMs: 100,
         queueWaitMs: 40,
+        decodeEventLoopDelayMs: 5,
+        decodeEventLoopMaxDelayMs: 3,
+        decodeEventLoopMaxGapMs: 28,
+        decodeEventLoopSamples: 4,
         modelInferenceMs: 20
     },
     {
@@ -59,6 +63,10 @@ const records = [
         safeReuseEvictions: 1,
         heldResponseMs: 500,
         queueWaitMs: 300,
+        decodeEventLoopDelayMs: 80,
+        decodeEventLoopMaxDelayMs: 60,
+        decodeEventLoopMaxGapMs: 85,
+        decodeEventLoopSamples: 7,
         modelInferenceMs: 50
     }
 ];
@@ -80,6 +88,10 @@ assert.strictEqual(summary.resultCounts.block, 1);
 assert.strictEqual(summary.safeReuseOutcomes.admitted, 2);
 assert.strictEqual(summary.safeReuseEvictions, 1);
 assert.strictEqual(summary.topSlow[0].requestId, 'two');
+assert.strictEqual(summary.metrics.decodeEventLoopDelayMs.avg, 43);
+assert.strictEqual(summary.metrics.decodeEventLoopMaxGapMs.max, 85);
+assert.strictEqual(summary.topSlow[0].decodeEventLoopMaxDelayMs, 60);
+assert.strictEqual(summary.topSlow[0].decodeEventLoopSamples, 7);
 assert.strictEqual(context.profilingTestApi.hostname('https://example.com/private/path?q=secret'), 'example.com');
 
 console.log('profiling summary tests passed');

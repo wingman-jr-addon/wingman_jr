@@ -23,6 +23,61 @@ const WJR_PROFILE = true;
 // same-page safe-image thumbnails. It does not disable image scanning.
 const WJR_PROFILE_DISABLE_SAFE_REUSE = false;
 
+// Measure whether a long <img> load/decode wait coincides with this processor's
+// JavaScript event loop being unable to run. A timeout is deliberately used
+// instead of requestAnimationFrame because processors normally live in a
+// hidden/background context where animation frames may be paused entirely.
+const PROC_EVENT_LOOP_PROBE_INTERVAL_MS = 25;
+
+function procCreateEventLoopDelayAccumulator(startedAt, intervalMs) {
+    return {
+        intervalMs: intervalMs,
+        lastObservedAt: startedAt,
+        totalDelayMs: 0,
+        maxDelayMs: 0,
+        maxGapMs: 0,
+        sampleCount: 0
+    };
+}
+
+function procObserveEventLoopDelay(accumulator, observedAt) {
+    const gapMs = Math.max(0, observedAt - accumulator.lastObservedAt);
+    const delayMs = Math.max(0, gapMs - accumulator.intervalMs);
+    accumulator.lastObservedAt = observedAt;
+    accumulator.totalDelayMs += delayMs;
+    accumulator.maxDelayMs = Math.max(accumulator.maxDelayMs, delayMs);
+    accumulator.maxGapMs = Math.max(accumulator.maxGapMs, gapMs);
+    accumulator.sampleCount++;
+}
+
+function procStartEventLoopDelayProbe() {
+    const accumulator = procCreateEventLoopDelayAccumulator(
+        performance.now(),
+        PROC_EVENT_LOOP_PROBE_INTERVAL_MS
+    );
+    let timer = null;
+    let stopped = false;
+    const tick = () => {
+        if(stopped) {
+            return;
+        }
+        procObserveEventLoopDelay(accumulator, performance.now());
+        timer = setTimeout(tick, PROC_EVENT_LOOP_PROBE_INTERVAL_MS);
+    };
+    timer = setTimeout(tick, PROC_EVENT_LOOP_PROBE_INTERVAL_MS);
+    return () => {
+        if(stopped) {
+            return null;
+        }
+        stopped = true;
+        clearTimeout(timer);
+        // The decode's onload task can win the race with an overdue heartbeat.
+        // Observing once here makes that final scheduling gap visible too.
+        procObserveEventLoopDelay(accumulator, performance.now());
+        return accumulator;
+    };
+}
+
 function procOnModelLoadProgress(percentage) {
     WJR_DEBUG && console.log('LIFECYCLE: Model load '+Math.round(percentage*100)+'% at '+performance.now());
 }
@@ -581,11 +636,24 @@ async function procPerformFiltering(entry) {
                 profile.imageLoadStartedAt = Date.now();
             }
             const imageLoadStartTime = performance.now();
-            let img = await procLoadImagePromise(url);
+            const stopEventLoopDelayProbe = profile
+                ? procStartEventLoopDelayProbe()
+                : null;
+            let img;
+            let decodeEventLoopStats = null;
+            try {
+                img = await procLoadImagePromise(url);
+            } finally {
+                decodeEventLoopStats = stopEventLoopDelayProbe?.() || null;
+            }
             if(profile) {
                 profile.imageDecodedAt = Date.now();
                 profile.decodeMs = Math.max(0, profile.imageDecodedAt - profile.processingStartedAt);
                 profile.imageLoadWaitMs = performance.now() - imageLoadStartTime;
+                profile.decodeEventLoopDelayMs = decodeEventLoopStats?.totalDelayMs ?? null;
+                profile.decodeEventLoopMaxDelayMs = decodeEventLoopStats?.maxDelayMs ?? null;
+                profile.decodeEventLoopMaxGapMs = decodeEventLoopStats?.maxGapMs ?? null;
+                profile.decodeEventLoopSamples = decodeEventLoopStats?.sampleCount ?? null;
                 profile.width = img.width;
                 profile.height = img.height;
             }
