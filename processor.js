@@ -456,6 +456,13 @@ function procConcatBufferViews(buffers) {
     return bytes;
 }
 
+function procGetOriginalResponseBytes(buffers) {
+    if(buffers.length === 1) {
+        return buffers[0];
+    }
+    return procConcatBufferViews(buffers).buffer;
+}
+
 function procIsAnimatedWebp(buffers) {
     let bytes = procConcatBufferViews(buffers);
     if(bytes.byteLength < 12
@@ -565,7 +572,7 @@ async function procPerformFiltering(entry) {
                         );
                     }
                     result.result = 'pass';
-                    result.imageBytes = await blob.arrayBuffer();
+                    result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
                     result.sqrxrScore = sqrxrScore;
                 } else {
                     WJR_DEBUG && console.log('ML: Blocked: '+procScoreToStr(sqrxrScore)+' '+entry.requestId);
@@ -597,16 +604,16 @@ async function procPerformFiltering(entry) {
                 WJR_DEBUG && console.debug('WEBREQ: Finishing '+entry.requestId);
             } else {
                 result.result = 'tiny';
-                result.imageBytes = await blob.arrayBuffer();
+                result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
             }
         } else {
             result.result = 'tiny';
-            result.imageBytes = await blob.arrayBuffer();
+            result.imageBytes = procGetOriginalResponseBytes(entry.buffers);
         }
     } catch(e) {
         console.error('WEBREQP: Error for '+entry.url+': '+e+' '+JSON.stringify(e)+' '+e.stack);
         result.result = 'error';
-        result.imageBytes = result.imageBytes || await blob.arrayBuffer();
+        result.imageBytes = result.imageBytes || procGetOriginalResponseBytes(entry.buffers);
     } finally {
         WJR_DEBUG && console.debug('WEBREQP: Finishing '+entry.requestId);
         if(url != null) {
