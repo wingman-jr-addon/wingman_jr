@@ -44,8 +44,9 @@ assert.strictEqual(
     'safe observation should retain the existing raw Blob without materializing a thumbnail'
 );
 
+let lastAdmission = null;
 for(let index = 1; index <= context.rawCacheTestApi.maxImages; index++) {
-    context.rawCacheTestApi.observe(
+    lastAdmission = context.rawCacheTestApi.observe(
         img,
         score,
         0.5,
@@ -56,6 +57,7 @@ for(let index = 1; index <= context.rawCacheTestApi.maxImages; index++) {
 const scope = context.rawCacheTestApi.getScope('raw-cache-test', false);
 assert.strictEqual(scope.images.length, context.rawCacheTestApi.maxImages);
 assert.ok(!scope.images.some(candidate => candidate.sourceUrl.endsWith('/0.jpg')));
+assert.strictEqual(lastAdmission.evictedCount, 1);
 
 const selected = context.rawCacheTestApi.pick(img, makeContext('target'));
 assert.ok(selected.blob instanceof Blob);

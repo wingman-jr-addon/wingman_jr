@@ -89,11 +89,15 @@ function SMR_findOldestCandidateIndex(scope) {
 }
 
 function SMR_pruneScopeBudget(scope) {
+    let evictedCount = 0;
     while (scope.images.length > 0
         && (scope.images.length > SMR_MAX_IMAGES_PER_SCOPE
             || scope.byteSize > SMR_MAX_SCOPE_BYTES)) {
-        SMR_removeCandidate(scope, SMR_findOldestCandidateIndex(scope));
+        if (SMR_removeCandidate(scope, SMR_findOldestCandidateIndex(scope))) {
+            evictedCount++;
+        }
     }
+    return evictedCount;
 }
 
 function SMR_getTotalBytes() {
@@ -106,6 +110,7 @@ function SMR_getTotalBytes() {
 
 function SMR_pruneGlobalBudget() {
     let totalBytes = SMR_getTotalBytes();
+    let evictedCount = 0;
     while (totalBytes > SMR_MAX_TOTAL_BYTES) {
         let oldestScope = null;
         let oldestIndex = -1;
@@ -124,7 +129,11 @@ function SMR_pruneGlobalBudget() {
         }
         const removed = SMR_removeCandidate(oldestScope, oldestIndex);
         totalBytes -= removed?.byteSize || 0;
+        if (removed) {
+            evictedCount++;
+        }
     }
+    return evictedCount;
 }
 
 function SMR_getScope(scopeKey, createIfMissing) {
@@ -217,12 +226,12 @@ function SMR_observeSafeImage(img, sqrxrScore, threshold, requestContext, source
     }
     scope.images.push(candidate);
     scope.byteSize += candidate.byteSize;
-    SMR_pruneScopeBudget(scope);
-    SMR_pruneGlobalBudget();
+    const evictedCount = SMR_pruneScopeBudget(scope) + SMR_pruneGlobalBudget();
     const wasRetained = scope.images.includes(candidate);
     return {
         outcome: wasRetained ? 'admitted' : 'budget-evicted',
         byteSize: candidate.byteSize,
+        evictedCount,
         scopeBytes: scope.byteSize,
         scopeSize: scope.images.length
     };
