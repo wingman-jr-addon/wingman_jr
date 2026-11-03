@@ -1127,6 +1127,63 @@ async function procGetVideoScanStatus(
     return scanResults;
 }
 
+function procCreateSerialTaskQueue(runTask) {
+    const waiting = [];
+    let active = false;
+
+    const pump = async () => {
+        if(active || waiting.length === 0) {
+            return;
+        }
+        active = true;
+        const queued = waiting.shift();
+        try {
+            queued.resolve(await runTask(queued.value));
+        } catch(error) {
+            queued.reject(error);
+        } finally {
+            active = false;
+            pump();
+        }
+    };
+
+    return {
+        enqueue(value) {
+            const promise = new Promise((resolve, reject) => {
+                waiting.push({ value, resolve, reject });
+            });
+            pump();
+            return promise;
+        }
+    };
+}
+
+async function procRunGifFrameScan(message) {
+    const gifRequest = {
+        requestId: message.requestId,
+        url: message.url,
+        mimeType: message.mimeType,
+        startTime: performance.now(),
+        buffers: message.buffers,
+        threshold: message.threshold
+    };
+    const gifScanResult = await procPerformFiltering(gifRequest);
+    const gifResponse = {
+        type: 'gif_scan',
+        requestId: gifScanResult.requestId,
+        result: gifScanResult.result,
+        adaptiveScore: gifScanResult.adaptiveScore,
+        auditRating: gifScanResult.auditRating,
+        auditThumbnail: gifScanResult.auditThumbnail
+    };
+    PROC_port.postMessage(gifResponse);
+}
+
+// A GIF chain submits frames sequentially, but separate chains can reach the
+// async port listener together. Give all GIF frames one admission lane so they
+// cannot create unbounded overlapping decode/inference work.
+const PROC_gifFrameScanQueue = procCreateSerialTaskQueue(procRunGifFrameScan);
+
 async function procOnPortMessage(m) {
     WJR_DEBUG && console.debug(`PROCV: Received message of type ${m.type}`);
     switch(m.type) {
@@ -1178,24 +1235,7 @@ async function procOnPortMessage(m) {
         break;
         case 'gif_frame': {
             WJR_DEBUG && console.debug('GIF: '+m.requestId);
-            let gifRequest = {
-                requestId: m.requestId,
-                url: m.url,
-                mimeType: m.mimeType,
-                startTime: performance.now(),
-                buffers: m.buffers,
-                threshold: m.threshold
-            };
-            let gifScanResult = await procPerformFiltering(gifRequest);
-            let gifResponse = {
-                type: 'gif_scan',
-                requestId: gifScanResult.requestId,
-                result: gifScanResult.result,
-                adaptiveScore: gifScanResult.adaptiveScore,
-                auditRating: gifScanResult.auditRating,
-                auditThumbnail: gifScanResult.auditThumbnail
-            };
-            PROC_port.postMessage(gifResponse);
+            await PROC_gifFrameScanQueue.enqueue(m);
         }
         break;
         case 'b64_start': {
