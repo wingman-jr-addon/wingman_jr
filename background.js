@@ -52,6 +52,20 @@ let BK_connectedClients = {};
 let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
+let BK_processorStartupState = 'loading';
+
+function bkSetProcessorStartupState(state) {
+    if (BK_processorStartupState === state) {
+        return;
+    }
+    BK_processorStartupState = state;
+    browser.runtime.sendMessage({
+        type: 'setup.processorStartupStateChanged',
+        state
+    }).catch(() => {
+        // The setup page is not present after first-run setup completes.
+    });
+}
 
 const BK_revealAllowlist = new Set();
 const BK_revealAllowlistQueue = [];
@@ -149,6 +163,7 @@ const BK_DEFAULT_MODEL_SELECTION = 'n017';
 let BK_modelSelection = BK_DEFAULT_MODEL_SELECTION;
 
 function bkReloadProcessors() {
+    bkSetProcessorStartupState('loading');
     WJR_DEBUG && console.log('LIFECYCLE: Cleaning up old processors.');
     let keys = Object.keys(BK_connectedClients);
     for (let key of keys) {
@@ -246,6 +261,7 @@ function bkOnProcessorMessage(m) {
             BK_connectedClients[m.processorId].backend = m.backend;
             BK_connectedClients[m.processorId].model = m.model;
             BK_connectedClients[m.processorId].tabId = m.tabId;
+            bkSetProcessorStartupState('ready');
         }
             break;
     }
@@ -1984,6 +2000,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'getOnOffSwitchShown') {
         sendResponse({ isOnOffSwitchShown: BK_isOnOffSwitchShown });
+    }
+    else if (request.type == 'setup.getProcessorStartupState') {
+        sendResponse({ state: BK_processorStartupState });
     }
     else if (request.type == 'settings.update') {
         return bkUpdateProtectedSettings(request.changes);
