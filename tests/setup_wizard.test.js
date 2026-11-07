@@ -39,6 +39,8 @@ assert.ok(hiddenTabsStep >= 0 && hiddenTabsStep < personaStep,
     'the hidden-tabs decision gates the rest of setup');
 assert.match(setupPage, /choose <strong>Keep Tabs Hidden<\/strong>[\s\S]*Done — continue/,
     'the opening gate gives one concise Firefox instruction before continuing');
+assert.match(setupPage, /id="processor-startup-status"[\s\S]*Starting protection… Firefox may pause briefly while the model loads\./,
+    'the hidden-tabs gate warns that protection is loading before Firefox can pause');
 for (const persona of ['everyday', 'boundaries', 'caregiver']) {
     assert.match(setupPage, new RegExp(`name="setup-goal" value="${persona}"`),
         `${persona} has a first-class setup path`);
@@ -59,6 +61,12 @@ assert.match(setupScript, /type:\s*'audit\.enableSettingsLock'/,
     'protected setup paths create a real settings password');
 assert.match(setupScript, /type:\s*'audit\.setTracking'/,
     'Audit remains a separate setting even when recommended with protection');
+assert.match(setupScript, /setup\.getProcessorStartupState/,
+    'the wizard checks whether the processor has finished loading');
+assert.match(setupScript, /setup\.processorStartupStateChanged/,
+    'the wizard reacts when the processor becomes ready');
+assert.match(source, /case 'registration':[\s\S]*bkSetProcessorStartupState\('ready'\)/,
+    'processor registration marks the model as ready');
 
 const openedUrls = [];
 const developmentContext = {

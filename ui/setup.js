@@ -3,6 +3,26 @@ const SETUP_STEPS = ['browser', 'goal', 'level', 'protection', 'summary'];
 let setupCurrentStep = 'browser';
 let setupPrivateAccessAllowed = false;
 
+function setupUpdateProcessorStartupState(state) {
+    const ready = state === 'ready';
+    const status = document.getElementById('processor-startup-status');
+    status.dataset.state = ready ? 'ready' : 'loading';
+    document.getElementById('processor-startup-message').textContent = ready
+        ? 'Protection is ready.'
+        : 'Starting protection… Firefox may pause briefly while the model loads.';
+}
+
+async function setupRefreshProcessorStartupState() {
+    try {
+        const startup = await browser.runtime.sendMessage({
+            type: 'setup.getProcessorStartupState'
+        });
+        setupUpdateProcessorStartupState(startup?.state);
+    } catch (error) {
+        console.warn('SETUP: Unable to check processor startup state', error);
+    }
+}
+
 function setupSelectedValue(name) {
     return document.querySelector(`input[name="${name}"]:checked`).value;
 }
@@ -251,6 +271,14 @@ document.querySelectorAll('#settings-password, #settings-password-confirm').forE
 
 document.getElementById('enable-audit').addEventListener('change', setupUpdateAuditCoverageWarning);
 
+browser.runtime.onMessage.addListener(message => {
+    if (message?.type === 'setup.processorStartupStateChanged') {
+        setupUpdateProcessorStartupState(message.state);
+    }
+});
+
 document.getElementById('setup-form').addEventListener('submit', event => {
     event.preventDefault();
 });
+
+setupRefreshProcessorStartupState();

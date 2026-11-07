@@ -102,6 +102,49 @@
 
     .browser-instruction strong { color: #4e2f00; }
 
+    .startup-status {
+      display: flex;
+      width: fit-content;
+      max-width: 540px;
+      align-items: center;
+      gap: 10px;
+      margin: -10px auto 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    .startup-spinner {
+      width: 17px;
+      height: 17px;
+      flex: 0 0 auto;
+      border: 2px solid rgba(47, 128, 237, 0.22);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: startup-spin 0.8s linear infinite;
+    }
+
+    .startup-status[data-state="ready"] { color: #18794e; }
+    .startup-status[data-state="ready"] .startup-spinner {
+      border: 0;
+      animation: none;
+    }
+    .startup-status[data-state="ready"] .startup-spinner::before {
+      content: "\2713";
+      display: block;
+      color: #18794e;
+      font-size: 17px;
+      font-weight: 800;
+      line-height: 17px;
+    }
+
+    @keyframes startup-spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .startup-spinner { animation-duration: 1.8s; }
+    }
+
     fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
     legend { margin-bottom: 10px; padding: 0; font-size: 15px; font-weight: 700; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
@@ -272,6 +315,10 @@
         <h2>First, answer Firefox</h2>
         <div class="browser-instruction">
           In the message at the <strong>top-right</strong>, choose <strong>Keep Tabs Hidden</strong>. Otherwise filtering may stop working.
+        </div>
+        <div class="startup-status" id="processor-startup-status" data-state="loading" role="status" aria-live="polite">
+          <span class="startup-spinner" aria-hidden="true"></span>
+          <span id="processor-startup-message">Starting protection… Firefox may pause briefly while the model loads.</span>
         </div>
         <button class="primary" id="hidden-tabs-confirmed" type="button">Done — continue</button>
       </section>
