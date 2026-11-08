@@ -150,7 +150,6 @@
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
     .choices { display: grid; gap: 11px; }
     .persona-choices { grid-template-columns: repeat(3, 1fr); }
-    .protection-choices { grid-template-columns: 1fr 1fr; }
 
     .choice {
       position: relative;
@@ -285,7 +284,7 @@
       body { padding: 0; }
       main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
       .wizard-header, .wizard-step, .wizard-footer { padding-left: 18px; padding-right: 18px; }
-      .persona-choices, .protection-choices, .password-grid { grid-template-columns: 1fr; }
+      .persona-choices, .password-grid { grid-template-columns: 1fr; }
       .choice { min-height: auto; }
       .browser-arrow { right: 2px; }
       .summary-row { grid-template-columns: 1fr; gap: 3px; }
@@ -340,24 +339,6 @@
             <label class="choice">
               <input type="radio" name="setup-goal" value="caregiver">
               <span><strong>Protect someone I care for</strong><small>Guard the settings and keep a local record of filtering activity.</small></span>
-            </label>
-          </div>
-        </fieldset>
-      </section>
-
-      <section class="wizard-step" data-step="level" hidden>
-        <h2>Choose a protection level</h2>
-        <p class="step-intro">This becomes the default for new sites. You can give individual sites their own zone later.</p>
-        <fieldset>
-          <legend class="visually-hidden">Protection level</legend>
-          <div class="choices protection-choices">
-            <label class="choice is-selected">
-              <input type="radio" name="protection-level" value="automatic" checked>
-              <span><strong>Adaptive</strong><small>Starts balanced, then adjusts based on what Wingman Jr. detects.</small><span class="recommended">Recommended</span></span>
-            </label>
-            <label class="choice">
-              <input type="radio" name="protection-level" value="untrusted">
-              <span><strong>Strict</strong><small>Keeps new sites in the Untrusted zone, blocking more aggressively until you change them.</small></span>
             </label>
           </div>
         </fieldset>

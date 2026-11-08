@@ -64,6 +64,7 @@ assert.ok(start >= 0 && end > start);
 vm.runInContext(source.slice(start, end) + `
     this.adaptiveTestApi = {
         initialize: bkInitializeAdaptiveZones,
+        setDefault: bkSetDefaultZone,
         buildPlan: bkBuildRequestPlan,
         getState: bkGetAdaptiveState,
         estimate: bkEstimateAdaptiveStats,
@@ -91,9 +92,47 @@ const api = context.adaptiveTestApi;
     });
     assert.deepStrictEqual(
         JSON.parse(JSON.stringify(adaptivePlan.adaptiveContext)),
-        { hostname: 'a.example', isPrivate: false }
+        { hostname: 'a.example', isPrivate: false, adaptiveMinimum: 'trusted' }
     );
     assert.strictEqual(adaptivePlan.threshold, 0.5);
+
+    const neutralMinimumPlan = api.buildPlan({
+        url: 'https://cdn.example/image.jpg',
+        preference: {
+            supported: true,
+            hostname: 'remembered.example',
+            mode: 'adaptive',
+            adaptiveMinimum: 'neutral'
+        }
+    });
+    assert.strictEqual(neutralMinimumPlan.effectiveZone, 'neutral');
+    assert.strictEqual(neutralMinimumPlan.threshold, 0.5);
+
+    api.setDefault({ default_zone: 'automatic', adaptive_minimum_zone: 'neutral' });
+    const inheritedMinimumPlan = api.buildPlan({
+        url: 'https://cdn.example/image.jpg',
+        preference: {
+            supported: true,
+            hostname: 'remembered.example',
+            mode: null,
+            adaptiveMinimum: null
+        }
+    });
+    assert.strictEqual(inheritedMinimumPlan.effectiveZone, 'neutral');
+    assert.strictEqual(inheritedMinimumPlan.adaptiveContext.adaptiveMinimum, 'neutral');
+    api.setDefault({ default_zone: 'automatic', adaptive_minimum_zone: 'trusted' });
+
+    const untrustedMinimumPlan = api.buildPlan({
+        url: 'https://cdn.example/image.jpg',
+        preference: {
+            supported: true,
+            hostname: 'remembered.example',
+            mode: 'adaptive',
+            adaptiveMinimum: 'untrusted'
+        }
+    });
+    assert.strictEqual(untrustedMinimumPlan.effectiveZone, 'untrusted');
+    assert.strictEqual(untrustedMinimumPlan.threshold, 0.2);
 
     const fixedPlan = api.buildPlan({
         url: 'https://cdn.example/image.jpg',

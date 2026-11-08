@@ -274,10 +274,13 @@ const BK_ADAPTIVE_MEMORY_SCHEMA = 1;
 const BK_ADAPTIVE_MAX_ACTIVE_DOMAINS = 256;
 const BK_ADAPTIVE_MAX_REMEMBERED_DOMAINS = 10000;
 const BK_ADAPTIVE_MIN_PREDICTIONS = 51;
+const BK_ADAPTIVE_MINIMUMS = Object.freeze(['trusted', 'neutral', 'untrusted']);
+const BK_ADAPTIVE_ZONE_RANK = Object.freeze({ trusted: 0, neutral: 1, untrusted: 2 });
 const BK_COMMON_SECOND_LEVEL_SUFFIXES = new Set([
     'ac', 'co', 'com', 'edu', 'gov', 'mil', 'net', 'org'
 ]);
 var BK_defaultMode = 'adaptive';
+var BK_defaultAdaptiveMinimum = 'trusted';
 var BK_adaptiveStates = new Map();
 var BK_adaptiveMemoryEnabled = true;
 var BK_rememberedAdaptiveZones = Object.create(null);
@@ -299,12 +302,26 @@ function bkGetAdaptiveDomain(hostname) {
     return labels.slice(hasCommonCountrySuffix ? -3 : -2).join('.');
 }
 
-function bkAddToPredictionBuffer(state, score) {
+function bkNormalizeAdaptiveMinimum(value) {
+    return BK_ADAPTIVE_MINIMUMS.includes(value) ? value : 'trusted';
+}
+
+function bkApplyAdaptiveMinimum(zone, minimum) {
+    const normalizedZone = Object.prototype.hasOwnProperty.call(BK_ADAPTIVE_ZONE_RANK, zone)
+        ? zone
+        : 'neutral';
+    const normalizedMinimum = bkNormalizeAdaptiveMinimum(minimum);
+    return BK_ADAPTIVE_ZONE_RANK[normalizedZone] >= BK_ADAPTIVE_ZONE_RANK[normalizedMinimum]
+        ? normalizedZone
+        : normalizedMinimum;
+}
+
+function bkAddToPredictionBuffer(state, score, adaptiveMinimum = 'trusted') {
     state.predictionBuffer.push(score);
     if (state.predictionBuffer.length > 200) {
         state.predictionBuffer.shift();
     }
-    return bkCheckZone(state);
+    return bkCheckZone(state, adaptiveMinimum);
 }
 
 function bkSetDefaultZone(result) {
@@ -312,11 +329,14 @@ function bkSetDefaultZone(result) {
     BK_defaultMode = ['trusted', 'neutral', 'untrusted'].includes(requestedDefault)
         ? requestedDefault
         : 'adaptive';
+    BK_defaultAdaptiveMinimum = bkNormalizeAdaptiveMinimum(
+        result && result.adaptive_minimum_zone
+    );
     bkRefreshActiveBrowserActionZone();
 }
 
-function bkCheckZone(state) {
-    const estimate = bkEstimateAdaptiveStats(state);
+function bkCheckZone(state, adaptiveMinimum = 'trusted') {
+    const estimate = bkEstimateAdaptiveStats(state, adaptiveMinimum);
     if (!estimate) {
         return false;
     }
@@ -389,11 +409,13 @@ function bkGetAdaptiveState(hostname, isPrivate = false) {
     return state;
 }
 
-function bkEstimateAdaptiveStats(state) {
+function bkEstimateAdaptiveStats(state, adaptiveMinimum = 'trusted') {
     if (state.predictionBuffer.length < BK_ADAPTIVE_MIN_PREDICTIONS) {
         return null;
     }
-    const profile = bkGetZoneProfile(state.zone);
+    const profile = bkGetZoneProfile(
+        bkApplyAdaptiveMinimum(state.zone, adaptiveMinimum)
+    );
     const blockCount = state.predictionBuffer.reduce(
         (count, score) => count + (score >= profile.threshold ? 1 : 0),
         0
@@ -413,7 +435,11 @@ function bkRecordAdaptiveScore(context, score) {
         return;
     }
     const state = bkGetAdaptiveState(context.hostname, context.isPrivate);
-    if (bkAddToPredictionBuffer(state, score)) {
+    if (bkAddToPredictionBuffer(
+        state,
+        score,
+        bkNormalizeAdaptiveMinimum(context.adaptiveMinimum)
+    )) {
         bkRefreshActiveBrowserActionZone();
     }
 }
@@ -509,17 +535,32 @@ function bkClearAdaptiveMemory() {
     });
 }
 
+function bkResolveAdaptiveMinimum(preference, mode) {
+    if (mode !== 'adaptive') {
+        return null;
+    }
+    return preference.mode === 'adaptive'
+        ? bkNormalizeAdaptiveMinimum(preference.adaptiveMinimum)
+        : BK_defaultAdaptiveMinimum;
+}
+
 function bkGetSiteFilteringState(pageUrl, isIncognito = false) {
     const preference = siteGetPreferenceForUrl(pageUrl);
     const mode = preference.mode || BK_defaultMode;
+    const adaptiveMinimum = bkResolveAdaptiveMinimum(preference, mode);
     const adaptiveState = preference.supported
         ? bkGetAdaptiveState(preference.hostname, isIncognito === true)
         : null;
-    const adaptiveZone = adaptiveState ? adaptiveState.zone : 'neutral';
+    const rawAdaptiveZone = adaptiveState ? adaptiveState.zone : 'neutral';
+    const adaptiveZone = mode === 'adaptive'
+        ? bkApplyAdaptiveMinimum(rawAdaptiveZone, adaptiveMinimum)
+        : rawAdaptiveZone;
     return {
         ...preference,
         mode: mode,
         defaultMode: BK_defaultMode,
+        defaultAdaptiveMinimum: BK_defaultAdaptiveMinimum,
+        adaptiveMinimum: adaptiveMinimum,
         adaptiveZone: adaptiveZone,
         effectiveZone: mode === 'adaptive' ? adaptiveZone : (mode === 'off' ? adaptiveZone : mode)
     };
@@ -528,17 +569,25 @@ function bkGetSiteFilteringState(pageUrl, isIncognito = false) {
 function bkBuildRequestPlan(details) {
     const preference = siteGetPreference(details);
     const mode = preference.mode || BK_defaultMode;
+    const adaptiveMinimum = bkResolveAdaptiveMinimum(preference, mode);
     let isIncognito = false;
     try {
         isIncognito = details && details.incognito === true;
     } catch (error) {
     }
     const adaptiveContext = preference.supported && mode === 'adaptive'
-        ? { hostname: preference.hostname, isPrivate: isIncognito }
+        ? {
+            hostname: preference.hostname,
+            isPrivate: isIncognito,
+            adaptiveMinimum: adaptiveMinimum
+        }
         : null;
-    const adaptiveZone = preference.supported
+    const rawAdaptiveZone = preference.supported
         ? bkGetAdaptiveState(preference.hostname, isIncognito).zone
         : 'neutral';
+    const adaptiveZone = mode === 'adaptive'
+        ? bkApplyAdaptiveMinimum(rawAdaptiveZone, adaptiveMinimum)
+        : rawAdaptiveZone;
     const effectiveZone = mode === 'adaptive' || mode === 'off' ? adaptiveZone : mode;
     // Freeze the numeric threshold when the request is enqueued.
     const profile = bkGetZoneProfile(effectiveZone);
@@ -1901,6 +1950,7 @@ const BK_PROTECTED_SETTING_VALIDATORS = Object.freeze({
     video_blocking_mode: value => ['enabled', 'quick', 'disabled'].includes(value),
     is_silent_mode_enabled: value => typeof value === 'boolean',
     default_zone: value => ['automatic', 'trusted', 'neutral', 'untrusted'].includes(value),
+    adaptive_minimum_zone: value => BK_ADAPTIVE_MINIMUMS.includes(value),
     model_selection: value => ['n017', 'sqrxr_112'].includes(value),
     backend_selection: value => ['webgl', 'inprocwebgl', 'wasm', 'webgl_wasm', 'wasm_webgl'].includes(value),
     url_filter_rules: value => value && typeof value === 'object' && !Array.isArray(value),
@@ -1921,8 +1971,12 @@ async function bkUpdateProtectedSettings(changes) {
     }
     await browser.storage.local.set(Object.fromEntries(entries));
     bkUpdateFromSettings();
-    if (Object.prototype.hasOwnProperty.call(changes, 'default_zone')) {
-        await browser.storage.local.get('default_zone').then(bkSetDefaultZone);
+    if (Object.prototype.hasOwnProperty.call(changes, 'default_zone')
+        || Object.prototype.hasOwnProperty.call(changes, 'adaptive_minimum_zone')) {
+        await browser.storage.local.get([
+            'default_zone',
+            'adaptive_minimum_zone'
+        ]).then(bkSetDefaultZone);
     }
     return { ok: true };
 }
@@ -1963,7 +2017,11 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setSiteFilteringMode') {
         return auditRequireSettingsUnlocked()
-            .then(() => siteSetModeForUrl(request.url, request.mode))
+            .then(() => siteSetModeForUrl(
+                request.url,
+                request.mode,
+                request.adaptiveMinimum
+            ))
             .then(() => {
                 const siteState = bkGetSiteFilteringState(request.url, request.incognito);
                 bkRefreshActiveBrowserActionZone(request.url, request.incognito);
@@ -2026,7 +2084,7 @@ function bkHandleMessage(request, sender, sendResponse) {
         bkUpdateFromSettings();
     }
     else if (request.type == 'setDefaultZone') {
-        return browser.storage.local.get('default_zone')
+        return browser.storage.local.get(['default_zone', 'adaptive_minimum_zone'])
             .then(bkSetDefaultZone);
     }
     else if (request.type == 'revealBlockedImage') {
@@ -2054,7 +2112,7 @@ if (browser.windows?.onFocusChanged) {
     browser.windows.onFocusChanged.addListener(() => bkRefreshActiveBrowserActionZone());
 }
 Promise.all([
-    browser.storage.local.get('default_zone').then(bkSetDefaultZone),
+    browser.storage.local.get(['default_zone', 'adaptive_minimum_zone']).then(bkSetDefaultZone),
     bkInitializeAdaptiveZones()
 ])
     .then(() => bkLoadBackendSettings()) //The loading of the first processor kicks off the rest of initialization

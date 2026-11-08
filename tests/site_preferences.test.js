@@ -109,11 +109,15 @@ assert.deepStrictEqual(
     JSON.parse(JSON.stringify(api.normalizeSettings({
         'News.Example': 'trusted',
         'off.example': 'off',
+        'adaptive.example': 'adaptive',
+        'safer.example': { mode: 'adaptive', adaptiveMinimum: 'neutral' },
         'invalid.example': 'invalid'
     }))),
     {
         'news.example': 'trusted',
-        'off.example': 'off'
+        'off.example': 'off',
+        'adaptive.example': { mode: 'adaptive', adaptiveMinimum: 'trusted' },
+        'safer.example': { mode: 'adaptive', adaptiveMinimum: 'neutral' }
     }
 );
 
@@ -139,8 +143,26 @@ assert.deepStrictEqual(
             hostname: 'news.example',
             enabled: false,
             mode: 'off',
+            adaptiveMinimum: null,
             isOverride: true
         }
+    );
+
+    await api.setModeForUrl('https://news.example/path', 'adaptive', 'neutral');
+    assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(api.getPreferenceForUrl('https://news.example/path'))),
+        {
+            supported: true,
+            hostname: 'news.example',
+            enabled: true,
+            mode: 'adaptive',
+            adaptiveMinimum: 'neutral',
+            isOverride: true
+        }
+    );
+    assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(storedData.site_filtering_settings['news.example'])),
+        { mode: 'adaptive', adaptiveMinimum: 'neutral' }
     );
 
     await api.setModeForUrl('https://news.example/path', 'trusted');

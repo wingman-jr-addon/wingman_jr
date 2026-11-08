@@ -130,6 +130,30 @@
       display: inline-flex;
       align-items: center;
     }
+    .adaptive-minimum {
+      min-width: 0;
+      margin: 5px 0 7px 28px;
+      padding: 8px 10px;
+      border: 0;
+      border-left: 2px solid rgba(47, 128, 237, 0.32);
+      background: rgba(47, 128, 237, 0.035);
+    }
+    .adaptive-minimum[hidden] {
+      display: none;
+    }
+    .adaptive-minimum legend {
+      margin: 0 0 4px;
+      padding: 0;
+      color: #4f5b75;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .adaptive-minimum .radio-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 18px;
+      margin: 0;
+    }
     input[type="radio"] {
       margin: 3px 0 0;
     }
@@ -208,7 +232,7 @@
     }
     .site-filter-list li {
       display: grid;
-      grid-template-columns: minmax(160px, 1fr) auto auto;
+      grid-template-columns: minmax(160px, 1fr) auto auto auto;
       align-items: center;
       gap: 12px;
       padding: 7px 9px;
@@ -413,6 +437,14 @@
         <p class="option-description">Sites without an override use this zone. Adaptive automatically changes zones based on how many unsafe images have been detected recently.</p>
         <div class="radio-group">
           <label class="radio-option" for="default_zone_automatic"><input type="radio" name="default_zone" id="default_zone_automatic" value="automatic" checked><span><b>Adaptive</b> - automatically change zones based on recent filtering results</span></label>
+          <fieldset class="adaptive-minimum" id="default_adaptive_minimum">
+            <legend>Minimum level</legend>
+            <div class="radio-group">
+              <label class="radio-option inline" for="adaptive_minimum_trusted"><input type="radio" name="adaptive_minimum_zone" id="adaptive_minimum_trusted" value="trusted" checked><span>Trusted</span></label>
+              <label class="radio-option inline" for="adaptive_minimum_neutral"><input type="radio" name="adaptive_minimum_zone" id="adaptive_minimum_neutral" value="neutral"><span>Neutral</span></label>
+              <label class="radio-option inline" for="adaptive_minimum_untrusted"><input type="radio" name="adaptive_minimum_zone" id="adaptive_minimum_untrusted" value="untrusted"><span>Untrusted</span></label>
+            </div>
+          </fieldset>
           <label class="radio-option" for="default_zone_trusted"><input type="radio" name="default_zone" id="default_zone_trusted" value="trusted"><span><b>Trusted</b> - prefer blocking fewer safe images, but may let more unsafe ones slip through</span></label>
           <label class="radio-option" for="default_zone_neutral"><input type="radio" name="default_zone" id="default_zone_neutral" value="neutral"><span><b>Neutral</b> - strike a balance between accidentally block safe images and letting unsafe ones through</span></label>
           <label class="radio-option" for="default_zone_untrusted"><input type="radio" name="default_zone" id="default_zone_untrusted" value="untrusted"><span><b>Untrusted</b> - prefer blocking unsafe content at the expense of blocking many safe images as well</span></label>

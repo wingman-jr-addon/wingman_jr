@@ -4,6 +4,7 @@ async function optSaveOptions() {
     let isSilentModeEnabled = document.querySelector('input[name="is_silent_mode_enabled"]:checked').value == "is_silent_mode_enabled_yes";
     let badgeCountScope = document.querySelector('input[name="badge_count_scope"]:checked').value;
     let defaultZone = document.querySelector('input[name="default_zone"]:checked').value;
+    let adaptiveMinimumZone = document.querySelector('input[name="adaptive_minimum_zone"]:checked').value;
     let modelSelection = document.querySelector('input[name="model_selection"]:checked').value;
     let backendSelection = document.querySelector('input[name="backend_selection"]:checked').value;
     try {
@@ -15,6 +16,7 @@ async function optSaveOptions() {
                 is_silent_mode_enabled: isSilentModeEnabled,
                 badge_count_scope: badgeCountScope,
                 default_zone: defaultZone,
+                adaptive_minimum_zone: adaptiveMinimumZone,
                 model_selection: modelSelection,
                 backend_selection: backendSelection
             }
@@ -23,6 +25,11 @@ async function optSaveOptions() {
         console.error('Error saving protected settings', error);
         await optRestoreOptions();
     }
+}
+
+function optUpdateAdaptiveMinimumVisibility() {
+    document.getElementById('default_adaptive_minimum').hidden =
+        document.querySelector('input[name="default_zone"]:checked')?.value !== 'automatic';
 }
 
 const OPT_DEFAULT_URL_FILTER_RULES = {
@@ -41,6 +48,7 @@ const OPT_DEFAULT_URL_FILTER_RULES = {
 };
 
 const OPT_SITE_MODES = ['off', 'adaptive', 'trusted', 'neutral', 'untrusted'];
+const OPT_ADAPTIVE_MINIMUMS = ['trusted', 'neutral', 'untrusted'];
 let OPT_securityState = null;
 
 function optSetSecurityStatus(id, message, state = '') {
@@ -280,13 +288,19 @@ function optNormalizeSiteSettings(settings) {
             continue;
         }
         let mode = OPT_SITE_MODES.includes(preference) ? preference : null;
+        let adaptiveMinimum = 'trusted';
         if (!mode && preference && typeof preference === 'object') {
             mode = preference.enabled === false
                 ? 'off'
                 : (OPT_SITE_MODES.includes(preference.mode) ? preference.mode : null);
+            adaptiveMinimum = OPT_ADAPTIVE_MINIMUMS.includes(preference.adaptiveMinimum)
+                ? preference.adaptiveMinimum
+                : 'trusted';
         }
         if (mode) {
-            normalized[hostname.toLowerCase()] = mode;
+            normalized[hostname.toLowerCase()] = mode === 'adaptive'
+                ? { mode: mode, adaptiveMinimum: adaptiveMinimum }
+                : mode;
         }
     }
     return normalized;
@@ -323,10 +337,12 @@ function optRenderSiteSettings(settings) {
     empty.hidden = hostnames.length > 0;
 
     for (const hostname of hostnames) {
-        const mode = normalizedSettings[hostname];
+        const preference = normalizedSettings[hostname];
+        const mode = typeof preference === 'string' ? preference : preference.mode;
         const item = document.createElement('li');
         const hostText = document.createElement('code');
         const modeSelect = document.createElement('select');
+        const minimumSelect = document.createElement('select');
         const removeButton = document.createElement('button');
         hostText.textContent = hostname;
         modeSelect.dataset.hostname = hostname;
@@ -343,21 +359,39 @@ function optRenderSiteSettings(settings) {
             modeSelect.append(option);
         }
         modeSelect.value = mode;
+        minimumSelect.dataset.hostname = hostname;
+        minimumSelect.dataset.setting = 'adaptive-minimum';
+        minimumSelect.setAttribute('aria-label', `Minimum adaptive level for ${hostname}`);
+        for (const value of OPT_ADAPTIVE_MINIMUMS) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = `Minimum: ${value.charAt(0).toUpperCase() + value.slice(1)}`;
+            minimumSelect.append(option);
+        }
+        minimumSelect.value = mode === 'adaptive'
+            ? preference.adaptiveMinimum
+            : 'trusted';
+        minimumSelect.hidden = mode !== 'adaptive';
         removeButton.type = 'button';
         removeButton.textContent = 'Use default';
         removeButton.dataset.hostname = hostname;
-        item.append(hostText, modeSelect, removeButton);
+        item.append(hostText, modeSelect, minimumSelect, removeButton);
         list.append(item);
     }
 }
 
-async function optUpdateSiteSetting(hostname, value) {
+async function optUpdateSiteSetting(hostname, value, adaptiveMinimum = null) {
     const status = document.getElementById('site_filtering_status');
     try {
         await browser.runtime.sendMessage({
             type: 'setSiteFilteringMode',
             url: `https://${hostname}/`,
             mode: value,
+            adaptiveMinimum: value === 'adaptive'
+                ? (OPT_ADAPTIVE_MINIMUMS.includes(adaptiveMinimum)
+                    ? adaptiveMinimum
+                    : document.querySelector('input[name="adaptive_minimum_zone"]:checked').value)
+                : undefined,
             incognito: false
         });
         const settings = await optReadSiteSettings();
@@ -484,6 +518,11 @@ function optRestoreOptions() {
         let coercedResult = result || 'automatic';
         console.log('OPTION: Setting default zone to ' + coercedResult);
         document.getElementById('default_zone_' + coercedResult).checked = true;
+        const adaptiveMinimum = OPT_ADAPTIVE_MINIMUMS.includes(rawResult.adaptive_minimum_zone)
+            ? rawResult.adaptive_minimum_zone
+            : 'trusted';
+        document.getElementById('adaptive_minimum_' + adaptiveMinimum).checked = true;
+        optUpdateAdaptiveMinimumVisibility();
     }
 
     function setCurrentBackendSelectionSwitchChoice(rawResult) {
@@ -516,7 +555,10 @@ function optRestoreOptions() {
     let gettingBadgeCountScope = browser.storage.local.get('badge_count_scope');
     gettingBadgeCountScope.then(setCurrentBadgeCountScope, onError);
 
-    let gettingDefaultZone = browser.storage.local.get('default_zone');
+    let gettingDefaultZone = browser.storage.local.get([
+        'default_zone',
+        'adaptive_minimum_zone'
+    ]);
     gettingDefaultZone.then(setDefaultZoneSwitchChoice, onError);
 
     let gettingBackendSelection = browser.storage.local.get('backend_selection');
@@ -696,7 +738,11 @@ document.getElementById('site_filtering_hosts').addEventListener('click', event 
 document.getElementById('site_filtering_hosts').addEventListener('change', event => {
     const hostname = event.target?.dataset?.hostname;
     if (hostname && event.target.tagName === 'SELECT') {
-        optUpdateSiteSetting(hostname, event.target.value);
+        if (event.target.dataset.setting === 'adaptive-minimum') {
+            optUpdateSiteSetting(hostname, 'adaptive', event.target.value);
+        } else {
+            optUpdateSiteSetting(hostname, event.target.value);
+        }
     }
 });
 var radiosOnOff = document.forms[0].elements["on_off_shown"];
@@ -728,6 +774,14 @@ for (var i = 0, max = radiosBadgeCountScope.length; i < max; i++) {
 var radiosDefaultZone = document.forms[0].elements["default_zone"];
 for (var i = 0, max = radiosDefaultZone.length; i < max; i++) {
     radiosDefaultZone[i].onclick = function () {
+        optUpdateAdaptiveMinimumVisibility();
+        optSaveOptions();
+    }
+}
+
+var radiosAdaptiveMinimum = document.forms[0].elements["adaptive_minimum_zone"];
+for (var i = 0, max = radiosAdaptiveMinimum.length; i < max; i++) {
+    radiosAdaptiveMinimum[i].onclick = function () {
         optSaveOptions();
     }
 }

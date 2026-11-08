@@ -45,6 +45,10 @@ for (const persona of ['everyday', 'boundaries', 'caregiver']) {
     assert.match(setupPage, new RegExp(`name="setup-goal" value="${persona}"`),
         `${persona} has a first-class setup path`);
 }
+assert.doesNotMatch(setupPage, /name="protection-level"|<strong>Strict<\/strong>/,
+    'the wizard uses persona-based adaptive minimums instead of a separate Strict choice');
+assert.match(setupScript, /adaptive_minimum_zone:\s*goal === 'everyday' \? 'trusted' : 'neutral'/,
+    'everyday keeps the legacy Trusted minimum while protected paths start at Neutral');
 assert.match(setupPage, /id="enable-audit" type="checkbox" checked/,
     'protected setup paths recommend Audit by default');
 assert.match(setupPage, /id="audit-private-warning"[\s\S]*They can be used to bypass Audit/,

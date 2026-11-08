@@ -14,6 +14,8 @@ let POP_siteState = {
     enabled: true,
     mode: 'adaptive',
     defaultMode: 'adaptive',
+    defaultAdaptiveMinimum: 'trusted',
+    adaptiveMinimum: 'trusted',
     adaptiveZone: 'neutral',
     effectiveZone: 'neutral',
     isOverride: false
@@ -86,6 +88,7 @@ function popUpdateFilteringUi() {
     const offLabel = document.getElementById('site_mode_off_label');
     const resetButton = document.getElementById('resetSiteMode');
     const modeInputs = document.querySelectorAll('input[name="siteMode"]');
+    const minimumInputs = document.querySelectorAll('input[name="siteAdaptiveMinimum"]');
     const canConfigureSite = POP_siteState.supported;
     const powerControl = document.getElementById('masterPower');
     const powerInput = document.getElementById('isOnOff');
@@ -141,6 +144,15 @@ function popUpdateFilteringUi() {
             : input.value === 'off');
         input.disabled = !canConfigureSite || POP_settingsLocked;
     }
+    const activeAdaptiveMinimum = POP_siteState.adaptiveMinimum
+        || POP_siteState.defaultAdaptiveMinimum
+        || 'trusted';
+    document.getElementById('siteAdaptiveMinimum').hidden =
+        !POP_siteState.supported || POP_siteState.mode !== 'adaptive';
+    for (const input of minimumInputs) {
+        input.checked = input.value === activeAdaptiveMinimum;
+        input.disabled = !canConfigureSite || POP_settingsLocked;
+    }
 
     const adaptiveState = document.getElementById('adaptiveCurrentZone');
     const adaptiveZone = POP_siteState.adaptiveZone || POP_siteState.effectiveZone;
@@ -160,9 +172,13 @@ function popUpdateFilteringUi() {
     } else if (!POP_siteState.enabled) {
         source.textContent = 'Filtering is off. Choose a zone to turn it on.';
     } else if (POP_siteState.isOverride) {
-        source.textContent = 'Custom zone.';
+        source.textContent = POP_siteState.mode === 'adaptive'
+            ? `Custom: Adaptive · ${popCapitalize(activeAdaptiveMinimum)} minimum.`
+            : 'Custom zone.';
     } else {
-        source.textContent = `Using default: ${popCapitalize(POP_siteState.defaultMode)}.`;
+        source.textContent = POP_siteState.defaultMode === 'adaptive'
+            ? `Using default: Adaptive · ${popCapitalize(POP_siteState.defaultAdaptiveMinimum)} minimum.`
+            : `Using default: ${popCapitalize(POP_siteState.defaultMode)}.`;
     }
 
     if (POP_masterFilteringState.mode === 'paused') {
@@ -259,11 +275,31 @@ window.onload = async function() {
             try {
                 await popSendSiteChange({
                     type: 'setSiteFilteringMode',
-                    mode: event.target.value
+                    mode: event.target.value,
+                    adaptiveMinimum: event.target.value === 'adaptive'
+                        ? document.querySelector('input[name="siteAdaptiveMinimum"]:checked')?.value
+                            || POP_siteState.defaultAdaptiveMinimum
+                            || 'trusted'
+                        : undefined
                 });
             } catch (error) {
                 popUpdateFilteringUi();
                 console.log('Error setting site zone: '+error);
+            }
+        });
+    }
+
+    for (const input of document.querySelectorAll('input[name="siteAdaptiveMinimum"]')) {
+        input.addEventListener('change', async event => {
+            try {
+                await popSendSiteChange({
+                    type: 'setSiteFilteringMode',
+                    mode: 'adaptive',
+                    adaptiveMinimum: event.target.value
+                });
+            } catch (error) {
+                popUpdateFilteringUi();
+                console.log('Error setting adaptive minimum: '+error);
             }
         });
     }
