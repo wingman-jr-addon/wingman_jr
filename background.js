@@ -6,8 +6,10 @@ browser.webRequest.handlerBehaviorChanged();
 
 
 const BK_SETUP_COMPLETED_KEY = 'setup_wizard_completed';
+const BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY = 'setup_hidden_tabs_confirmed';
 const BK_SETUP_SETTING_KEYS = [
     BK_SETUP_COMPLETED_KEY,
+    BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY,
     'is_silent_mode_enabled',
     'is_on_off_shown'
 ];
@@ -53,6 +55,9 @@ let BK_openFilters = {};
 let BK_openB64Filters = {};
 let BK_openVidFilters = {};
 let BK_processorStartupState = 'loading';
+let BK_setupProcessorStartDeferred = false;
+let BK_setupBootstrapTabId = null;
+let BK_setupBootstrapPromise = null;
 
 function bkSetProcessorStartupState(state) {
     if (BK_processorStartupState === state) {
@@ -65,6 +70,59 @@ function bkSetProcessorStartupState(state) {
     }).catch(() => {
         // The setup page is not present after first-run setup completes.
     });
+}
+
+function bkShouldDeferProcessorStartup(settings) {
+    return bkShouldOpenSetup(settings)
+        && settings[BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY] !== true;
+}
+
+function bkPrepareSetupProcessorBootstrap() {
+    BK_setupProcessorStartDeferred = true;
+    bkSetProcessorStartupState('awaiting-hidden-tabs');
+    BK_setupBootstrapPromise = browser.tabs.create({
+        url: browser.runtime.getURL('processor_bootstrap.html'),
+        active: false
+    }).then(async tab => {
+        BK_setupBootstrapTabId = tab.id;
+        await browser.tabs.hide(tab.id);
+    }).catch(error => {
+        console.error('SETUP: Unable to prepare hidden processor tab', error);
+    });
+    return BK_setupBootstrapPromise;
+}
+
+async function bkConfirmHiddenTabsAndStartProcessors() {
+    await browser.storage.local.set({
+        [BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY]: true
+    });
+    if (!BK_setupProcessorStartDeferred) {
+        return { state: BK_processorStartupState };
+    }
+
+    BK_setupProcessorStartDeferred = false;
+    bkSetProcessorStartupState('loading');
+    try {
+        await BK_setupBootstrapPromise;
+    } finally {
+        BK_setupBootstrapPromise = null;
+        if (BK_setupBootstrapTabId !== null) {
+            const bootstrapTabId = BK_setupBootstrapTabId;
+            BK_setupBootstrapTabId = null;
+            await browser.tabs.remove(bootstrapTabId).catch(() => {});
+        }
+    }
+    await bkLoadBackendSettings();
+    return { state: BK_processorStartupState };
+}
+
+async function bkInitializeProcessorsForSession() {
+    const setupSettings = await browser.storage.local.get(BK_SETUP_SETTING_KEYS);
+    if (bkShouldDeferProcessorStartup(setupSettings)) {
+        await bkPrepareSetupProcessorBootstrap();
+        return;
+    }
+    await bkLoadBackendSettings();
 }
 
 const BK_revealAllowlist = new Set();
@@ -2004,6 +2062,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'setup.getProcessorStartupState') {
         sendResponse({ state: BK_processorStartupState });
     }
+    else if (request.type == 'setup.confirmHiddenTabs') {
+        return bkConfirmHiddenTabsAndStartProcessors();
+    }
     else if (request.type == 'settings.update') {
         return bkUpdateProtectedSettings(request.changes);
     }
@@ -2057,10 +2118,10 @@ Promise.all([
     browser.storage.local.get('default_zone').then(bkSetDefaultZone),
     bkInitializeAdaptiveZones()
 ])
-    .then(() => bkLoadBackendSettings()) //The loading of the first processor kicks off the rest of initialization
+    .then(() => bkInitializeProcessorsForSession()) //The loading of the first processor kicks off the rest of initialization
     .catch(error => {
         console.error('LIFECYCLE: Unable to initialize adaptive filtering', error);
-        return bkLoadBackendSettings().catch(retryError => {
+        return bkInitializeProcessorsForSession().catch(retryError => {
             console.error('LIFECYCLE: Unable to load processor settings', retryError);
         });
     });

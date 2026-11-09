@@ -2,14 +2,32 @@ const SETUP_COMPLETED_KEY = 'setup_wizard_completed';
 const SETUP_STEPS = ['browser', 'goal', 'level', 'protection', 'summary'];
 let setupCurrentStep = 'browser';
 let setupPrivateAccessAllowed = false;
+let setupAdvanceWhenProcessorReady = false;
 
 function setupUpdateProcessorStartupState(state) {
-    const ready = state === 'ready';
-    const status = document.getElementById('processor-startup-status');
-    status.dataset.state = ready ? 'ready' : 'loading';
-    document.getElementById('processor-startup-message').textContent = ready
-        ? 'Protection is ready.'
-        : 'Starting protection… Firefox may pause briefly while the model loads.';
+    const startupState = state === 'ready'
+        ? 'ready'
+        : (state === 'awaiting-hidden-tabs' ? 'awaiting-hidden-tabs' : 'loading');
+    const button = document.getElementById('hidden-tabs-confirmed');
+    const labels = {
+        'awaiting-hidden-tabs': ['I chose Keep Tabs Hidden', 'Start protection'],
+        loading: ['Loading protection…', 'Firefox may pause briefly'],
+        ready: ['Continue setup', 'Protection is ready']
+    };
+    button.dataset.startupState = startupState;
+    button.disabled = startupState === 'loading';
+    document.getElementById('hidden-tabs-confirmed-label').textContent = labels[startupState][0];
+    document.getElementById('processor-startup-message').textContent = labels[startupState][1];
+}
+
+function setupHandleProcessorStartupState(state) {
+    setupUpdateProcessorStartupState(state);
+    if (state === 'ready'
+        && setupAdvanceWhenProcessorReady
+        && setupCurrentStep === 'browser') {
+        setupAdvanceWhenProcessorReady = false;
+        setupShowStep('goal');
+    }
 }
 
 async function setupRefreshProcessorStartupState() {
@@ -17,7 +35,7 @@ async function setupRefreshProcessorStartupState() {
         const startup = await browser.runtime.sendMessage({
             type: 'setup.getProcessorStartupState'
         });
-        setupUpdateProcessorStartupState(startup?.state);
+        setupHandleProcessorStartupState(startup?.state);
     } catch (error) {
         console.warn('SETUP: Unable to check processor startup state', error);
     }
@@ -240,8 +258,29 @@ async function finishSetup() {
     }
 }
 
-document.getElementById('hidden-tabs-confirmed').addEventListener('click', () => {
-    setupShowStep('goal');
+document.getElementById('hidden-tabs-confirmed').addEventListener('click', async () => {
+    const button = document.getElementById('hidden-tabs-confirmed');
+    if (button.dataset.startupState === 'ready') {
+        setupShowStep('goal');
+        return;
+    }
+    if (button.dataset.startupState !== 'awaiting-hidden-tabs') {
+        return;
+    }
+
+    setupUpdateProcessorStartupState('loading');
+    setupAdvanceWhenProcessorReady = true;
+    try {
+        const startup = await browser.runtime.sendMessage({
+            type: 'setup.confirmHiddenTabs'
+        });
+        setupHandleProcessorStartupState(startup?.state);
+    } catch (error) {
+        console.error('SETUP: Unable to start protection', error);
+        setupAdvanceWhenProcessorReady = false;
+        setupUpdateProcessorStartupState('awaiting-hidden-tabs');
+        document.getElementById('processor-startup-message').textContent = 'Could not start protection. Try again.';
+    }
 });
 
 document.getElementById('wizard-next').addEventListener('click', async () => {
@@ -273,7 +312,7 @@ document.getElementById('enable-audit').addEventListener('change', setupUpdateAu
 
 browser.runtime.onMessage.addListener(message => {
     if (message?.type === 'setup.processorStartupStateChanged') {
-        setupUpdateProcessorStartupState(message.state);
+        setupHandleProcessorStartupState(message.state);
     }
 });
 

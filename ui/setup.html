@@ -102,16 +102,12 @@
 
     .browser-instruction strong { color: #4e2f00; }
 
-    .startup-status {
-      display: flex;
-      width: fit-content;
-      max-width: 540px;
+    .startup-button {
+      display: inline-flex;
+      min-width: 250px;
       align-items: center;
+      justify-content: center;
       gap: 10px;
-      margin: -10px auto 20px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
       text-align: left;
     }
 
@@ -119,21 +115,31 @@
       width: 17px;
       height: 17px;
       flex: 0 0 auto;
-      border: 2px solid rgba(47, 128, 237, 0.22);
-      border-top-color: var(--blue);
+      border: 2px solid rgba(255, 255, 255, 0.38);
+      border-top-color: #fff;
       border-radius: 50%;
       animation: startup-spin 0.8s linear infinite;
     }
 
-    .startup-status[data-state="ready"] { color: #18794e; }
-    .startup-status[data-state="ready"] .startup-spinner {
+    .startup-button-copy { display: grid; gap: 1px; }
+    .startup-button-label { font-size: 14px; line-height: 1.2; }
+    .startup-button-status {
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.25;
+      opacity: 0.86;
+    }
+
+    .startup-button[data-startup-state="awaiting-hidden-tabs"] .startup-spinner,
+    .startup-button[data-startup-state="ready"] .startup-spinner {
       border: 0;
       animation: none;
     }
-    .startup-status[data-state="ready"] .startup-spinner::before {
-      content: "\2713";
+    .startup-button[data-startup-state="awaiting-hidden-tabs"] .startup-spinner::before,
+    .startup-button[data-startup-state="ready"] .startup-spinner::before {
+      content: "\2192";
       display: block;
-      color: #18794e;
+      color: #fff;
       font-size: 17px;
       font-weight: 800;
       line-height: 17px;
@@ -314,13 +320,15 @@
         <div class="browser-arrow" aria-hidden="true">&#x2197;</div>
         <h2>First, answer Firefox</h2>
         <div class="browser-instruction">
-          In the message at the <strong>top-right</strong>, choose <strong>Keep Tabs Hidden</strong>. Otherwise filtering may stop working.
+          Wingman Jr. uses one hidden tab for faster, more reliable filtering. In Firefox’s message at the <strong>top-right</strong>, choose <strong>Keep Tabs Hidden</strong>. Choosing <strong>Disable Extension</strong> stops protection.
         </div>
-        <div class="startup-status" id="processor-startup-status" data-state="loading" role="status" aria-live="polite">
+        <button class="primary startup-button" id="hidden-tabs-confirmed" data-startup-state="awaiting-hidden-tabs" type="button">
           <span class="startup-spinner" aria-hidden="true"></span>
-          <span id="processor-startup-message">Starting protection… Firefox may pause briefly while the model loads.</span>
-        </div>
-        <button class="primary" id="hidden-tabs-confirmed" type="button">Done — continue</button>
+          <span class="startup-button-copy">
+            <span class="startup-button-label" id="hidden-tabs-confirmed-label">I chose Keep Tabs Hidden</span>
+            <span class="startup-button-status" id="processor-startup-message" role="status" aria-live="polite">Start protection</span>
+          </span>
+        </button>
       </section>
 
       <section class="wizard-step" data-step="goal" hidden>
