@@ -92,6 +92,16 @@ function bkPrepareSetupProcessorBootstrap() {
     return BK_setupBootstrapPromise;
 }
 
+async function bkShowHiddenTabsPromptAgain() {
+    await BK_setupBootstrapPromise;
+    if (!BK_setupProcessorStartDeferred || BK_setupBootstrapTabId === null) {
+        throw new Error('The hidden-tab setup prompt is no longer available.');
+    }
+    await browser.tabs.show(BK_setupBootstrapTabId);
+    await browser.tabs.hide(BK_setupBootstrapTabId);
+    return { ok: true };
+}
+
 async function bkConfirmHiddenTabsAndStartProcessors() {
     await browser.storage.local.set({
         [BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY]: true
@@ -740,6 +750,10 @@ const CRASH_BAD_STATE_RESTART_THRESHOLD = 2;
 const CRASH_IDLE_SECONDS = 3 * 60;
 
 async function bkCrashDetectionWatchdog() {
+    if (BK_setupProcessorStartDeferred) {
+        CRASH_NO_PROCESSOR_COUNT = 0;
+        return;
+    }
     let idleState = await browser.idle.queryState(CRASH_IDLE_SECONDS)
     if(idleState != 'active') {
         console.log('CRASH: User not active, ceasing crash check.');
@@ -2064,6 +2078,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     }
     else if (request.type == 'setup.confirmHiddenTabs') {
         return bkConfirmHiddenTabsAndStartProcessors();
+    }
+    else if (request.type == 'setup.showHiddenTabsPromptAgain') {
+        return bkShowHiddenTabsPromptAgain();
     }
     else if (request.type == 'settings.update') {
         return bkUpdateProtectedSettings(request.changes);

@@ -130,6 +130,21 @@
       opacity: 0.86;
     }
 
+    .prompt-retry {
+      display: block;
+      min-width: 0;
+      margin: 10px auto 0;
+      padding: 4px 6px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .prompt-retry[hidden] { display: none; }
+
     .startup-button[data-startup-state="awaiting-hidden-tabs"] .startup-spinner,
     .startup-button[data-startup-state="ready"] .startup-spinner {
       border: 0;
@@ -329,6 +344,7 @@
             <span class="startup-button-status" id="processor-startup-message" role="status" aria-live="polite">Start protection</span>
           </span>
         </button>
+        <button class="prompt-retry" id="show-hidden-tabs-prompt" type="button">Didn’t choose it? Show the Firefox message again</button>
       </section>
 
       <section class="wizard-step" data-step="goal" hidden>

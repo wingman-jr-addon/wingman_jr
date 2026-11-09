@@ -16,6 +16,7 @@ function setupUpdateProcessorStartupState(state) {
     };
     button.dataset.startupState = startupState;
     button.disabled = startupState === 'loading';
+    document.getElementById('show-hidden-tabs-prompt').hidden = startupState !== 'awaiting-hidden-tabs';
     document.getElementById('hidden-tabs-confirmed-label').textContent = labels[startupState][0];
     document.getElementById('processor-startup-message').textContent = labels[startupState][1];
 }
@@ -280,6 +281,24 @@ document.getElementById('hidden-tabs-confirmed').addEventListener('click', async
         setupAdvanceWhenProcessorReady = false;
         setupUpdateProcessorStartupState('awaiting-hidden-tabs');
         document.getElementById('processor-startup-message').textContent = 'Could not start protection. Try again.';
+    }
+});
+
+document.getElementById('show-hidden-tabs-prompt').addEventListener('click', async () => {
+    const button = document.getElementById('show-hidden-tabs-prompt');
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Showing Firefox message…';
+    try {
+        await browser.runtime.sendMessage({
+            type: 'setup.showHiddenTabsPromptAgain'
+        });
+        button.textContent = originalText;
+    } catch (error) {
+        console.error('SETUP: Unable to show the hidden-tabs prompt again', error);
+        button.textContent = 'Could not show the message. Try again.';
+    } finally {
+        button.disabled = false;
     }
 });
 

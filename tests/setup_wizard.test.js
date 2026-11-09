@@ -42,6 +42,8 @@ assert.match(setupPage, /uses one hidden tab[\s\S]*choose <strong>Keep Tabs Hidd
     'the opening disclosure explains the hidden tab and Firefox choices plainly');
 assert.match(setupPage, /<button[^>]*id="hidden-tabs-confirmed"[^>]*data-startup-state="awaiting-hidden-tabs"[^>]*>[\s\S]*class="startup-spinner"[\s\S]*I chose Keep Tabs Hidden[\s\S]*Start protection[\s\S]*<\/button>/,
     'the previous hidden-tabs confirmation flow remains intact');
+assert.match(setupPage, /id="show-hidden-tabs-prompt"[^>]*>Didn’t choose it\? Show the Firefox message again<\/button>/,
+    'the hidden-tabs step lets a confused user restore the Firefox message');
 assert.doesNotMatch(bootstrapPage, /tfjs|processor\.js|processor_tabstartup\.js/,
     'the hidden bootstrap tab does not load the model runtime');
 for (const persona of ['everyday', 'boundaries', 'caregiver']) {
@@ -70,6 +72,8 @@ assert.match(setupScript, /setup\.processorStartupStateChanged/,
     'the wizard reacts when the processor becomes ready');
 assert.match(setupScript, /type:\s*'setup\.confirmHiddenTabs'/,
     'confirming the Firefox choice explicitly starts the processor');
+assert.match(setupScript, /type:\s*'setup\.showHiddenTabsPromptAgain'/,
+    'the retry action asks the background to restore the Firefox message');
 assert.match(setupScript, /button\.disabled = startupState === 'loading'/,
     'the confirmation button becomes a disabled loading indicator during startup');
 assert.match(setupScript, /ready:\s*\['Continue setup', 'Protection is ready'\]/,
