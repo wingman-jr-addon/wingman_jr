@@ -1,6 +1,8 @@
 const SITE_SETTINGS_STORAGE_KEY = 'site_filtering_settings';
 const SITE_LEGACY_DISABLED_HOSTS_KEY = 'site_filtering_disabled_hosts';
 const SITE_MODES = Object.freeze(['off', 'adaptive', 'trusted', 'neutral', 'untrusted']);
+const SITE_ADAPTIVE_MINIMUMS = Object.freeze(['trusted', 'neutral', 'untrusted']);
+const SITE_DEFAULT_ADAPTIVE_MINIMUM = 'trusted';
 
 let SITE_settings = {};
 
@@ -31,6 +33,29 @@ function siteNormalizeMode(value) {
     return SITE_MODES.includes(value) ? value : null;
 }
 
+function siteNormalizeAdaptiveMinimum(value) {
+    return SITE_ADAPTIVE_MINIMUMS.includes(value)
+        ? value
+        : SITE_DEFAULT_ADAPTIVE_MINIMUM;
+}
+
+function siteNormalizePreference(rawPreference) {
+    let mode = siteNormalizeMode(rawPreference);
+    let adaptiveMinimum = SITE_DEFAULT_ADAPTIVE_MINIMUM;
+    if (!mode && rawPreference && typeof rawPreference === 'object') {
+        mode = rawPreference.enabled === false
+            ? 'off'
+            : siteNormalizeMode(rawPreference.mode);
+        adaptiveMinimum = siteNormalizeAdaptiveMinimum(rawPreference.adaptiveMinimum);
+    }
+    if (!mode) {
+        return null;
+    }
+    return mode === 'adaptive'
+        ? { mode: mode, adaptiveMinimum: adaptiveMinimum }
+        : mode;
+}
+
 function siteNormalizeSettings(settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
         return {};
@@ -41,14 +66,9 @@ function siteNormalizeSettings(settings) {
         if (!hostname) {
             continue;
         }
-        let mode = siteNormalizeMode(rawPreference);
-        if (!mode && rawPreference && typeof rawPreference === 'object') {
-            mode = rawPreference.enabled === false
-                ? 'off'
-                : siteNormalizeMode(rawPreference.mode);
-        }
-        if (mode) {
-            normalized[hostname] = mode;
+        const preference = siteNormalizePreference(rawPreference);
+        if (preference) {
+            normalized[hostname] = preference;
         }
     }
     return normalized;
@@ -118,13 +138,24 @@ function siteGetTopLevelPageUrl(details) {
 }
 
 function siteGetPreferenceForHostname(hostname) {
-    const mode = SITE_settings[hostname];
-    if (!mode) {
-        return { enabled: true, mode: null, isOverride: false };
+    const storedPreference = SITE_settings[hostname];
+    if (!storedPreference) {
+        return {
+            enabled: true,
+            mode: null,
+            adaptiveMinimum: null,
+            isOverride: false
+        };
     }
+    const mode = typeof storedPreference === 'string'
+        ? storedPreference
+        : storedPreference.mode;
     return {
         enabled: mode !== 'off',
         mode: mode,
+        adaptiveMinimum: mode === 'adaptive'
+            ? siteNormalizeAdaptiveMinimum(storedPreference.adaptiveMinimum)
+            : null,
         isOverride: true
     };
 }
@@ -132,7 +163,7 @@ function siteGetPreferenceForHostname(hostname) {
 function siteGetPreference(details) {
     const hostname = siteHostnameFromUrl(siteGetTopLevelPageUrl(details));
     if (!hostname) {
-        return { supported: false, hostname: null, enabled: true, mode: null, isOverride: false };
+        return { supported: false, hostname: null, enabled: true, mode: null, adaptiveMinimum: null, isOverride: false };
     }
     return { supported: true, hostname: hostname, ...siteGetPreferenceForHostname(hostname) };
 }
@@ -140,7 +171,7 @@ function siteGetPreference(details) {
 function siteGetPreferenceForUrl(pageUrl) {
     const hostname = siteHostnameFromUrl(pageUrl);
     if (!hostname) {
-        return { supported: false, hostname: null, enabled: true, mode: null, isOverride: false };
+        return { supported: false, hostname: null, enabled: true, mode: null, adaptiveMinimum: null, isOverride: false };
     }
     return { supported: true, hostname: hostname, ...siteGetPreferenceForHostname(hostname) };
 }
@@ -163,14 +194,19 @@ async function siteSaveSettings(settings) {
     return normalized;
 }
 
-async function siteSetModeForUrl(pageUrl, mode) {
+async function siteSetModeForUrl(pageUrl, mode, adaptiveMinimum = SITE_DEFAULT_ADAPTIVE_MINIMUM) {
     const hostname = siteHostnameFromUrl(pageUrl);
     const normalizedMode = siteNormalizeMode(mode);
     if (!hostname || !normalizedMode) {
         return false;
     }
     const settings = await siteReadEditableSettings();
-    settings[hostname] = normalizedMode;
+    settings[hostname] = normalizedMode === 'adaptive'
+        ? {
+            mode: normalizedMode,
+            adaptiveMinimum: siteNormalizeAdaptiveMinimum(adaptiveMinimum)
+        }
+        : normalizedMode;
     await siteSaveSettings(settings);
     return true;
 }

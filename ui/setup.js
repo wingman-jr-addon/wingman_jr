@@ -1,5 +1,5 @@
 const SETUP_COMPLETED_KEY = 'setup_wizard_completed';
-const SETUP_STEPS = ['browser', 'goal', 'level', 'protection', 'summary'];
+const SETUP_STEPS = ['browser', 'goal', 'protection', 'summary'];
 let setupCurrentStep = 'browser';
 let setupPrivateAccessAllowed = false;
 let setupAdvanceWhenProcessorReady = false;
@@ -81,7 +81,7 @@ function setupUpdateNavigation() {
 
 function setupRenderSummary() {
     const goal = setupSelectedValue('setup-goal');
-    const level = setupSelectedValue('protection-level');
+    const adaptiveMinimum = goal === 'everyday' ? 'Trusted' : 'Neutral';
     const auditEnabled = setupNeedsProtection()
         && document.getElementById('enable-audit').checked;
     const goalLabels = {
@@ -91,7 +91,7 @@ function setupRenderSummary() {
     };
     const rows = [
         ['Starting point', goalLabels[goal]],
-        ['Default protection', level === 'automatic' ? 'Adaptive' : 'Strict (Untrusted zone)'],
+        ['Default protection', `Adaptive (${adaptiveMinimum} minimum)`],
         ['Blocked images', 'Replace discreetly with safe images'],
         ['On/off controls', goal === 'everyday' ? 'Available' : 'Hidden'],
         ['Settings password', setupNeedsProtection() ? 'Required' : 'Not set'],
@@ -232,7 +232,8 @@ async function finishSetup() {
             changes: {
                 is_silent_mode_enabled: true,
                 is_on_off_shown: goal === 'everyday',
-                default_zone: setupSelectedValue('protection-level')
+                default_zone: 'automatic',
+                adaptive_minimum_zone: goal === 'everyday' ? 'trusted' : 'neutral'
             }
         });
         if (auditEnabled) {
