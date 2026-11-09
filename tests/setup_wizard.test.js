@@ -9,6 +9,7 @@ vm.createContext(context);
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
 const setupPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.html'), 'utf8');
 const setupScript = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.js'), 'utf8');
+const bootstrapPage = fs.readFileSync(path.join(__dirname, '..', 'processor_bootstrap.html'), 'utf8');
 const start = source.indexOf("const BK_SETUP_COMPLETED_KEY");
 const end = source.indexOf('async function bkOpenSetupForNewUser', start);
 assert.ok(start >= 0 && end > start);
@@ -37,10 +38,14 @@ const hiddenTabsStep = setupPage.indexOf('data-step="browser"');
 const personaStep = setupPage.indexOf('data-step="goal"');
 assert.ok(hiddenTabsStep >= 0 && hiddenTabsStep < personaStep,
     'the hidden-tabs decision gates the rest of setup');
-assert.match(setupPage, /choose <strong>Keep Tabs Hidden<\/strong>[\s\S]*Done — continue/,
-    'the opening gate gives one concise Firefox instruction before continuing');
-assert.match(setupPage, /id="processor-startup-status"[\s\S]*Starting protection… Firefox may pause briefly while the model loads\./,
-    'the hidden-tabs gate warns that protection is loading before Firefox can pause');
+assert.match(setupPage, /uses one hidden tab[\s\S]*choose <strong>Keep Tabs Hidden<\/strong>[\s\S]*Choosing <strong>Disable Extension<\/strong> stops protection/i,
+    'the opening disclosure explains the hidden tab and Firefox choices plainly');
+assert.match(setupPage, /<button[^>]*id="hidden-tabs-confirmed"[^>]*data-startup-state="awaiting-hidden-tabs"[^>]*>[\s\S]*class="startup-spinner"[\s\S]*I chose Keep Tabs Hidden[\s\S]*Start protection[\s\S]*<\/button>/,
+    'the previous hidden-tabs confirmation flow remains intact');
+assert.match(setupPage, /id="show-hidden-tabs-prompt"[^>]*>Didn’t choose it\? Show the Firefox message again<\/button>/,
+    'the hidden-tabs step lets a confused user restore the Firefox message');
+assert.doesNotMatch(bootstrapPage, /tfjs|processor\.js|processor_tabstartup\.js/,
+    'the hidden bootstrap tab does not load the model runtime');
 for (const persona of ['everyday', 'boundaries', 'caregiver']) {
     assert.match(setupPage, new RegExp(`name="setup-goal" value="${persona}"`),
         `${persona} has a first-class setup path`);
@@ -69,6 +74,22 @@ assert.match(setupScript, /setup\.getProcessorStartupState/,
     'the wizard checks whether the processor has finished loading');
 assert.match(setupScript, /setup\.processorStartupStateChanged/,
     'the wizard reacts when the processor becomes ready');
+assert.match(setupScript, /type:\s*'setup\.confirmHiddenTabs'/,
+    'confirming the Firefox choice explicitly starts the processor');
+assert.match(setupScript, /type:\s*'setup\.showHiddenTabsPromptAgain'/,
+    'the retry action asks the background to restore the Firefox message');
+assert.match(setupScript, /button\.disabled = startupState === 'loading'/,
+    'the confirmation button becomes a disabled loading indicator during startup');
+assert.match(setupScript, /ready:\s*\['Continue setup', 'Protection is ready'\]/,
+    'processor readiness turns the loading indicator into a continue action');
+assert.match(setupScript, /state === 'ready'[\s\S]*setupAdvanceWhenProcessorReady[\s\S]*setupShowStep\('goal'\)/,
+    'processor readiness advances a user-initiated startup directly to persona selection');
+assert.match(source, /bkShouldDeferProcessorStartup[\s\S]*BK_SETUP_HIDDEN_TABS_CONFIRMED_KEY/,
+    'fresh installs defer processor startup until hidden tabs are confirmed');
+assert.match(source, /processor_bootstrap\.html/,
+    'fresh installs use a lightweight hidden tab to trigger the Firefox prompt');
+assert.match(source, /setup\.confirmHiddenTabs[\s\S]*bkConfirmHiddenTabsAndStartProcessors/,
+    'the setup confirmation starts deferred processors');
 assert.match(source, /case 'registration':[\s\S]*bkSetProcessorStartupState\('ready'\)/,
     'processor registration marks the model as ready');
 
