@@ -883,6 +883,41 @@ function procGetBufferedRangesString(video) {
 }
 
 const VIDEO_LOAD_TIMEOUT_MS = 5000;
+const procVideoLoadedFirstFrame = (video, url) => new Promise((resolve, reject) => {
+    let isSettled = false;
+    let timeoutId;
+
+    const cleanup = () => {
+        if(timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+        }
+        video.removeEventListener('error', onError);
+        video.removeEventListener('loadeddata', onLoadedData);
+    };
+    const settle = (callback, value) => {
+        if(isSettled) {
+            return;
+        }
+        isSettled = true;
+        cleanup();
+        callback(value);
+    };
+    const onError = () => settle(reject, video.error);
+    const onLoadedData = () => {
+        video.width = video.videoWidth;
+        video.height = video.videoHeight;
+        settle(resolve);
+    };
+
+    video.addEventListener('error', onError);
+    video.addEventListener('loadeddata', onLoadedData);
+    timeoutId = setTimeout(() => {
+        WJR_DEBUG && console.warn('MLV: Timed out loading opening frame');
+        settle(reject, `MLV: Timed out loading opening frame in ${VIDEO_LOAD_TIMEOUT_MS} ms`);
+    }, VIDEO_LOAD_TIMEOUT_MS);
+    video.src = url;
+});
+
 const procVideoLoadedData = (video,url,seekTime) => new Promise( (resolve, reject) => {
     let isSettled = false;
     let timeoutId;
@@ -1020,6 +1055,29 @@ async function procEvaluateVideoComposite(
     scanResults.frames.push(...frameTimes.map(time => ({ 'time': time, 'status': frameStatus })));
 }
 
+async function procEvaluateOpeningVideoFrame(
+    video,
+    scanResults,
+    threshold,
+    requestId,
+    requestType,
+    mimeType,
+    videoChainId
+) {
+    WJR_DEBUG && console.debug('MLV: Opening-frame scan predicting '+requestId+' in video group '+videoChainId);
+    const sqrxrScore = await procPredict(video);
+    scanResults.openingFrameTime = video.currentTime;
+    if(procIsSafe(sqrxrScore, threshold)) {
+        WJR_DEBUG && console.log('MLV: Opening-frame scan PASS video score: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        await procCommonLogImg(video, 'MLV: Opening-frame scan PASS VID '+procScoreToStr(sqrxrScore));
+        scanResults.openingFrameStatus = 'pass';
+    } else {
+        WJR_DEBUG && console.log('MLV: Opening-frame scan BLOCKED video score: '+procScoreToStr(sqrxrScore)+' type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
+        await procCommonWarnImg(video, 'MLV: Opening-frame scan BLOCKED VID '+procScoreToStr(sqrxrScore));
+        scanResults.openingFrameStatus = 'block';
+    }
+}
+
 
 async function procGetVideoScanStatus(
     videoChainId,
@@ -1029,6 +1087,7 @@ async function procGetVideoScanStatus(
     mimeType,
     buffers,
     threshold,
+    scanOpeningFrame,
     scanStart,
     scanStep,
     scanMaxSteps,
@@ -1044,7 +1103,9 @@ async function procGetVideoScanStatus(
         blockCount: 0,
         error: undefined,
         frames: [],
-        sourceFrameCount: 0
+        sourceFrameCount: 0,
+        openingFrameStatus: null,
+        openingFrameTime: null
     };
     try {
         WJR_DEBUG && console.info('MLV: SCAN video '+requestId+', type '+requestType+', MIME '+mimeType+' for video group '+videoChainId);
@@ -1055,6 +1116,22 @@ async function procGetVideoScanStatus(
         //inferenceVideo.type = vidFilter.mimeType; //?
         inferenceVideo.autoplay = false;
         videoUrl = procGetVideoUrl(requestId, mimeType, buffers);
+
+        if(scanOpeningFrame) {
+            await procVideoLoadedFirstFrame(inferenceVideo, videoUrl);
+            await procEvaluateOpeningVideoFrame(
+                inferenceVideo,
+                scanResults,
+                threshold,
+                requestId,
+                requestType,
+                mimeType,
+                videoChainId
+            );
+            if(scanResults.openingFrameStatus === 'block') {
+                return scanResults;
+            }
+        }
 
         let compositeCanvas = procCreateVideoCompositeCanvas();
         let compositeFrameTimes = [];
@@ -1272,6 +1349,7 @@ async function procOnPortMessage(m) {
                 m.mimeType,
                 m.buffers,
                 m.threshold,
+                m.scanOpeningFrame,
                 m.scanStart,
                 m.scanStep,
                 m.scanMaxSteps,
