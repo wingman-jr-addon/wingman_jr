@@ -61,20 +61,16 @@ function updateSelectedChoices() {
 function setupVisibleSteps() {
     return setupNeedsProtection()
         ? SETUP_STEPS
-        : ['browser', 'goal'];
+        : ['browser', 'goal', 'summary'];
 }
 
 function setupUpdateNavigation() {
-    const everydayFinish = setupCurrentStep === 'goal' && !setupNeedsProtection();
     const visibleSteps = setupVisibleSteps().filter(value => value !== 'browser');
     const stepIndex = visibleSteps.indexOf(setupCurrentStep);
     document.getElementById('step-count').textContent = setupCurrentStep === 'browser'
         ? 'Before we begin'
-        : (everydayFinish
-            ? 'Quick setup'
-            : `Step ${stepIndex + 1} of ${visibleSteps.length}`);
-    document.getElementById('wizard-next').textContent = everydayFinish
-        || setupCurrentStep === 'summary'
+        : `Step ${stepIndex + 1} of ${visibleSteps.length}`;
+    document.getElementById('wizard-next').textContent = setupCurrentStep === 'summary'
         ? 'Finish setup'
         : 'Continue';
 }
@@ -91,7 +87,7 @@ function setupRenderSummary() {
     };
     const rows = [
         ['Starting point', goalLabels[goal]],
-        ['Default protection', `Adaptive (${adaptiveMinimum} minimum)`],
+        ['Default site zone', `Adaptive (${adaptiveMinimum} minimum)`],
         ['Blocked images', 'Replace discreetly with safe images'],
         ['On/off controls', goal === 'everyday' ? 'Available' : 'Hidden'],
         ['Settings password', setupNeedsProtection() ? 'Required' : 'Not set'],
@@ -308,8 +304,7 @@ document.getElementById('wizard-next').addEventListener('click', async () => {
         document.getElementById('settings-password').focus();
         return;
     }
-    if (setupCurrentStep === 'summary'
-        || (setupCurrentStep === 'goal' && !setupNeedsProtection())) {
+    if (setupCurrentStep === 'summary') {
         await finishSetup();
         return;
     }
