@@ -9,6 +9,7 @@ vm.createContext(context);
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
 const setupPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.html'), 'utf8');
 const setupScript = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.js'), 'utf8');
+const optionsPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'options.html'), 'utf8');
 const bootstrapPage = fs.readFileSync(path.join(__dirname, '..', 'processor_bootstrap.html'), 'utf8');
 const start = source.indexOf("const BK_SETUP_COMPLETED_KEY");
 const end = source.indexOf('async function bkOpenSetupForNewUser', start);
@@ -54,6 +55,20 @@ assert.doesNotMatch(setupPage, /name="protection-level"|<strong>Strict<\/strong>
     'the wizard uses persona-based adaptive minimums instead of a separate Strict choice');
 assert.match(setupScript, /adaptive_minimum_zone:\s*goal === 'everyday' \? 'trusted' : 'neutral'/,
     'everyday keeps the legacy Trusted minimum while protected paths start at Neutral');
+for (const zone of ['automatic', 'trusted', 'neutral', 'untrusted']) {
+    assert.match(optionsPage, new RegExp(`name="default_zone"[^>]*value="${zone}"`),
+        `Options lets the user change the default site zone to ${zone}`);
+}
+for (const minimum of ['trusted', 'neutral', 'untrusted']) {
+    assert.match(optionsPage, new RegExp(`name="adaptive_minimum_zone"[^>]*value="${minimum}"`),
+        `Options lets the user change the adaptive minimum to ${minimum}`);
+}
+assert.match(optionsPage, /New sites and sites without an override use this zone/,
+    'Options explains that the default site zone controls new sites');
+assert.match(setupScript, /\['Default site zone', `Adaptive \(\$\{adaptiveMinimum\} minimum\)`\]/,
+    'the wizard summary names the setting and shows the value setup picked');
+assert.match(setupPage, /change every setting later in Settings, including the default site zone under Filtering/,
+    'the summary tells users where the automatically chosen setting can be changed');
 assert.match(setupPage, /id="enable-audit" type="checkbox" checked/,
     'protected setup paths recommend Audit by default');
 assert.match(setupPage, /id="audit-private-warning"[\s\S]*They can be used to bypass Audit/,
@@ -62,10 +77,10 @@ assert.match(setupPage, /rel="icon"[\s\S]*wingman_icon_32\.png/,
     'the launched setup page uses the Wingman favicon');
 assert.match(setupScript, /goal === 'everyday'/,
     'the everyday path keeps convenient on\/off controls available');
-assert.match(setupScript, /:\s*\['browser', 'goal'\]/,
-    'the everyday path skips advanced protection choices and the summary');
-assert.match(setupScript, /setupCurrentStep === 'goal' && !setupNeedsProtection\(\)/,
-    'the everyday path finishes directly from the starting-point screen');
+assert.match(setupScript, /:\s*\['browser', 'goal', 'summary'\]/,
+    'the everyday path skips advanced protection choices but still reviews the picked settings');
+assert.doesNotMatch(setupScript, /setupCurrentStep === 'goal' && !setupNeedsProtection\(\)/,
+    'the everyday path cannot save before showing the summary');
 assert.match(setupScript, /type:\s*'audit\.enableSettingsLock'/,
     'protected setup paths create a real settings password');
 assert.match(setupScript, /type:\s*'audit\.setTracking'/,
