@@ -130,6 +130,50 @@
       display: inline-flex;
       align-items: center;
     }
+    .backend-compatibility {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 18px;
+      margin: 2px 0 3px 24px;
+      color: #4f5b75;
+      font-size: 0.85rem;
+    }
+    .backend-compatibility[hidden] {
+      display: none;
+    }
+    .backend-compatibility-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+      font-size: 1rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .backend-compatibility[data-state="checking"] .backend-compatibility-icon {
+      box-sizing: border-box;
+      border: 2px solid rgba(79, 91, 117, 0.28);
+      border-top-color: #4f5b75;
+      border-radius: 50%;
+      animation: compatibility-spinner 0.75s linear infinite;
+    }
+    .backend-compatibility[data-state="compatible"] {
+      color: #18794e;
+    }
+    .backend-compatibility[data-state="incompatible"] {
+      color: #b42318;
+    }
+    @keyframes compatibility-spinner {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .backend-compatibility[data-state="checking"] .backend-compatibility-icon {
+        animation-duration: 1.5s;
+      }
+    }
     .adaptive-minimum {
       min-width: 0;
       margin: 5px 0 7px 28px;
@@ -606,6 +650,10 @@
         <div class="radio-group">
           <label class="radio-option" for="backend_selection_webgl"><input type="radio" name="backend_selection" id="backend_selection_webgl" value="webgl" checked><span>WebGL only</span></label>
           <label class="radio-option" for="backend_selection_inprocwebgl"><input type="radio" name="backend_selection" id="backend_selection_inprocwebgl" value="inprocwebgl"><span>Background.js WebGL, fallback to WebGL (a bit slower, tries to avoid hidden tab, use for compatibility)</span></label>
+          <div id="inprocwebgl_compatibility" class="backend-compatibility" data-state="checking" role="status" aria-live="polite" aria-atomic="true" hidden>
+            <span class="backend-compatibility-icon" aria-hidden="true"></span>
+            <span class="backend-compatibility-message">Checking compatibility…</span>
+          </div>
           <label class="radio-option" for="backend_selection_wasm"><input type="radio" name="backend_selection" id="backend_selection_wasm" value="wasm"><span>WASM only</span></label>
           <label class="radio-option" for="backend_selection_webgl_wasm"><input type="radio" name="backend_selection" id="backend_selection_webgl_wasm" value="webgl_wasm"><span>WebGL (primary) + WASM (secondary)</span></label>
           <label class="radio-option" for="backend_selection_wasm_webgl"><input type="radio" name="backend_selection" id="backend_selection_wasm_webgl" value="wasm_webgl"><span>WASM (primary) + WebGL (secondary)</span></label>

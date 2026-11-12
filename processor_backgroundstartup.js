@@ -1,5 +1,5 @@
 let PROC_processorId = 'inprocwebgl';
-function bkTryStartupBackgroundJsProcessor() {
+function bkCheckInProcWebGLCompatibility(releaseContext = true) {
     // In Firefox 83, background.js Tensorflow.js inference fell back to CPU for
     // many users, essentially making the browsing experience unusuable. The addon
     // was rewritten in a client/server architecture to allow for a hidden tab to
@@ -14,25 +14,50 @@ function bkTryStartupBackgroundJsProcessor() {
     // will fail and the hidden tab approach must be used instead
     console.log('INPROC: Performing Tensorflow.js WebGL check for background.js...');
     let inferenceCanvas = document.createElement('canvas');
-    let inferenceCtx = inferenceCanvas.getContext('webgl2',
-    {
-        alpha: false,
-        antialias: false,
-        premultipliedAlpha: false,
-        preserveDrawingBuffer: false,
-        depth: false,
-        stencil: false,
-        failIfMajorPerformanceCaveat: true
-    });
+    let inferenceCtx = null;
+    try {
+        inferenceCtx = inferenceCanvas.getContext('webgl2',
+        {
+            alpha: false,
+            antialias: false,
+            premultipliedAlpha: false,
+            preserveDrawingBuffer: false,
+            depth: false,
+            stencil: false,
+            failIfMajorPerformanceCaveat: true
+        });
+    } catch (error) {
+        console.warn('INPROC: Tensorflow.js WebGL check for background.js threw an error.', error);
+    }
     if(!inferenceCtx) {
         console.log('INPROC: Tensorflow.js WebGL check for background.js failed, falling back to hidden tab.');
+        return { compatible: false };
+    }
+
+    let inferenceCtxType = `${inferenceCtx}`;
+    console.log(`INPROC: Tensorflow.js WebGL check for background.js succeeded! (${inferenceCtxType})`);
+    if(releaseContext) {
+        try {
+            let loseContext = inferenceCtx.getExtension('WEBGL_lose_context');
+            if(loseContext) {
+                loseContext.loseContext();
+            }
+        } catch (error) {
+            console.warn('INPROC: Unable to explicitly release the compatibility check context.', error);
+        }
+    }
+    return { compatible: true, contextType: inferenceCtxType };
+}
+
+function bkTryStartupBackgroundJsProcessor() {
+    // Preserve the original startup behavior and let Tensorflow.js replace the
+    // temporary context naturally while it initializes its own backend.
+    let compatibility = bkCheckInProcWebGLCompatibility(false);
+    if(!compatibility.compatible) {
         return null;
     }
-    
-    let inferenceCtxType = `${inferenceCtx}`;
-    console.log(`INPROC: Tensorflow.js WebGL check for background.js succeeded, continuing in-process! (${inferenceCtxType})`);
-    delete inferenceCtx;
-    delete inferenceCanvas;
+
+    console.log(`INPROC: Continuing in-process! (${compatibility.contextType})`);
     //Initialize and fake out a port pair for processor and background
     procWingmanStartup('webgl', BK_modelSelection)
     .then(async ()=>
@@ -87,5 +112,5 @@ function bkTryStartupBackgroundJsProcessor() {
             model: PROC_activeModelSelection
         });
     });
-    return inferenceCtxType;
+    return compatibility.contextType;
 }

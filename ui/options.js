@@ -32,6 +32,47 @@ function optUpdateAdaptiveMinimumVisibility() {
         document.querySelector('input[name="default_zone"]:checked')?.value !== 'automatic';
 }
 
+let OPT_inProcCompatibilityCheckId = 0;
+
+function optRenderInProcCompatibility(state) {
+    const status = document.getElementById('inprocwebgl_compatibility');
+    const icon = status.querySelector('.backend-compatibility-icon');
+    const message = status.querySelector('.backend-compatibility-message');
+    const display = {
+        checking: { icon: '', message: 'Checking compatibility…' },
+        compatible: { icon: '✓', message: 'Likely compatible' },
+        incompatible: { icon: '×', message: 'Likely incompatible' }
+    }[state];
+
+    status.hidden = false;
+    status.dataset.state = state;
+    icon.textContent = display.icon;
+    message.textContent = display.message;
+}
+
+async function optCheckInProcWebGLCompatibility() {
+    const checkId = ++OPT_inProcCompatibilityCheckId;
+    optRenderInProcCompatibility('checking');
+    try {
+        // Give the browser a chance to paint the checking state before the
+        // usually fast background-page probe completes.
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const result = await browser.runtime.sendMessage({
+            type: 'options.checkInProcWebGLCompatibility'
+        });
+        if(checkId !== OPT_inProcCompatibilityCheckId) {
+            return;
+        }
+        optRenderInProcCompatibility(result?.compatible === true ? 'compatible' : 'incompatible');
+    } catch (error) {
+        if(checkId !== OPT_inProcCompatibilityCheckId) {
+            return;
+        }
+        optRenderInProcCompatibility('incompatible');
+        console.error('Error checking in-process WebGL compatibility', error);
+    }
+}
+
 const OPT_DEFAULT_URL_FILTER_RULES = {
     whitelist: {
         domains: [
@@ -686,9 +727,17 @@ document.addEventListener('DOMContentLoaded', () => {
         optSetSecurityStatus('settings_lock_status', error.message || String(error), 'error');
     });
     optRestoreOptions();
+    if(document.getElementById('advanced').open) {
+        optCheckInProcWebGLCompatibility();
+    }
 });
 window.addEventListener('pagehide', () => {
     browser.runtime.sendMessage({ type: 'audit.lockSettings' }).catch(() => {});
+});
+document.getElementById('advanced').addEventListener('toggle', event => {
+    if(event.currentTarget.open) {
+        optCheckInProcWebGLCompatibility();
+    }
 });
 document.getElementById('start_settings_lock_setup').addEventListener('click', optStartSettingsLockSetup);
 document.getElementById('continue_settings_lock_setup').addEventListener('click', optContinueSettingsLockSetup);

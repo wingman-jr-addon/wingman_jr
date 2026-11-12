@@ -2140,6 +2140,9 @@ function bkHandleMessage(request, sender, sendResponse) {
     else if (request.type == 'setup.showHiddenTabsPromptAgain') {
         return bkShowHiddenTabsPromptAgain();
     }
+    else if (request.type == 'options.checkInProcWebGLCompatibility') {
+        sendResponse(bkCheckInProcWebGLCompatibility());
+    }
     else if (request.type == 'settings.update') {
         return bkUpdateProtectedSettings(request.changes);
     }
