@@ -27,6 +27,12 @@ async function optSaveOptions() {
     }
 }
 
+async function optOpenSetupWizard() {
+    await browser.tabs.create({
+        url: browser.runtime.getURL('ui/setup.html?rerun=1')
+    });
+}
+
 function optUpdateAdaptiveMinimumVisibility() {
     document.getElementById('default_adaptive_minimum').hidden =
         document.querySelector('input[name="default_zone"]:checked')?.value !== 'automatic';
@@ -734,12 +740,22 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('pagehide', () => {
     browser.runtime.sendMessage({ type: 'audit.lockSettings' }).catch(() => {});
 });
+browser.runtime.onMessage.addListener(message => {
+    if (message?.type === 'setup.rerunClosed') {
+        window.location.reload();
+    }
+});
 document.getElementById('advanced').addEventListener('toggle', event => {
     if(event.currentTarget.open) {
         optCheckInProcWebGLCompatibility();
     }
 });
 document.getElementById('start_settings_lock_setup').addEventListener('click', optStartSettingsLockSetup);
+document.getElementById('open_setup_wizard').addEventListener('click', () => {
+    optOpenSetupWizard().catch(error => {
+        console.error('OPTION: Unable to open setup wizard', error);
+    });
+});
 document.getElementById('continue_settings_lock_setup').addEventListener('click', optContinueSettingsLockSetup);
 document.getElementById('back_settings_lock_setup').addEventListener('click', optBackSettingsLockSetup);
 document.getElementById('cancel_settings_lock_setup').addEventListener('click', optCancelProtectionFlow);

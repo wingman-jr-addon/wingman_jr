@@ -372,9 +372,9 @@
         <h2 id="protection-heading">Protect the settings</h2>
         <p class="step-intro" id="protection-intro">A password prevents filtering controls and settings from being changed casually.</p>
         <div class="protection-panel">
-          <h3>Create a settings password</h3>
+          <h3 id="password-heading">Create a settings password</h3>
           <p id="password-guidance">For stronger boundaries, consider asking someone you trust to choose or hold this password.</p>
-          <div class="password-grid">
+          <div class="password-grid" id="password-grid">
             <div class="field">
               <label for="settings-password">Password</label>
               <input id="settings-password" type="password" minlength="8" autocomplete="new-password">
@@ -400,6 +400,16 @@
         <h2>You’re ready to start</h2>
         <p class="step-intro">Here’s the starting setup Wingman Jr. will use. You can change every setting later in Settings, including the default site zone under Filtering.</p>
         <div class="summary" id="setup-summary"></div>
+        <div class="coverage-warning" id="summary-remove-protection" role="note" hidden>
+          <span class="coverage-warning-icon" aria-hidden="true">&#9888;</span>
+          <span>
+            <strong>Remove the existing settings password?</strong> Everyday browsing keeps controls convenient, so this preset removes settings protection.
+            <label class="audit-choice" for="confirm-remove-protection">
+              <input id="confirm-remove-protection" type="checkbox">
+              <span>I understand that settings will no longer require a password.</span>
+            </label>
+          </span>
+        </div>
         <div class="coverage-warning" id="summary-privacy" role="note" hidden>
           <span class="coverage-warning-icon" aria-hidden="true">&#9888;</span>
           <span><strong>Reminder:</strong> Private Windows can bypass Audit until you allow Wingman Jr. to run there.</span>

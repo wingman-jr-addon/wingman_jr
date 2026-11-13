@@ -1,8 +1,19 @@
 const SETUP_COMPLETED_KEY = 'setup_wizard_completed';
 const SETUP_STEPS = ['browser', 'goal', 'protection', 'summary'];
+const SETUP_IS_RERUN = new URLSearchParams(window.location.search).get('rerun') === '1';
 let setupCurrentStep = 'browser';
 let setupPrivateAccessAllowed = false;
 let setupAdvanceWhenProcessorReady = false;
+let setupSettingsLockEnabled = false;
+let setupRerunCloseNotified = false;
+
+async function setupNotifyRerunClosed() {
+    if (!SETUP_IS_RERUN || setupRerunCloseNotified) {
+        return;
+    }
+    setupRerunCloseNotified = true;
+    await browser.runtime.sendMessage({ type: 'setup.rerunClosed' });
+}
 
 function setupUpdateProcessorStartupState(state) {
     const startupState = state === 'ready'
@@ -42,12 +53,31 @@ async function setupRefreshProcessorStartupState() {
     }
 }
 
+async function setupRefreshProtectionState() {
+    try {
+        const state = await browser.runtime.sendMessage({ type: 'audit.getState' });
+        setupSettingsLockEnabled = state?.settingsLockEnabled === true;
+        if (setupCurrentStep === 'protection') {
+            setupUpdateProtectionCopy();
+            setupUpdatePasswordState();
+        } else if (setupCurrentStep === 'summary') {
+            setupRenderSummary();
+        }
+    } catch (error) {
+        console.warn('SETUP: Unable to check settings protection state', error);
+    }
+}
+
 function setupSelectedValue(name) {
     return document.querySelector(`input[name="${name}"]:checked`).value;
 }
 
 function setupNeedsProtection() {
     return setupSelectedValue('setup-goal') !== 'everyday';
+}
+
+function setupShouldRemoveProtection() {
+    return setupSettingsLockEnabled && !setupNeedsProtection();
 }
 
 function updateSelectedChoices() {
@@ -90,7 +120,11 @@ function setupRenderSummary() {
         ['Default site zone', `Adaptive (${adaptiveMinimum} minimum)`],
         ['Blocked images', 'Replace discreetly with safe images'],
         ['On/off controls', goal === 'everyday' ? 'Available' : 'Hidden'],
-        ['Settings password', setupNeedsProtection() ? 'Required' : 'Not set'],
+        ['Settings password', setupShouldRemoveProtection()
+            ? 'Remove existing'
+            : (setupSettingsLockEnabled
+                ? 'Keep existing'
+                : (setupNeedsProtection() ? 'Required' : 'Not set'))],
         ['Local audit history', auditEnabled ? 'On' : 'Off']
     ];
     const summary = document.getElementById('setup-summary');
@@ -106,6 +140,7 @@ function setupRenderSummary() {
     }));
     document.getElementById('summary-privacy').hidden = !auditEnabled
         || setupPrivateAccessAllowed;
+    document.getElementById('summary-remove-protection').hidden = !setupShouldRemoveProtection();
 }
 
 function setupUpdateAuditCoverageWarning() {
@@ -133,13 +168,25 @@ function setupUpdateProtectionCopy() {
     document.getElementById('protection-intro').textContent = caregiver
         ? 'A password keeps filtering controls, site exceptions, and other settings in the caregiver’s hands.'
         : 'A password makes changing or disabling protection a deliberate decision.';
-    document.getElementById('password-guidance').textContent = caregiver
-        ? 'Choose a password that the person being protected will not know.'
-        : 'Consider asking someone you trust to choose or hold this password.';
+    document.getElementById('password-heading').textContent = setupSettingsLockEnabled
+        ? 'Keep the existing settings password'
+        : 'Create a settings password';
+    document.getElementById('password-guidance').textContent = setupSettingsLockEnabled
+        ? 'Settings protection is already enabled, so this preset will keep the current password.'
+        : (caregiver
+            ? 'Choose a password that the person being protected will not know.'
+            : 'Consider asking someone you trust to choose or hold this password.');
+    document.getElementById('password-grid').hidden = setupSettingsLockEnabled;
 }
 
 function setupUpdatePasswordState() {
     if (!setupNeedsProtection()) {
+        return true;
+    }
+    if (setupSettingsLockEnabled) {
+        const status = document.getElementById('password-status');
+        status.textContent = 'Your current settings password will not change.';
+        status.dataset.state = 'saved';
         return true;
     }
     const password = document.getElementById('settings-password').value;
@@ -184,7 +231,9 @@ function setupShowStep(step) {
         setupUpdatePasswordState();
         setupUpdateAuditCoverageWarning();
         setupRefreshPrivateCoverage();
-        document.getElementById('settings-password').focus();
+        if (!setupSettingsLockEnabled) {
+            document.getElementById('settings-password').focus();
+        }
     }
     if (step === 'summary') {
         setupRenderSummary();
@@ -216,8 +265,16 @@ async function finishSetup() {
     const status = document.getElementById('setup-status');
     const goal = setupSelectedValue('setup-goal');
     const protectedSetup = setupNeedsProtection();
+    const removeExistingProtection = setupShouldRemoveProtection();
     const auditEnabled = protectedSetup
         && document.getElementById('enable-audit').checked;
+    if (removeExistingProtection
+        && !document.getElementById('confirm-remove-protection').checked) {
+        status.textContent = 'Confirm that you want to remove the existing settings password.';
+        status.dataset.state = 'error';
+        document.getElementById('confirm-remove-protection').focus();
+        return;
+    }
     setSetupBusy(true);
     status.textContent = 'Saving your setup…';
     status.dataset.state = '';
@@ -238,7 +295,7 @@ async function finishSetup() {
                 enabled: true
             });
         }
-        if (protectedSetup) {
+        if (protectedSetup && !setupSettingsLockEnabled) {
             const password = document.getElementById('settings-password').value;
             await browser.runtime.sendMessage({
                 type: 'audit.enableSettingsLock',
@@ -246,7 +303,11 @@ async function finishSetup() {
                 confirmPassword: document.getElementById('settings-password-confirm').value
             });
         }
+        if (removeExistingProtection) {
+            await browser.runtime.sendMessage({ type: 'audit.disableSettingsLock' });
+        }
         await browser.storage.local.set({ [SETUP_COMPLETED_KEY]: true });
+        await setupNotifyRerunClosed();
         await closeSetupTab();
     } catch (error) {
         console.error('SETUP: Unable to save quick setup', error);
@@ -334,5 +395,13 @@ browser.runtime.onMessage.addListener(message => {
 document.getElementById('setup-form').addEventListener('submit', event => {
     event.preventDefault();
 });
+window.addEventListener('pagehide', () => {
+    setupNotifyRerunClosed().catch(() => {});
+});
 
-setupRefreshProcessorStartupState();
+if (SETUP_IS_RERUN) {
+    setupShowStep('goal');
+} else {
+    setupRefreshProcessorStartupState();
+}
+setupRefreshProtectionState();

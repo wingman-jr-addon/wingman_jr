@@ -10,6 +10,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf
 const setupPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.html'), 'utf8');
 const setupScript = fs.readFileSync(path.join(__dirname, '..', 'ui', 'setup.js'), 'utf8');
 const optionsPage = fs.readFileSync(path.join(__dirname, '..', 'ui', 'options.html'), 'utf8');
+const optionsScript = fs.readFileSync(path.join(__dirname, '..', 'ui', 'options.js'), 'utf8');
 const bootstrapPage = fs.readFileSync(path.join(__dirname, '..', 'processor_bootstrap.html'), 'utf8');
 const start = source.indexOf("const BK_SETUP_COMPLETED_KEY");
 const end = source.indexOf('async function bkOpenSetupForNewUser', start);
@@ -75,6 +76,16 @@ assert.match(setupPage, /id="audit-private-warning"[\s\S]*They can be used to by
     'the Audit step explains the private-window bypass risk');
 assert.match(setupPage, /rel="icon"[\s\S]*wingman_icon_32\.png/,
     'the launched setup page uses the Wingman favicon');
+assert.match(optionsPage, /id="open_setup_wizard"[^>]*>Run setup wizard<\/button>/,
+    'Options offers a visible way to rerun the persona preset wizard');
+assert.match(optionsScript, /browser\.tabs\.create\(\{[\s\S]*browser\.runtime\.getURL\('ui\/setup\.html\?rerun=1'\)/,
+    'the Options action opens the existing setup wizard in a new tab');
+assert.match(setupScript, /SETUP_IS_RERUN[\s\S]*setupShowStep\('goal'\)/,
+    'rerunning setup from Options skips the first-run hidden-tabs permission step');
+assert.match(setupScript, /pagehide[\s\S]*setupNotifyRerunClosed/,
+    'closing a rerun notifies the Options page even when the wizard is dismissed manually');
+assert.match(optionsScript, /setup\.rerunClosed[\s\S]*window\.location\.reload\(\)/,
+    'Options refreshes after the rerun closes');
 assert.match(setupScript, /goal === 'everyday'/,
     'the everyday path keeps convenient on\/off controls available');
 assert.match(setupScript, /:\s*\['browser', 'goal', 'summary'\]/,
@@ -83,6 +94,14 @@ assert.doesNotMatch(setupScript, /setupCurrentStep === 'goal' && !setupNeedsProt
     'the everyday path cannot save before showing the summary');
 assert.match(setupScript, /type:\s*'audit\.enableSettingsLock'/,
     'protected setup paths create a real settings password');
+assert.match(setupScript, /protectedSetup && !setupSettingsLockEnabled/,
+    'rerunning a protected preset keeps an existing settings password');
+assert.match(setupPage, /id="confirm-remove-protection" type="checkbox"/,
+    'the everyday rerun requires explicit confirmation before removing an existing password');
+assert.match(setupScript, /removeExistingProtection[\s\S]*type:\s*'audit\.disableSettingsLock'/,
+    'the everyday preset removes confirmed existing protection through the guarded API');
+assert.match(setupScript, /type:\s*'audit\.getState'/,
+    'the wizard checks for existing settings protection before applying a preset');
 assert.match(setupScript, /type:\s*'audit\.setTracking'/,
     'Audit remains a separate setting even when recommended with protection');
 assert.match(setupScript, /setup\.getProcessorStartupState/,
