@@ -7,8 +7,8 @@ const processorSource = fs.readFileSync(path.join(root, 'processor.js'), 'utf8')
 const tf = require(path.join(root, 'libs', 'tfjs_3.11.0.js'));
 
 const modelCases = [
-    { id: 'n017', path: 'n017_graph_model/model.json' },
-    { id: 'sqrxr_112', path: 'sqrxr_112_graphopt/model.json' }
+    { id: 'n017', path: 'models/n017_graph_model/model.json' },
+    { id: 'sqrxr_112', path: 'models/sqrxr_112_graphopt/model.json' }
 ];
 
 assert.match(

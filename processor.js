@@ -1,11 +1,11 @@
 const PROC_DEFAULT_MODEL_SELECTION = 'n017';
 const PROC_MODEL_CONFIGS = Object.freeze({
     n017: Object.freeze({
-        path: 'n017_graph_model/model.json',
+        path: 'models/n017_graph_model/model.json',
         preprocessing: 'n017'
     }),
     sqrxr_112: Object.freeze({
-        path: 'sqrxr_112_graphopt/model.json',
+        path: 'models/sqrxr_112_graphopt/model.json',
         preprocessing: 'sqrxr_112'
     })
 });
