@@ -289,12 +289,10 @@ async function finishSetup() {
                 adaptive_minimum_zone: goal === 'everyday' ? 'trusted' : 'neutral'
             }
         });
-        if (auditEnabled) {
-            await browser.runtime.sendMessage({
-                type: 'audit.setTracking',
-                enabled: true
-            });
-        }
+        await browser.runtime.sendMessage({
+            type: 'audit.setTracking',
+            enabled: auditEnabled
+        });
         if (protectedSetup && !setupSettingsLockEnabled) {
             const password = document.getElementById('settings-password').value;
             await browser.runtime.sendMessage({
