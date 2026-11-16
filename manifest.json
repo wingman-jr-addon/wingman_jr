@@ -27,6 +27,7 @@
   
     "background": {
       "scripts": [
+          "models/n017_graph_model/roc.js",
           "roc.js",
           "mp4.js",
           "ebml.js",
