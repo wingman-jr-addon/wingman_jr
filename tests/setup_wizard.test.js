@@ -156,14 +156,23 @@ const finishSetupStart = setupScript.indexOf('async function finishSetup()');
 const finishSetupEnd = setupScript.indexOf("\ndocument.getElementById('hidden-tabs-confirmed')", finishSetupStart);
 assert.ok(finishSetupStart >= 0 && finishSetupEnd > finishSetupStart);
 
+const protectedSettingsStart = source.indexOf('const BK_PROTECTED_SETTING_VALIDATORS');
+const protectedSettingsEnd = source.indexOf('function bkHandleMessage', protectedSettingsStart);
+assert.ok(protectedSettingsStart >= 0 && protectedSettingsEnd > protectedSettingsStart);
+
 async function verifySetupAuditSelection(goal, auditChecked, initialTracking, existingLock = false) {
     const messages = [];
+    const savedSettings = { setup_persona: goal === 'everyday' ? 'caregiver' : 'everyday' };
     let trackingEnabled = initialTracking;
     let completed = false;
     let closed = false;
     const status = { textContent: '', dataset: {} };
     const setupContext = {
         console,
+        BK_ADAPTIVE_MINIMUMS: ['trusted', 'neutral', 'untrusted'],
+        auditRequireSettingsUnlocked: async () => {},
+        bkUpdateFromSettings() {},
+        bkSetDefaultZone() {},
         SETUP_COMPLETED_KEY: 'setup_wizard_completed',
         setupSettingsLockEnabled: existingLock,
         setupSelectedValue: () => goal,
@@ -181,20 +190,32 @@ async function verifySetupAuditSelection(goal, auditChecked, initialTracking, ex
             runtime: {
                 sendMessage: async message => {
                     messages.push(message);
+                    if (message.type === 'settings.update') {
+                        await setupContext.bkUpdateProtectedSettings(message.changes);
+                    }
                     if (message.type === 'audit.setTracking') {
                         trackingEnabled = message.enabled;
                     }
                 }
             },
-            storage: { local: { set: async () => { completed = true; } } }
+            storage: { local: {
+                get: async () => savedSettings,
+                set: async changes => {
+                    Object.assign(savedSettings, changes);
+                    completed = savedSettings.setup_wizard_completed === true;
+                }
+            } }
         }
     };
     vm.createContext(setupContext);
+    vm.runInContext(source.slice(protectedSettingsStart, protectedSettingsEnd), setupContext);
     vm.runInContext(setupScript.slice(finishSetupStart, finishSetupEnd), setupContext);
     await setupContext.finishSetup();
 
     const expectedTracking = goal !== 'everyday' && auditChecked;
     assert.strictEqual(status.dataset.state, '', 'setup must save successfully');
+    assert.strictEqual(savedSettings.setup_persona, goal,
+        'finishing or rerunning setup persists the selected persona through the guarded settings API');
     assert.strictEqual(trackingEnabled, expectedTracking,
         `${goal} setup must apply the Audit choice even when tracking was ${initialTracking ? 'on' : 'off'}`);
     assert.strictEqual(messages.filter(message => message.type === 'audit.setTracking').length, 1,
@@ -207,7 +228,30 @@ async function verifySetupAuditSelection(goal, auditChecked, initialTracking, ex
     assert.ok(completed && closed, 'setup finishes only after applying its settings');
 }
 
+async function verifyPersonaProtection() {
+    let locked = false;
+    const savedSettings = {};
+    const settingsContext = {
+        auditRequireSettingsUnlocked: async () => {
+            if (locked) throw new Error('Settings are locked.');
+        },
+        bkUpdateFromSettings() {},
+        browser: { storage: { local: { set: async changes => Object.assign(savedSettings, changes) } } }
+    };
+    vm.createContext(settingsContext);
+    vm.runInContext(source.slice(protectedSettingsStart, protectedSettingsEnd), settingsContext);
+    for (const value of ['unknown', '', null, true, 1]) {
+        await assert.rejects(settingsContext.bkUpdateProtectedSettings({ setup_persona: value }),
+            /Invalid or unsupported settings update/);
+    }
+    locked = true;
+    await assert.rejects(settingsContext.bkUpdateProtectedSettings({ setup_persona: 'caregiver' }),
+        /Settings are locked/);
+    assert.deepStrictEqual(savedSettings, {}, 'invalid or locked updates must not save a persona');
+}
+
 (async () => {
+    await verifyPersonaProtection();
     await verifySetupAuditSelection('everyday', true, true);
     await verifySetupAuditSelection('everyday', true, true, true);
     await verifySetupAuditSelection('boundaries', false, true, true);

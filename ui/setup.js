@@ -283,6 +283,7 @@ async function finishSetup() {
         await browser.runtime.sendMessage({
             type: 'settings.update',
             changes: {
+                setup_persona: goal,
                 is_silent_mode_enabled: true,
                 is_on_off_shown: goal === 'everyday',
                 default_zone: 'automatic',
