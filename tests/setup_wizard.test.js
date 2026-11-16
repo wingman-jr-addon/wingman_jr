@@ -152,7 +152,69 @@ vm.runInContext(source.slice(start, openSetupEnd) + `
     this.openSetup = bkOpenSetupForNewUser;
 `, developmentContext);
 
+const finishSetupStart = setupScript.indexOf('async function finishSetup()');
+const finishSetupEnd = setupScript.indexOf("\ndocument.getElementById('hidden-tabs-confirmed')", finishSetupStart);
+assert.ok(finishSetupStart >= 0 && finishSetupEnd > finishSetupStart);
+
+async function verifySetupAuditSelection(goal, auditChecked, initialTracking, existingLock = false) {
+    const messages = [];
+    let trackingEnabled = initialTracking;
+    let completed = false;
+    let closed = false;
+    const status = { textContent: '', dataset: {} };
+    const setupContext = {
+        console,
+        SETUP_COMPLETED_KEY: 'setup_wizard_completed',
+        setupSettingsLockEnabled: existingLock,
+        setupSelectedValue: () => goal,
+        setupNeedsProtection: () => goal !== 'everyday',
+        setupShouldRemoveProtection: () => existingLock && goal === 'everyday',
+        setSetupBusy() {},
+        setupNotifyRerunClosed: async () => {},
+        closeSetupTab: async () => { closed = true; },
+        document: {
+            getElementById: id => id === 'setup-status'
+                ? status
+                : { checked: id === 'enable-audit' ? auditChecked : true, value: 'test-password' }
+        },
+        browser: {
+            runtime: {
+                sendMessage: async message => {
+                    messages.push(message);
+                    if (message.type === 'audit.setTracking') {
+                        trackingEnabled = message.enabled;
+                    }
+                }
+            },
+            storage: { local: { set: async () => { completed = true; } } }
+        }
+    };
+    vm.createContext(setupContext);
+    vm.runInContext(setupScript.slice(finishSetupStart, finishSetupEnd), setupContext);
+    await setupContext.finishSetup();
+
+    const expectedTracking = goal !== 'everyday' && auditChecked;
+    assert.strictEqual(status.dataset.state, '', 'setup must save successfully');
+    assert.strictEqual(trackingEnabled, expectedTracking,
+        `${goal} setup must apply the Audit choice even when tracking was ${initialTracking ? 'on' : 'off'}`);
+    assert.strictEqual(messages.filter(message => message.type === 'audit.setTracking').length, 1,
+        'setup must explicitly apply the selected Audit state');
+    const lockIndex = messages.findIndex(message => message.type === 'audit.enableSettingsLock');
+    if (lockIndex !== -1) {
+        assert.ok(messages.findIndex(message => message.type === 'audit.setTracking') < lockIndex,
+            'apply Audit before creating a settings lock');
+    }
+    assert.ok(completed && closed, 'setup finishes only after applying its settings');
+}
+
 (async () => {
+    await verifySetupAuditSelection('everyday', true, true);
+    await verifySetupAuditSelection('everyday', true, true, true);
+    await verifySetupAuditSelection('boundaries', false, true, true);
+    await verifySetupAuditSelection('caregiver', false, true);
+    await verifySetupAuditSelection('boundaries', true, false);
+    await verifySetupAuditSelection('caregiver', true, true, true);
+
     await developmentContext.openSetup(false);
     assert.deepStrictEqual(openedUrls, [], 'normal installs keep the saved-setting guard');
 
