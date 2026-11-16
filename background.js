@@ -2017,6 +2017,8 @@ function bkSetAllLogging(onOrOff) {
 }
 
 const BK_PROTECTED_SETTING_VALIDATORS = Object.freeze({
+    // Absent for users who have not completed a persona-aware setup; do not infer it.
+    setup_persona: value => ['everyday', 'boundaries', 'caregiver'].includes(value),
     is_on_off_shown: value => typeof value === 'boolean',
     badge_count_scope: value => ['global', 'tab'].includes(value),
     video_blocking_mode: value => ['enabled', 'quick', 'disabled'].includes(value),
